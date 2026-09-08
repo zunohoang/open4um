@@ -1,0 +1,31 @@
+import { Router } from 'express'
+import { requireAuth } from '@/middlewares/auth.middleware'
+import { validate } from '@/middlewares/validate.middleware'
+import * as authController from '@/controllers/auth.controller'
+import {
+  registerSchema,
+  loginSchema,
+  refreshSchema,
+  updateProfileSchema,
+  changePasswordSchema
+} from '@/validators/auth.validator'
+
+export const authRouter = Router()
+
+authRouter.post('/register', validate(registerSchema), authController.register)
+authRouter.post('/login', validate(loginSchema), authController.login)
+authRouter.post('/refresh', validate(refreshSchema), authController.refresh)
+authRouter.post('/logout', validate(refreshSchema), authController.logout)
+authRouter.get('/me', requireAuth, authController.me)
+authRouter.patch(
+  '/profile',
+  requireAuth,
+  validate(updateProfileSchema),
+  authController.updateProfile
+)
+authRouter.patch(
+  '/change-password',
+  requireAuth,
+  validate(changePasswordSchema),
+  authController.changePassword
+)

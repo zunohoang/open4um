@@ -1,0 +1,47 @@
+services:
+  mongo:
+    image: mongo:8
+    container_name: absliderdb_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: absliderdb
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    ports:
+      - '127.0.0.1:${DB_PORT}:27017'
+      # Mongo dùng
+    volumes:
+      - abslider_mongodata:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: abslider_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '127.0.0.1:${REDIS_PORT}:6379'
+      # Redis sử dụng RedisInsight để làm UI
+    volumes:
+      - abslider_redisdata:/data
+
+  minio:
+    image: minio/minio
+    container_name: abslider_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports: 
+      - '127.0.0.1:${MINIO_PORT}:9000' 
+      - '127.0.0.1:${MINIO_CONSOLE_PORT}:9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    volumes: 
+      - abslider_miniodata:/data
+
+volumes:
+  abslider_mongodata:
+    name: abslider_mongodata
+  abslider_redisdata:
+    name: abslider_redisdata
+  abslider_miniodata:
+    name: abslider_miniodata

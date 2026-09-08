@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Lora', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+  --color-brand-ink: #173c39;
+  --color-brand-paper: #f5f1e8;
+  --color-brand-rust: #c45b3f;
+}
+
+@layer base {
+  body {
+    @apply m-0 min-w-80 bg-brand-paper font-display text-brand-ink;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+}
