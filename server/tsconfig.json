@@ -5,7 +5,8 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "minio/dist/main/internal/*": ["./node_modules/minio/dist/main/internal/*"]
     },
     "outDir": "dist",
     "rootDir": "src",
