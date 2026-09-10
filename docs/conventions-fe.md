@@ -1,8 +1,8 @@
-# Frontend Conventions — ABSlider-FE
+# Frontend Conventions — client
 
 ## Tổng quan
 
-Tài liệu định nghĩa quy ước code của ABSlider-FE. Mục tiêu: code dễ đọc, nhất quán giữa các thành viên, và dễ mở rộng theo từng nhóm use case (UC001-032). Stack: React 19 + TypeScript + Vite + TailwindCSS v4 + Zustand + TanStack Query + Vitest/React Testing Library.
+Tài liệu định nghĩa quy ước code của client. Mục tiêu: code dễ đọc, nhất quán giữa các thành viên, và dễ mở rộng theo từng nhóm use case (UC001-032). Stack: React 19 + TypeScript + Vite + TailwindCSS v4 + Zustand + TanStack Query + Vitest/React Testing Library.
 
 ---
 
