@@ -2,7 +2,11 @@
 
 ## Tổng quan
 
-Áp dụng cho cả 2 repo `ABSlider-FE` và `ABSlider-BE`, team 5 người: PM (Hoàng), Tester (Duy), 2 Developer (Nam, Thạch), DevOps (Đức). Mô hình nhánh: **Git Flow**. Commit theo **Conventional Commits**.
+Áp dụng cho repository **ABSlider** trên GitHub (quản lý mã nguồn tập trung cho cả `client` và `server`), team 5 người: PM (Hoàng), Tester (Duy), 2 Developer (Nam, Thạch), DevOps (Đức). Mô hình nhánh: **Git Flow**. Commit theo **Conventional Commits**.
+
+> [!NOTE]
+> Toàn bộ dự án `ABSlider` là **1 repository Git duy nhất** trên GitHub. Tuy nhiên, hai phần `client` và `server` được **triển khai (host) tại 2 nơi độc lập** (`client` trên nền tảng web tĩnh như Vercel, `server` trên VPS qua Docker).
+
 
 ---
 
@@ -91,24 +95,31 @@ chore(deps): nâng cấp TanStack Query lên v5.60
 
 ## 4. GitHub Actions — CI
 
-Mỗi repo có workflow CI riêng tại `.github/workflows/ci.yml`, chạy khi có PR nhắm vào `develop` hoặc `main`.
+Vì toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**, các workflow CI được đặt tập trung tại `.github/workflows/` ở thư mục gốc của repo. Mỗi phần `client` và `server` có workflow riêng biệt, áp dụng **path filtering** (`paths`) để chỉ kích hoạt khi có thay đổi trong thư mục tương ứng khi mở PR nhắm vào `develop` hoặc `main`.
 
 ```yaml
-# ABSlider-FE/.github/workflows/ci.yml
-name: CI
+# .github/workflows/ci-client.yml
+name: CI - Client
 on:
   pull_request:
     branches: [develop, main]
+    paths:
+      - 'client/**'
+      - '.github/workflows/ci-client.yml'
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version-file: 'package.json'
+          node-version-file: 'client/package.json'
           cache: 'npm'
+          cache-dependency-path: 'client/package-lock.json'
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
@@ -117,21 +128,28 @@ jobs:
 ```
 
 ```yaml
-# ABSlider-BE/.github/workflows/ci.yml
-name: CI
+# .github/workflows/ci-server.yml
+name: CI - Server
 on:
   pull_request:
     branches: [develop, main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci-server.yml'
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version-file: 'package.json'
+          node-version-file: 'server/package.json'
           cache: 'npm'
+          cache-dependency-path: 'server/package-lock.json'
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
@@ -141,30 +159,37 @@ jobs:
 
 ### Branch protection checklist (`main` và `develop`)
 
-- [ ] Require status check `build-and-test` pass trước khi merge.
+- [ ] Require status check pass trước khi merge (`CI - Client` hoặc `CI - Server` tùy PR sửa phần nào).
 - [ ] Require tối thiểu 1 approve review.
 - [ ] Require nhánh up-to-date với base trước khi merge.
 - [ ] Không cho phép force-push / xóa nhánh `main`, `develop`.
 
 ---
 
-## 5. CD
+## 5. Triển khai (CD) & Nơi Host tách biệt
 
-### BE trên VPS (đã chốt)
+Dù chung 1 repository Git trên GitHub, **nơi host của `client` và `server` tách biệt hoàn toàn**:
 
-`ABSlider-BE` deploy lên **VPS** qua Docker + SSH, tự động khi có push vào `main` (production) và có thể mở rộng thêm `develop` → môi trường staging nếu VPS đủ tài nguyên.
+### 5.1. Backend (`server`) trên VPS
+
+`server` deploy lên **VPS** qua Docker + SSH, tự động kích hoạt khi có push vào `main` (production) mà có thay đổi tại thư mục `server/`. Workflow đặt tại `.github/workflows/cd-server.yml`:
 
 ```yaml
-# ABSlider-BE/.github/workflows/cd.yml
-name: CD
+# .github/workflows/cd-server.yml
+name: CD - Server
 on:
   push:
     branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/cd-server.yml'
 
 jobs:
   deploy:
-    needs: build-and-test        # chỉ chạy sau khi job CI pass
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - name: Build & push Docker image
@@ -185,21 +210,32 @@ jobs:
             docker compose -f /opt/abslider/docker-compose.yml up -d --no-deps backend
 ```
 
-**GitHub repo secrets cần cấu hình** (`Settings → Secrets and variables → Actions`):
+**GitHub Repo Secrets cần cấu hình** (`Settings → Secrets and variables → Actions` trên repo ABSlider):
 
 | Secret | Mô tả |
 |---|---|
 | `VPS_HOST` | IP/domain của VPS |
 | `VPS_USER` | User SSH deploy (không dùng root) |
 | `VPS_SSH_KEY` | Private key SSH (public key đã add vào `~/.ssh/authorized_keys` trên VPS) |
-| `DOCKER_IMAGE` | Tên image, VD `ghcr.io/absliderteam/abslider-be` |
+| `DOCKER_IMAGE` | Tên image, VD `ghcr.io/absliderteam/server` |
 | `DOCKER_USERNAME` / `DOCKER_PASSWORD` | Đăng nhập registry chứa image |
 
 Trên VPS, MongoDB/Redis/MinIO chạy cùng qua `docker-compose.yml`; biến môi trường thật (`.env`) đặt sẵn trên VPS tại `/opt/abslider/.env`, **không** đi qua GitHub Actions.
 
-### FE — chưa chốt (việc cần làm sau)
+### 5.2. Frontend (`client`) trên Nền tảng Web tĩnh (Vercel)
 
-Hạ tầng deploy FE chưa quyết định. Đang nghiêng về **Vercel** (tích hợp Git native, không cần custom GitHub Action — mỗi push lên `main`/`develop` tự deploy preview/production); sẽ cập nhật mục này khi chốt.
+Hạ tầng deploy Frontend tách riêng hoàn toàn với Backend:
+- Đặt trên nền tảng **Vercel** (kết nối trực tiếp với GitHub repo `ABSlider`).
+- **Cấu hình Project trên Vercel**:
+  - **Root Directory**: Chọn `client`.
+  - **Framework Preset**: Vite.
+  - **Build Command**: `npm run build`.
+  - **Output Directory**: `dist`.
+  - **Environment Variables**: Cấu hình `VITE_API_BASE_URL` trỏ tới domain Backend trên VPS (VD: `https://api.abslider.com/api/v1`).
+- **Cơ chế CI/CD**: Vercel tự động nhận diện commit/PR từ GitHub repo:
+  - Khi mở PR hoặc push lên `develop`: Vercel tạo Preview Deployment để kiểm thử.
+  - Khi merge vào `main`: Tự động deploy bản Production chính thức. Không cần cấu hình SSH hay Docker cho Frontend.
+
 
 ---
 

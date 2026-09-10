@@ -2,22 +2,28 @@
 
 ## Tổng quan
 
-Dự án tách thành **2 repo/workspace riêng biệt** (không dùng monorepo), mỗi repo mở độc lập trong VSCode để mỗi bên tự nhận đúng phiên bản TypeScript/tooling của mình:
+Cả thư mục **ABSlider** là **1 repository Git duy nhất** trên GitHub. Trong đó:
+- Mã nguồn được quản lý tập trung trong 1 repo: thư mục gốc chứa `docs/`, hạ tầng Docker dev, thư mục `.github/` chứa workflows CI/CD chung.
+- **Nơi host tách riêng độc lập**:
+  - **`client`** (Frontend): Xây dựng bằng React + Vite, build thành static files và triển khai trên dịch vụ lưu trữ web tĩnh riêng biệt.
+  - **`server`** (Backend): Xây dựng bằng Node.js + Express, đóng gói Docker container và triển khai trên VPS riêng cùng các dịch vụ phụ trợ (MongoDB, Redis, MinIO).
+- Mỗi thư mục `client` và `server` tự sở hữu `package.json` và `tsconfig.json` riêng biệt, độc lập về dependencies và tooling.
 
 ```
-ABSlider/                  # thư mục cha, không phải 1 repo git chung
-  docs/                    # tài liệu chung: đặc tả, convention, quy trình
-  docs-template/           # tài liệu tham khảo từ dự án trước (không sửa)
-  docker-compose.yml       # môi trường dev dùng chung: MongoDB, Redis, MinIO
-  ABSlider-FE/              # repo riêng — React + Vite
-  ABSlider-BE/              # repo riêng — Node + Express
+ABSlider/                  # 1 Git repository duy nhất đẩy lên GitHub
+  .github/                 # Workflows GitHub Actions (CI/CD) & template chung
+  docs/                    # Tài liệu chung: đặc tả, convention, quy trình
+  docs-template/           # Tài liệu tham khảo từ dự án trước (không sửa)
+  docker-compose.dev.yml   # Môi trường dev dùng chung: MongoDB, Redis, MinIO
+  client/                  # Frontend — React + Vite (package.json riêng, host riêng)
+  server/                  # Backend — Node + Express (package.json riêng, host riêng trên VPS)
 ```
 
-`docker-compose.yml` ở gốc chạy các phần mềm hạ tầng cho dev local (MongoDB, Redis, MinIO) — xem chi tiết tại [conventions-be.md § Môi trường dev bằng Docker](conventions-be.md#6-cấu-hình-môi-trường). Cả `ABSlider-FE` và `ABSlider-BE` chỉ cần `docker compose up -d` trước khi `npm run dev`.
+`docker-compose.dev.yml` ở gốc chạy các phần mềm hạ tầng cho dev local (MongoDB, Redis, MinIO) — xem chi tiết tại [conventions-be.md § Môi trường dev bằng Docker](conventions-be.md#6-cấu-hình-môi-trường). Cả `client` và `server` chỉ cần `docker compose -f docker-compose.dev.yml up -d` trước khi `npm run dev`.
 
 ---
 
-## 1. Route tree — `ABSlider-FE`
+## 1. Route tree — `client`
 
 ```
 src/app/
@@ -61,10 +67,10 @@ src/app/
 
 ---
 
-## 2. Cấu trúc thư mục — `ABSlider-FE`
+## 2. Cấu trúc thư mục — `client`
 
 ```
-ABSlider-FE/
+client/
   public/
   src/
     app/                   # routes (bảng trên), providers, layout gốc, entrypoint
@@ -118,10 +124,10 @@ ABSlider-FE/
 
 ---
 
-## 3. Cấu trúc thư mục — `ABSlider-BE`
+## 3. Cấu trúc thư mục — `server`
 
 ```
-ABSlider-BE/
+server/
   src/
     config/                # đọc & validate biến môi trường
     routes/                # khai báo endpoint theo resource
@@ -163,11 +169,3 @@ ABSlider-BE/
 | Bucket | `media` |
 | Nội dung | Ảnh người dùng upload vào slide (UC011) |
 | Permission | Đọc public qua presigned URL, ghi chỉ qua Backend (server key) |
-
----
-
-## 4. Ghi chú
-
-- `ABSlider-FE` và `ABSlider-BE` có `package.json`, `tsconfig.json`, cấu hình ESLint/Prettier **độc lập** — không chia sẻ `node_modules` hay config chung.
-- Thư mục `docs/` ở gốc giữ tài liệu không thuộc riêng FE hay BE: đặc tả dự án (`dtyc.pdf`, `ktda.pdf`), convention (`conventions-fe.md`, `conventions-be.md`), quy trình làm việc (`github-workflow.md`) và chính tài liệu này.
-- Khi 2 repo `ABSlider-FE`/`ABSlider-BE` được tạo thật trên GitHub, mỗi repo tự mang theo `.github/` riêng (workflow CI, template PR/issue) — xem [github-workflow.md](github-workflow.md).

@@ -1,8 +1,8 @@
-# Backend Conventions — ABSlider-BE
+# Backend Conventions — server
 
 ## Tổng quan
 
-Tài liệu định nghĩa quy ước code của ABSlider-BE. Stack: Node.js + Express v5 + TypeScript + MongoDB (Mongoose) + Redis + Gemini API + MinIO + Jest/Supertest. Kiến trúc phân lớp: `routes → controllers → services → models`.
+Tài liệu định nghĩa quy ước code của server. Stack: Node.js + Express v5 + TypeScript + MongoDB (Mongoose) + Redis + Gemini API + MinIO + Jest/Supertest. Kiến trúc phân lớp: `routes → controllers → services → models`.
 
 ---
 
