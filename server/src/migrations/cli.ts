@@ -18,8 +18,8 @@ const main = async () => {
     await mongoose.disconnect()
     logger.info('✅ Hoàn tất thao tác migration CLI')
     process.exit(0)
-  } catch (error) {
-    logger.error({ error }, '❌ Lỗi khi thực thi migration CLI')
+  } catch (err) {
+    logger.error({ err }, '❌ Lỗi khi thực thi migration CLI')
     process.exit(1)
   }
 }

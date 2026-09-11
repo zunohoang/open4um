@@ -11,11 +11,25 @@ import type {
   Role
 } from '@/types/auth.types'
 import { getCreditConfig } from '@/services/admin.service'
+import * as emailService from '@/services/email.service'
 
 const ACCESS_TOKEN_EXPIRES_IN = '15m'
 const REFRESH_TOKEN_EXPIRES_IN = '7d'
+const OTP_TTL_SECONDS = 300 // 5 phút
+const OTP_COOLDOWN_SECONDS = 60 // 1 phút
 
 const blacklistKey = (jti: string) => `blacklist:${jti}`
+const registerOtpKey = (email: string) => `otp:register:${email.toLowerCase()}`
+const registerCooldownKey = (email: string) =>
+  `otp:cooldown:register:${email.toLowerCase()}`
+const forgotPasswordOtpKey = (email: string) =>
+  `otp:forgot:${email.toLowerCase()}`
+const forgotPasswordCooldownKey = (email: string) =>
+  `otp:cooldown:forgot:${email.toLowerCase()}`
+
+const generateOtp = (): string => {
+  return crypto.randomInt(100000, 1000000).toString()
+}
 
 const signAccessToken = (id: string, role: Role) => {
   const payload: AccessTokenPayload = { id, role, type: 'access' }
@@ -50,22 +64,58 @@ const toPublicUser = (user: UserDocument) => ({
   creditBalance: user.creditBalance
 })
 
+export const sendRegisterOtp = async (email: string) => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const existing = await UserModel.findOne({ email: normalizedEmail })
+  if (existing) throw new AppError('Email đã được sử dụng', 409)
+
+  const cooldown = await redis.get(registerCooldownKey(normalizedEmail))
+  if (cooldown) {
+    throw new AppError('Vui lòng đợi 60 giây trước khi gửi lại mã OTP', 429)
+  }
+
+  const otp = generateOtp()
+  await redis.set(registerOtpKey(normalizedEmail), otp, 'EX', OTP_TTL_SECONDS)
+  await redis.set(
+    registerCooldownKey(normalizedEmail),
+    '1',
+    'EX',
+    OTP_COOLDOWN_SECONDS
+  )
+
+  await emailService.sendRegisterOtp(normalizedEmail, otp)
+
+  return { message: 'Mã xác thực đã được gửi đến email của bạn' }
+}
+
 export const register = async (
   name: string,
   email: string,
-  password: string
+  password: string,
+  otp?: string
 ) => {
-  const existing = await UserModel.findOne({ email })
+  const normalizedEmail = email.toLowerCase().trim()
+  const existing = await UserModel.findOne({ email: normalizedEmail })
   if (existing) throw new AppError('Email đã được sử dụng', 409)
+
+  if (env.ENABLE_EMAIL_VERIFICATION) {
+    const storedOtp = await redis.get(registerOtpKey(normalizedEmail))
+    if (!storedOtp || storedOtp !== otp) {
+      throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
+    }
+    await redis.del(registerOtpKey(normalizedEmail))
+    await redis.del(registerCooldownKey(normalizedEmail))
+  }
 
   const passwordHash = await bcrypt.hash(password, 10)
   const creditConfig = await getCreditConfig()
   const user = await UserModel.create({
     name,
-    email,
+    email: normalizedEmail,
     passwordHash,
     creditBalance: creditConfig.signupBonus
   })
+
   return {
     user: toPublicUser(user),
     ...issueTokens(user._id.toString(), user.role as Role)
@@ -176,4 +226,47 @@ export const changePassword = async (
   user.passwordHash = await bcrypt.hash(newPassword, 10)
   await user.save()
   return { message: 'Đổi mật khẩu thành công' }
+}
+
+export const forgotPassword = async (email: string) => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await UserModel.findOne({ email: normalizedEmail })
+  if (!user) {
+    throw new AppError(
+      'Tài khoản với email này không tồn tại trong hệ thống',
+      404
+    )
+  }
+
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      403
+    )
+  }
+
+  const cooldown = await redis.get(forgotPasswordCooldownKey(normalizedEmail))
+  if (cooldown) {
+    throw new AppError('Vui lòng đợi 60 giây trước khi yêu cầu lại mã OTP', 429)
+  }
+
+  const otp = generateOtp()
+  await redis.set(
+    forgotPasswordOtpKey(normalizedEmail),
+    otp,
+    'EX',
+    OTP_TTL_SECONDS
+  )
+  await redis.set(
+    forgotPasswordCooldownKey(normalizedEmail),
+    '1',
+    'EX',
+    OTP_COOLDOWN_SECONDS
+  )
+
+  await emailService.sendForgotPasswordOtp(normalizedEmail, otp)
+
+  return {
+    message: 'Mã xác thực đặt lại mật khẩu đã được gửi đến email của bạn'
+  }
 }

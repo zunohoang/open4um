@@ -13,8 +13,35 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
     jest.clearAllMocks()
   })
 
+  describe('POST /api/v1/auth/send-register-otp', () => {
+    it('trả 422 khi email không hợp lệ', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/send-register-otp')
+        .send({ email: 'not-an-email' })
+
+      expect(res.status).toBe(422)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 200 và thông báo khi gửi OTP thành công', async () => {
+      mockedAuthService.sendRegisterOtp.mockResolvedValue({
+        message: 'Mã xác thực đã được gửi đến email của bạn'
+      })
+
+      const res = await request(app)
+        .post('/api/v1/auth/send-register-otp')
+        .send({ email: 'test@example.com' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(mockedAuthService.sendRegisterOtp).toHaveBeenCalledWith(
+        'test@example.com'
+      )
+    })
+  })
+
   describe('POST /api/v1/auth/register', () => {
-    it('trả 422 khi dữ liệu đầu vào không hợp lệ (thiếu email, mật khẩu ngắn)', async () => {
+    it('trả 422 khi dữ liệu đầu vào không hợp lệ (tên ngắn, email sai, mật khẩu ngắn)', async () => {
       const res = await request(app).post('/api/v1/auth/register').send({
         name: 'A',
         email: 'invalid-email',
@@ -25,7 +52,7 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       expect(res.body.success).toBe(false)
     })
 
-    it('trả 201 và thông tin người dùng khi đăng ký thành công', async () => {
+    it('trả 201 và thông tin người dùng khi đăng ký kèm OTP hợp lệ', async () => {
       const mockResult = {
         user: {
           id: 'u1',
@@ -43,13 +70,47 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       const res = await request(app).post('/api/v1/auth/register').send({
         name: 'Nguyen Van A',
         email: 'test@example.com',
-        password: 'password123'
+        password: 'password123',
+        otp: '123456'
       })
 
       expect(res.status).toBe(201)
       expect(res.body.success).toBe(true)
       expect(res.body.data.user.email).toBe('test@example.com')
       expect(res.body.data.accessToken).toBe('mock_access_token')
+      expect(mockedAuthService.register).toHaveBeenCalledWith(
+        'Nguyen Van A',
+        'test@example.com',
+        'password123',
+        '123456'
+      )
+    })
+  })
+
+  describe('POST /api/v1/auth/forgot-password', () => {
+    it('trả 422 khi email sai định dạng', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: 'wrong-email' })
+
+      expect(res.status).toBe(422)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 200 khi gửi OTP đặt lại mật khẩu thành công', async () => {
+      mockedAuthService.forgotPassword.mockResolvedValue({
+        message: 'Mã xác thực đặt lại mật khẩu đã được gửi đến email của bạn'
+      })
+
+      const res = await request(app)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: 'user@example.com' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(mockedAuthService.forgotPassword).toHaveBeenCalledWith(
+        'user@example.com'
+      )
     })
   })
 
