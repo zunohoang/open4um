@@ -25,6 +25,13 @@ export const authApi = {
   forgotPassword: async (data: { email: string }) =>
     (await apiClient.post<{ message: string }>('/auth/forgot-password', data))
       .data,
+  resetPassword: async (data: {
+    email: string
+    otp: string
+    password: string
+  }) =>
+    (await apiClient.post<{ message: string }>('/auth/reset-password', data))
+      .data,
   profile: async () =>
     (await apiClient.get<{ data: User }>('/auth/me')).data.data,
   refresh: async (refreshToken: string) =>

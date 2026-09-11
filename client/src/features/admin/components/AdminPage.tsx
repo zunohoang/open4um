@@ -59,6 +59,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [isRestoring, setIsRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
 
+  // State cho Modal xóa vĩnh viễn người dùng
+  const [deletingUser, setDeletingUser] = useState<AdminUser | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   // Tải danh sách người dùng
   const fetchUsers = useCallback(async () => {
     setIsLoadingUsers(true)
@@ -294,6 +299,34 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }
   }
 
+  const openDeleteModal = (user: AdminUser) => {
+    if (user._id === currentUser?.id || user.role === 'admin') return
+    setDeletingUser(user)
+    setDeleteError(null)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deletingUser) return
+    try {
+      setIsDeleting(true)
+      await adminApi.deleteUser(deletingUser._id)
+      setUsers((prev) => prev.filter((u) => u._id !== deletingUser._id))
+      setUsersTotal((prev) => Math.max(0, prev - 1))
+      setSaveMessage(
+        `Đã xóa vĩnh viễn tài khoản ${deletingUser.name} cùng toàn bộ dữ liệu liên quan`
+      )
+      setDeletingUser(null)
+      setTimeout(() => setSaveMessage(null), 4000)
+    } catch (err: unknown) {
+      const errorMsg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message || 'Không thể xóa người dùng, vui lòng thử lại'
+      setDeleteError(errorMsg)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <main className='mx-auto max-w-7xl px-5 py-12 sm:px-12'>
       {!isAdminOnly && (
@@ -452,6 +485,14 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
                             Khóa tài khoản
                           </button>
                         )}
+                        <button
+                          className='border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 hover:border-red-500 transition'
+                          onClick={() => openDeleteModal(user)}
+                          type='button'
+                          title='Xóa vĩnh viễn người dùng'
+                        >
+                          Xóa
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -926,6 +967,73 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
                 disabled={isRestoring}
               >
                 {isRestoring ? 'Đang xử lý...' : 'Khôi phục tài khoản'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal Xóa vĩnh viễn người dùng */}
+      <Modal
+        open={Boolean(deletingUser)}
+        onClose={() => setDeletingUser(null)}
+        title='Xóa vĩnh viễn người dùng'
+      >
+        {deletingUser && (
+          <div className='space-y-4 font-sans'>
+            <p className='text-sm text-stone-700 leading-relaxed'>
+              Bạn có chắc chắn muốn{' '}
+              <strong className='text-red-700'>xóa vĩnh viễn</strong> tài khoản
+              người dùng{' '}
+              <strong className='text-emerald-950'>{deletingUser.name}</strong>{' '}
+              (
+              <span className='font-mono text-stone-600'>
+                {deletingUser.email}
+              </span>
+              )?
+            </p>
+            <div className='border border-red-300 bg-red-50 p-3.5 text-xs text-red-900 leading-relaxed space-y-1.5'>
+              <div className='font-bold flex items-center gap-1.5 text-red-950'>
+                ⚠️ Cảnh báo hành động không thể hoàn tác:
+              </div>
+              <ul className='list-disc list-inside space-y-1 text-red-800'>
+                <li>
+                  Tài khoản người dùng sẽ bị xóa hoàn toàn khỏi hệ thống ngay
+                  lập tức.
+                </li>
+                <li>
+                  Toàn bộ bài giảng, slide trình chiếu và thư mục do người dùng
+                  này tạo sẽ bị xóa vĩnh viễn.
+                </li>
+                <li>
+                  Dữ liệu đã xóa không thể khôi phục lại dưới bất kỳ hình thức
+                  nào.
+                </li>
+              </ul>
+            </div>
+
+            {deleteError && (
+              <div className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'>
+                ❌ {deleteError}
+              </div>
+            )}
+
+            <div className='mt-6 flex justify-end gap-2 pt-2'>
+              <button
+                type='button'
+                className='border border-stone-300 px-4 py-2 text-xs font-semibold hover:bg-stone-100'
+                onClick={() => setDeletingUser(null)}
+                disabled={isDeleting}
+              >
+                Hủy
+              </button>
+              <button
+                type='button'
+                className='bg-red-700 px-4 py-2 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-50'
+                onClick={() => void handleConfirmDelete()}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Đang xóa...' : 'Xác nhận xóa'}
               </button>
             </div>
           </div>
