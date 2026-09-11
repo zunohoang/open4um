@@ -11,7 +11,13 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string(),
   MINIO_ENDPOINT: z.string(),
   MINIO_ACCESS_KEY: z.string(),
-  MINIO_SECRET_KEY: z.string()
+  MINIO_SECRET_KEY: z.string(),
+  RESEND_API_KEY: z.string(),
+  RESEND_FROM_EMAIL: z.string(),
+  ENABLE_EMAIL_VERIFICATION: z
+    .string()
+    .default('true')
+    .transform((val) => val !== 'false')
 })
 
 export const env = envSchema.parse(process.env)

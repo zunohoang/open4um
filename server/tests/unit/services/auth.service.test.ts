@@ -1,6 +1,14 @@
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { register, login, refresh, logout } from '@/services/auth.service'
+import {
+  sendRegisterOtp,
+  register,
+  login,
+  refresh,
+  logout,
+  forgotPassword
+} from '@/services/auth.service'
+import * as emailService from '@/services/email.service'
 
 // Mock bcrypt để tăng tốc độ test và tránh tốn CPU hashing
 jest.mock('bcrypt', () => ({
@@ -13,6 +21,7 @@ const mockUserFindById = jest.fn()
 const mockUserCreate = jest.fn()
 const mockRedisGet = jest.fn()
 const mockRedisSet = jest.fn()
+const mockRedisDel = jest.fn()
 
 jest.mock('@/models/user.model', () => ({
   UserModel: {
@@ -25,7 +34,8 @@ jest.mock('@/models/user.model', () => ({
 jest.mock('@/lib/redis', () => ({
   redis: {
     get: (...args: any[]) => mockRedisGet(...args),
-    set: (...args: any[]) => mockRedisSet(...args)
+    set: (...args: any[]) => mockRedisSet(...args),
+    del: (...args: any[]) => mockRedisDel(...args)
   }
 }))
 
@@ -35,9 +45,64 @@ jest.mock('@/services/admin.service', () => ({
   })
 }))
 
+jest.mock('@/services/email.service', () => ({
+  sendRegisterOtp: jest.fn().mockResolvedValue(undefined),
+  sendForgotPasswordOtp: jest.fn().mockResolvedValue(undefined)
+}))
+
 describe('auth.service unit tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  describe('sendRegisterOtp', () => {
+    it('ném lỗi 409 khi email đã tồn tại trong hệ thống', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'test@example.com'
+      })
+
+      await expect(sendRegisterOtp('test@example.com')).rejects.toMatchObject({
+        statusCode: 409,
+        message: 'Email đã được sử dụng'
+      })
+    })
+
+    it('ném lỗi 429 khi đang trong thời gian cooldown 60s', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+      mockRedisGet.mockResolvedValue('1')
+
+      await expect(sendRegisterOtp('test@example.com')).rejects.toMatchObject({
+        statusCode: 429,
+        message: expect.stringContaining('60 giây')
+      })
+    })
+
+    it('tạo mã OTP, lưu Redis và gửi email thành công', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+      mockRedisGet.mockResolvedValue(null)
+      mockRedisSet.mockResolvedValue('OK')
+
+      const result = await sendRegisterOtp('test@example.com')
+
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        'otp:register:test@example.com',
+        expect.stringMatching(/^\d{6}$/),
+        'EX',
+        300
+      )
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        'otp:cooldown:register:test@example.com',
+        '1',
+        'EX',
+        60
+      )
+      expect(emailService.sendRegisterOtp).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.stringMatching(/^\d{6}$/)
+      )
+      expect(result.message).toContain('Mã xác thực đã được gửi')
+    })
   })
 
   describe('register', () => {
@@ -48,15 +113,36 @@ describe('auth.service unit tests', () => {
       })
 
       await expect(
-        register('Nguyen Van A', 'test@example.com', 'pass123')
+        register('Nguyen Van A', 'test@example.com', 'pass123', '123456')
       ).rejects.toMatchObject({
         statusCode: 409,
         message: 'Email đã được sử dụng'
       })
     })
 
+    it('ném lỗi 400 khi mã OTP không khớp hoặc đã hết hạn', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+      mockRedisGet.mockResolvedValue(null)
+
+      await expect(
+        register('Nguyen Van A', 'test@example.com', 'pass123', '123456')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('Mã OTP')
+      })
+
+      mockRedisGet.mockResolvedValue('654321')
+      await expect(
+        register('Nguyen Van A', 'test@example.com', 'pass123', '123456')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('Mã OTP')
+      })
+    })
+
     it('đăng ký thành công: mã hóa mật khẩu, tạo user và trả về tokens cùng thông tin user', async () => {
       mockUserFindOne.mockResolvedValue(null)
+      mockRedisGet.mockResolvedValue('123456')
       ;(bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password_xyz')
 
       const fakeCreatedUser = {
@@ -72,10 +158,12 @@ describe('auth.service unit tests', () => {
       const result = await register(
         'Nguyen Van A',
         'test@example.com',
-        'password123'
+        'password123',
+        '123456'
       )
 
       expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10)
+      expect(mockRedisDel).toHaveBeenCalledWith('otp:register:test@example.com')
       expect(mockUserCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Nguyen Van A',
@@ -94,6 +182,69 @@ describe('auth.service unit tests', () => {
       })
       expect(result).toHaveProperty('accessToken')
       expect(result).toHaveProperty('refreshToken')
+    })
+  })
+
+  describe('forgotPassword', () => {
+    it('ném lỗi 404 khi email không tồn tại', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+
+      await expect(
+        forgotPassword('notfound@example.com')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: expect.stringContaining('không tồn tại')
+      })
+    })
+
+    it('ném lỗi 403 khi tài khoản bị khóa', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'locked@example.com',
+        status: 'locked'
+      })
+
+      await expect(forgotPassword('locked@example.com')).rejects.toMatchObject({
+        statusCode: 403,
+        message: expect.stringContaining('khóa')
+      })
+    })
+
+    it('ném lỗi 429 khi cooldown còn hiệu lực', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active'
+      })
+      mockRedisGet.mockResolvedValue('1')
+
+      await expect(forgotPassword('valid@example.com')).rejects.toMatchObject({
+        statusCode: 429,
+        message: expect.stringContaining('60 giây')
+      })
+    })
+
+    it('gửi OTP đặt lại mật khẩu thành công', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active'
+      })
+      mockRedisGet.mockResolvedValue(null)
+
+      const result = await forgotPassword('valid@example.com')
+
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        'otp:forgot:valid@example.com',
+        expect.stringMatching(/^\d{6}$/),
+        'EX',
+        300
+      )
+      expect(emailService.sendForgotPasswordOtp).toHaveBeenCalledWith(
+        'valid@example.com',
+        expect.stringMatching(/^\d{6}$/)
+      )
+      expect(result.message).toContain('đặt lại mật khẩu')
     })
   })
 

@@ -2,9 +2,14 @@ import { asyncHandler } from '@/utils/asyncHandler'
 import { ok } from '@/utils/response'
 import * as authService from '@/services/auth.service'
 
+export const sendRegisterOtp = asyncHandler(async (req, res) => {
+  const result = await authService.sendRegisterOtp(req.body.email)
+  ok(res, result)
+})
+
 export const register = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body
-  const result = await authService.register(name, email, password)
+  const { name, email, password, otp } = req.body
+  const result = await authService.register(name, email, password, otp)
   ok(res, result, 201)
 })
 
@@ -41,5 +46,10 @@ export const changePassword = asyncHandler(async (req, res) => {
     oldPassword,
     newPassword
   )
+  ok(res, result)
+})
+
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const result = await authService.forgotPassword(req.body.email)
   ok(res, result)
 })
