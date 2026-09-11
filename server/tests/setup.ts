@@ -7,6 +7,9 @@ process.env.GEMINI_API_KEY = 'test-gemini-key'
 process.env.MINIO_ENDPOINT = 'localhost'
 process.env.MINIO_ACCESS_KEY = 'minioadmin'
 process.env.MINIO_SECRET_KEY = 'minioadmin'
+process.env.RESEND_API_KEY = 'test-resend-key'
+process.env.RESEND_FROM_EMAIL = 'test@resend.dev'
+process.env.ENABLE_EMAIL_VERIFICATION = 'true'
 
 // Mock pino logger để tránh output thừa trong test run
 jest.mock('@/lib/logger', () => ({

@@ -1,9 +1,21 @@
 import { z } from 'zod'
 
+export const sendRegisterOtpSchema = z.object({
+  email: z.string().email('Địa chỉ email không đúng định dạng')
+})
+
 export const registerSchema = z.object({
   name: z.string().min(2, 'Tên phải có ít nhất 2 ký tự'),
   email: z.string().email('Địa chỉ email không đúng định dạng'),
-  password: z.string().min(6, 'Mật khẩu phải có ít nhất 6 ký tự')
+  password: z.string().min(6, 'Mật khẩu phải có ít nhất 6 ký tự'),
+  otp: z
+    .string()
+    .regex(/^\d{6}$/, 'Mã OTP phải gồm 6 chữ số')
+    .optional()
+})
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Địa chỉ email không đúng định dạng')
 })
 
 export const loginSchema = z.object({

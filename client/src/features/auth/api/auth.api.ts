@@ -11,8 +11,19 @@ export const authApi = {
   login: async (data: { email: string; password: string }) =>
     (await apiClient.post<{ data: AuthSession }>('/auth/login', data)).data
       .data,
-  register: async (data: { name: string; email: string; password: string }) =>
+  sendRegisterOtp: async (data: { email: string }) =>
+    (await apiClient.post<{ message: string }>('/auth/send-register-otp', data))
+      .data,
+  register: async (data: {
+    name: string
+    email: string
+    password: string
+    otp?: string
+  }) =>
     (await apiClient.post<{ data: AuthSession }>('/auth/register', data)).data
+      .data,
+  forgotPassword: async (data: { email: string }) =>
+    (await apiClient.post<{ message: string }>('/auth/forgot-password', data))
       .data,
   profile: async () =>
     (await apiClient.get<{ data: User }>('/auth/me')).data.data,
