@@ -27,6 +27,15 @@ const forgotPasswordOtpKey = (email: string) =>
 const forgotPasswordCooldownKey = (email: string) =>
   `otp:cooldown:forgot:${email.toLowerCase()}`
 
+export const PROFILE_UPDATE_COOLDOWN_SECONDS = 60 // Cooldown 60s giữa 2 lần cập nhật
+export const PROFILE_UPDATE_WINDOW_SECONDS = 3600 // Khung thời gian 1 giờ
+export const PROFILE_UPDATE_MAX_PER_WINDOW = 5 // Tối đa 5 lần trong 1 giờ
+
+export const profileCooldownKey = (userId: string) =>
+  `ratelimit:profile:cooldown:${userId}`
+export const profileCountKey = (userId: string) =>
+  `ratelimit:profile:count:${userId}`
+
 const generateOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString()
 }
@@ -207,8 +216,54 @@ export const updateProfile = async (
 ) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  if (name !== undefined) user.name = name
+
+  const trimmedName = name?.trim()
+  // Nếu không truyền tên hoặc tên mới không có thay đổi so với hiện tại
+  if (!trimmedName || trimmedName === user.name) {
+    return toPublicUser(user)
+  }
+
+  // 1. Kiểm tra cooldown chống spam liên tục giữa 2 lần cập nhật (mặc định 60s)
+  const cooldown = await redis.get(profileCooldownKey(userId))
+  if (cooldown) {
+    const ttl = await redis.ttl(profileCooldownKey(userId))
+    const remaining = ttl > 0 ? ttl : PROFILE_UPDATE_COOLDOWN_SECONDS
+    throw new AppError(
+      `Bạn đang cập nhật quá nhanh. Vui lòng đợi ${remaining} giây trước khi thử lại.`,
+      429
+    )
+  }
+
+  // 2. Kiểm tra giới hạn số lần cập nhật trong 1 giờ (tối đa 5 lần)
+  const currentCountStr = await redis.get(profileCountKey(userId))
+  const currentCount = currentCountStr ? parseInt(currentCountStr, 10) : 0
+  if (currentCount >= PROFILE_UPDATE_MAX_PER_WINDOW) {
+    const ttl = await redis.ttl(profileCountKey(userId))
+    const remainingMinutes = Math.ceil(
+      (ttl > 0 ? ttl : PROFILE_UPDATE_WINDOW_SECONDS) / 60
+    )
+    throw new AppError(
+      `Bạn đã thay đổi thông tin cá nhân quá nhiều lần (tối đa ${PROFILE_UPDATE_MAX_PER_WINDOW} lần/giờ). Vui lòng thử lại sau ${remainingMinutes} phút.`,
+      429
+    )
+  }
+
+  // 3. Cập nhật thông tin vào CSDL
+  user.name = trimmedName
   await user.save()
+
+  // 4. Thiết lập cooldown và tăng bộ đếm lượt thay đổi trong Redis
+  await redis.set(
+    profileCooldownKey(userId),
+    '1',
+    'EX',
+    PROFILE_UPDATE_COOLDOWN_SECONDS
+  )
+  const newCount = await redis.incr(profileCountKey(userId))
+  if (newCount === 1) {
+    await redis.expire(profileCountKey(userId), PROFILE_UPDATE_WINDOW_SECONDS)
+  }
+
   return toPublicUser(user)
 }
 

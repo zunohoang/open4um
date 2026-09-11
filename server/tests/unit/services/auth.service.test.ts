@@ -6,7 +6,8 @@ import {
   login,
   refresh,
   logout,
-  forgotPassword
+  forgotPassword,
+  updateProfile
 } from '@/services/auth.service'
 import * as emailService from '@/services/email.service'
 
@@ -22,6 +23,9 @@ const mockUserCreate = jest.fn()
 const mockRedisGet = jest.fn()
 const mockRedisSet = jest.fn()
 const mockRedisDel = jest.fn()
+const mockRedisTtl = jest.fn()
+const mockRedisIncr = jest.fn()
+const mockRedisExpire = jest.fn()
 
 jest.mock('@/models/user.model', () => ({
   UserModel: {
@@ -35,7 +39,10 @@ jest.mock('@/lib/redis', () => ({
   redis: {
     get: (...args: any[]) => mockRedisGet(...args),
     set: (...args: any[]) => mockRedisSet(...args),
-    del: (...args: any[]) => mockRedisDel(...args)
+    del: (...args: any[]) => mockRedisDel(...args),
+    ttl: (...args: any[]) => mockRedisTtl(...args),
+    incr: (...args: any[]) => mockRedisIncr(...args),
+    expire: (...args: any[]) => mockRedisExpire(...args)
   }
 }))
 
@@ -466,6 +473,109 @@ describe('auth.service unit tests', () => {
 
       expect(mockRedisSet).not.toHaveBeenCalled()
       expect(result).toEqual({ message: 'Đăng xuất thành công' })
+    })
+  })
+
+  describe('updateProfile', () => {
+    it('ném lỗi 404 khi tài khoản không tồn tại', async () => {
+      mockUserFindById.mockResolvedValue(null)
+
+      await expect(
+        updateProfile('not-found', 'New Name')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Tài khoản không tồn tại'
+      })
+    })
+
+    it('không cập nhật DB và không tốn lượt khi tên mới giống hệt tên cũ', async () => {
+      const mockSave = jest.fn()
+      mockUserFindById.mockResolvedValue({
+        _id: 'u1',
+        name: 'Nguyen Van A',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20,
+        save: mockSave
+      })
+
+      const result = await updateProfile('u1', '  Nguyen Van A  ')
+
+      expect(mockSave).not.toHaveBeenCalled()
+      expect(mockRedisGet).not.toHaveBeenCalled()
+      expect(result.name).toBe('Nguyen Van A')
+    })
+
+    it('ném lỗi 429 khi người dùng đang trong thời gian cooldown giữa 2 lần đổi', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20
+      })
+      mockRedisGet.mockResolvedValueOnce('1') // Cooldown active
+      mockRedisTtl.mockResolvedValueOnce(45)
+
+      await expect(updateProfile('u1', 'Brand New Name')).rejects.toMatchObject(
+        {
+          statusCode: 429,
+          message: expect.stringContaining('45 giây')
+        }
+      )
+    })
+
+    it('ném lỗi 429 khi vượt quá giới hạn 5 lần/giờ', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20
+      })
+      mockRedisGet.mockResolvedValueOnce(null) // Cooldown not active
+      mockRedisGet.mockResolvedValueOnce('5') // Hourly count = 5
+      mockRedisTtl.mockResolvedValueOnce(1800) // TTL 1800s = 30 minutes
+
+      await expect(updateProfile('u1', 'Brand New Name')).rejects.toMatchObject(
+        {
+          statusCode: 429,
+          message: expect.stringContaining('5 lần/giờ')
+        }
+      )
+    })
+
+    it('cập nhật tên thành công, lưu DB và thiết lập cooldown cùng bộ đếm trong Redis', async () => {
+      const mockSave = jest.fn().mockResolvedValue(undefined)
+      const mockUser = {
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20,
+        save: mockSave
+      }
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockRedisGet.mockResolvedValueOnce(null) // Cooldown not active
+      mockRedisGet.mockResolvedValueOnce('2') // Hourly count = 2
+      mockRedisIncr.mockResolvedValueOnce(3)
+
+      const result = await updateProfile('u1', 'Updated Name')
+
+      expect(mockUser.name).toBe('Updated Name')
+      expect(mockSave).toHaveBeenCalled()
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        'ratelimit:profile:cooldown:u1',
+        '1',
+        'EX',
+        60
+      )
+      expect(mockRedisIncr).toHaveBeenCalledWith('ratelimit:profile:count:u1')
+      expect(result.name).toBe('Updated Name')
     })
   })
 })

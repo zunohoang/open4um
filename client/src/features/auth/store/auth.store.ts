@@ -13,6 +13,7 @@ interface AuthState {
   refreshToken: string | null
   setSession: (session: Session) => void
   setAccessToken: (accessToken: string) => void
+  updateUser: (partialUser: Partial<User>) => void
   clearSession: () => void
 }
 
@@ -28,6 +29,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   setAccessToken: (accessToken) => {
     localStorage.setItem('accessToken', accessToken)
     set({ accessToken })
+  },
+  updateUser: (partialUser) => {
+    set((state) => ({
+      user: state.user ? { ...state.user, ...partialUser } : null
+    }))
   },
   clearSession: () => {
     localStorage.removeItem('accessToken')
