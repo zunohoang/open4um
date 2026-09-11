@@ -6,7 +6,8 @@ import {
   login,
   refresh,
   logout,
-  forgotPassword
+  forgotPassword,
+  resetPassword
 } from '@/services/auth.service'
 import * as emailService from '@/services/email.service'
 
@@ -245,6 +246,76 @@ describe('auth.service unit tests', () => {
         expect.stringMatching(/^\d{6}$/)
       )
       expect(result.message).toContain('đặt lại mật khẩu')
+    })
+  })
+
+  describe('resetPassword', () => {
+    it('ném lỗi 404 khi không tìm thấy email', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+
+      await expect(
+        resetPassword('notfound@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: expect.stringContaining('không tồn tại')
+      })
+    })
+
+    it('ném lỗi 403 khi tài khoản bị khóa', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'locked@example.com',
+        status: 'locked'
+      })
+
+      await expect(
+        resetPassword('locked@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: expect.stringContaining('khóa')
+      })
+    })
+
+    it('ném lỗi 400 khi OTP không khớp hoặc hết hạn', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active'
+      })
+      mockRedisGet.mockResolvedValue(null)
+
+      await expect(
+        resetPassword('valid@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining(
+          'Mã OTP không chính xác hoặc đã hết hạn'
+        )
+      })
+    })
+
+    it('đặt lại mật khẩu thành công và xóa OTP trong Redis', async () => {
+      const mockSave = jest.fn().mockResolvedValue(undefined)
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active',
+        passwordHash: 'old_hash',
+        save: mockSave
+      })
+      mockRedisGet.mockResolvedValue('123456')
+      ;(bcrypt.hash as jest.Mock).mockResolvedValue('new_hash_123')
+
+      const result = await resetPassword(
+        'valid@example.com',
+        '123456',
+        'newpassword123'
+      )
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('newpassword123', 10)
+      expect(mockSave).toHaveBeenCalled()
+      expect(mockRedisDel).toHaveBeenCalledWith('otp:forgot:valid@example.com')
+      expect(result.message).toContain('thành công')
     })
   })
 
