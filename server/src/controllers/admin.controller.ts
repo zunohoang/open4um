@@ -1,6 +1,5 @@
 import { asyncHandler } from '@/utils/asyncHandler'
 import { ok, okPaginated } from '@/utils/response'
-import { AppError } from '@/utils/AppError'
 import * as adminService from '@/services/admin.service'
 
 export const listUsers = asyncHandler(async (req, res) => {
@@ -18,24 +17,23 @@ export const createUser = asyncHandler(async (req, res) => {
 })
 
 export const updateUser = asyncHandler(async (req, res) => {
-  if (req.params.id === req.user.id) {
-    throw new AppError(
-      'Không thể tự sửa tài khoản quản trị của chính mình',
-      400
-    )
-  }
   const user = await adminService.updateUser(String(req.params.id), req.body)
   ok(res, user)
 })
 
 export const lockUser = asyncHandler(async (req, res) => {
-  const user = await adminService.lockUser(String(req.params.id), req.user.id)
+  const user = await adminService.lockUser(String(req.params.id))
   ok(res, user)
 })
 
 export const restoreUser = asyncHandler(async (req, res) => {
   const user = await adminService.restoreUser(String(req.params.id))
   ok(res, user)
+})
+
+export const deleteUser = asyncHandler(async (req, res) => {
+  const result = await adminService.deleteUser(String(req.params.id))
+  ok(res, result)
 })
 
 export const listAiUsage = asyncHandler(async (req, res) => {

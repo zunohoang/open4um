@@ -270,3 +270,37 @@ export const forgotPassword = async (email: string) => {
     message: 'Mã xác thực đặt lại mật khẩu đã được gửi đến email của bạn'
   }
 }
+
+export const resetPassword = async (
+  email: string,
+  otp: string,
+  password: string
+) => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await UserModel.findOne({ email: normalizedEmail })
+  if (!user) {
+    throw new AppError(
+      'Tài khoản với email này không tồn tại trong hệ thống',
+      404
+    )
+  }
+
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      403
+    )
+  }
+
+  const storedOtp = await redis.get(forgotPasswordOtpKey(normalizedEmail))
+  if (!storedOtp || storedOtp !== otp) {
+    throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
+  }
+
+  user.passwordHash = await bcrypt.hash(password, 10)
+  await user.save()
+
+  await redis.del(forgotPasswordOtpKey(normalizedEmail))
+
+  return { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' }
+}

@@ -24,6 +24,8 @@ adminRouter.patch(
 )
 adminRouter.patch('/users/:id/lock', adminController.lockUser)
 adminRouter.patch('/users/:id/restore', adminController.restoreUser)
+adminRouter.delete('/users/:id', adminController.deleteUser)
+
 adminRouter.get('/ai-usage', adminController.listAiUsage)
 adminRouter.get('/credit-config', adminController.getCreditConfig)
 adminRouter.patch(

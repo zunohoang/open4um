@@ -1,6 +1,6 @@
 process.env.NODE_ENV = 'test'
 process.env.PORT = '4000'
-process.env.MONGO_URI = 'mongodb://localhost:27017/test'
+process.env.MONGO_URI = 'mongodb://localhost:27017'
 process.env.REDIS_URL = 'redis://localhost:6379'
 process.env.JWT_SECRET = 'test-jwt-secret-key-at-least-16-chars'
 process.env.GEMINI_API_KEY = 'test-gemini-key'
