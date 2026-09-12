@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
-export type SidebarTab = 'library' | 'trash' | 'admin'
+export type SidebarTab = 'library' | 'trash' | 'profile' | 'admin'
 
 interface SidebarProps {
   activeTab?: SidebarTab
@@ -26,9 +26,11 @@ export const Sidebar = ({
     activeTab ||
     (location.pathname.startsWith('/trash')
       ? 'trash'
-      : location.pathname.startsWith('/admin')
-        ? 'admin'
-        : 'library')
+      : location.pathname.startsWith('/profile')
+        ? 'profile'
+        : location.pathname.startsWith('/admin')
+          ? 'admin'
+          : 'library')
 
   const handleNav = (tab: SidebarTab, path: string) => {
     onTabChange?.(tab)
@@ -59,6 +61,33 @@ export const Sidebar = ({
 
         {/* Danh sách các ngăn điều hướng dạng danh mục xuất bản */}
         <nav className='space-y-1'>
+          <button
+            type='button'
+            onClick={() => handleNav('profile', '/profile')}
+            className={`flex w-full items-center justify-between border-l-2 px-3 py-2.5 text-xs transition ${
+              currentTab === 'profile'
+                ? 'border-orange-700 bg-stone-200/70 font-bold text-emerald-950'
+                : 'border-transparent text-stone-600 hover:bg-stone-200/40 hover:text-emerald-950'
+            }`}
+          >
+            <div className='flex items-center gap-2.5'>
+              <svg
+                xmlns='http://www.w3.org/2000/svg'
+                fill='none'
+                viewBox='0 0 24 24'
+                strokeWidth={1.75}
+                stroke='currentColor'
+                className={`h-4 w-4 ${currentTab === 'profile' ? 'text-orange-700' : 'text-stone-400'}`}
+              >
+                <path
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  d='M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z'
+                />
+              </svg>
+              <span>Hồ sơ cá nhân</span>
+            </div>
+          </button>
           {/* Ngăn 1: Thư viện bài giảng */}
           <button
             type='button'
@@ -121,6 +150,8 @@ export const Sidebar = ({
               <span>Thùng rác</span>
             </div>
           </button>
+
+          {/* Ngăn 3: Hồ sơ cá nhân */}
 
           {/* Lối vào Quản trị (dành cho admin) */}
           {isAdmin && (

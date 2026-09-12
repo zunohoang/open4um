@@ -7,6 +7,19 @@ export const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(err.statusCode).json({ success: false, message: err.message })
     return
   }
+
+  if (
+    (err as { status?: number; statusCode?: number }).status === 413 ||
+    (err as { status?: number; statusCode?: number }).statusCode === 413 ||
+    (err as { type?: string }).type === 'entity.too.large'
+  ) {
+    res.status(413).json({
+      success: false,
+      message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+    })
+    return
+  }
+
   logger.error({ err }, '❌ Lỗi hệ thống chưa được xử lý')
   res
     .status(500)

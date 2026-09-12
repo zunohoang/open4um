@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 interface WorkspaceHeaderProps {
@@ -23,6 +24,7 @@ export const WorkspaceHeader = ({
   onLogout,
   children
 }: WorkspaceHeaderProps) => {
+  const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const isAdmin = user?.role === 'admin'
 
@@ -172,9 +174,17 @@ export const WorkspaceHeader = ({
               {user?.name || 'Tài khoản'}
             </span>
 
-            {/* Ô tròn hiện chữ cái đầu của tên bên phải */}
-            <div className='flex h-6 w-6 items-center justify-center bg-orange-700 font-sans text-xs font-bold text-white'>
-              {initial}
+            {/* Ảnh đại diện hoặc ô chữ cái đầu của tên bên phải */}
+            <div className='flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-sans text-xs font-bold text-white'>
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className='h-full w-full object-cover'
+                />
+              ) : (
+                initial
+              )}
             </div>
 
             {/* Mũi tên chỉ thị mở/đóng */}
@@ -199,8 +209,16 @@ export const WorkspaceHeader = ({
             <div className='absolute right-0 mt-2 w-80 border border-stone-300 bg-white p-4 shadow-xl font-sans text-stone-800 z-50'>
               {/* Header Box: Thông tin định danh */}
               <div className='flex items-center gap-3 pb-3 border-b border-stone-200'>
-                <div className='flex h-9 w-9 shrink-0 items-center justify-center bg-orange-700 font-bold text-white text-sm'>
-                  {initial}
+                <div className='flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-bold text-white text-sm'>
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.name}
+                      className='h-full w-full object-cover'
+                    />
+                  ) : (
+                    initial
+                  )}
                 </div>
                 <div className='min-w-0 flex-1'>
                   <div className='truncate text-sm font-bold text-emerald-950'>
@@ -317,6 +335,27 @@ export const WorkspaceHeader = ({
                         💡 Số dư credit dùng để tự động tạo outline và sinh nội
                         dung slide bài giảng thông minh.
                       </div>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setOpen(false)
+                          navigate('/profile')
+                        }}
+                        className='mt-2 flex w-full items-center justify-center gap-1.5 border border-stone-300 bg-white py-1.5 font-sans text-xs font-bold text-orange-700 transition hover:border-orange-700 hover:bg-orange-50'
+                      >
+                        <span>Quản lý hồ sơ cá nhân</span>
+                        <span>→</span>
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setOpen(false)
+                          navigate('/change-password')
+                        }}
+                        className='mt-1.5 flex w-full items-center justify-center gap-1.5 border border-stone-200 bg-stone-50 py-1.5 font-sans text-xs font-medium text-stone-700 transition hover:border-stone-400 hover:bg-white'
+                      >
+                        <span>Đổi mật khẩu tài khoản</span>
+                      </button>
                     </div>
                   )}
 
@@ -426,8 +465,33 @@ export const WorkspaceHeader = ({
                 </>
               )}
 
-              {/* Footer: Lối vào admin (nếu người dùng thường có link) & Nút Đăng xuất */}
+              {/* Footer: Lối vào Profile, Lối vào admin & Nút Đăng xuất */}
               <div className='mt-3.5 space-y-1 border-t border-stone-200 pt-2.5'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setOpen(false)
+                    navigate('/profile')
+                  }}
+                  className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-stone-700 hover:bg-stone-100 transition'
+                >
+                  <svg
+                    xmlns='http://www.w3.org/2000/svg'
+                    fill='none'
+                    viewBox='0 0 24 24'
+                    strokeWidth={1.75}
+                    stroke='currentColor'
+                    className='h-4 w-4 text-orange-700'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      d='M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z'
+                    />
+                  </svg>
+                  <span>Hồ sơ cá nhân & Đổi mật khẩu</span>
+                </button>
+
                 {!isAdmin && onAdmin && (
                   <button
                     type='button'

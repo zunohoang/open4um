@@ -1,21 +1,21 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { AdminPage } from '@/features/admin/components/AdminPage'
 import { AuthPage } from '@/features/auth/components/AuthPage'
 import { authApi } from '@/features/auth/api/auth.api'
-import { CreateLectureModal } from '@/features/lecture-generation/components/CreateLectureModal'
 import { EditorPage } from '@/features/slide-editor/components/EditorPage'
 import { LibraryPage } from '@/features/library/components/LibraryPage'
 import { PresentationPage } from '@/features/presentation/components/PresentationPage'
+import { ProfilePage } from '@/features/auth/components/ProfilePage'
+import { ChangePasswordPage } from '@/features/auth/components/ChangePasswordPage'
 import { WorkspaceHeader } from '@/components/layout/WorkspaceHeader'
-import { Sidebar } from '@/components/layout/Sidebar'
+import { UserLayout } from '@/components/layout/UserLayout'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 export const App = () => {
   const navigate = useNavigate()
   const { user, accessToken, refreshToken, setSession, clearSession } =
     useAuthStore()
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 
   useEffect(() => {
     if (!accessToken || user) return
@@ -48,6 +48,8 @@ export const App = () => {
         <main className='pt-16 min-h-screen'>
           <Routes>
             <Route path='/admin' element={<AdminPage />} />
+            <Route path='/profile' element={<ProfilePage />} />
+            <Route path='/change-password' element={<ChangePasswordPage />} />
             <Route path='*' element={<Navigate to='/admin' replace />} />
           </Routes>
         </main>
@@ -64,37 +66,12 @@ export const App = () => {
       <Route path='/editor/:id' element={<EditorPage />} />
 
       {/* 3. Layout Không gian làm việc người dùng (Header + Sidebar cố định + Nội dung + Modal tạo mới) */}
-      <Route
-        element={
-          <div className='min-h-screen bg-brand-paper font-sans'>
-            {/* Header cố định trên cùng */}
-            <WorkspaceHeader onLogout={logout} />
-
-            {/* Sidenav điều hướng cố định bên trái (chỉ người dùng thường) */}
-            <Sidebar onCreateClick={() => setIsCreateModalOpen(true)} />
-
-            {/* Vùng nội dung chính bên phải */}
-            <main className='ml-60 pt-16 min-h-screen'>
-              <Outlet />
-            </main>
-
-            {/* Modal Tạo bài giảng */}
-            <CreateLectureModal
-              open={isCreateModalOpen}
-              onClose={() => setIsCreateModalOpen(false)}
-              onDone={(created) => {
-                setIsCreateModalOpen(false)
-                navigate(`/editor/${created._id}`, {
-                  state: { lecture: created }
-                })
-              }}
-            />
-          </div>
-        }
-      >
+      <Route element={<UserLayout />}>
         <Route path='/' element={<Navigate to='/library' replace />} />
         <Route path='/library' element={<LibraryPage viewMode='library' />} />
         <Route path='/trash' element={<LibraryPage viewMode='trash' />} />
+        <Route path='/profile' element={<ProfilePage />} />
+        <Route path='/change-password' element={<ChangePasswordPage />} />
         <Route path='*' element={<Navigate to='/library' replace />} />
       </Route>
     </Routes>

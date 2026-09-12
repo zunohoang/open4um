@@ -35,7 +35,10 @@ export const me = asyncHandler(async (req, res) => {
 })
 
 export const updateProfile = asyncHandler(async (req, res) => {
-  const result = await authService.updateProfile(req.user.id, req.body.name)
+  const result = await authService.updateProfile(req.user.id, {
+    name: req.body.name,
+    avatar: req.body.avatar
+  })
   ok(res, result)
 })
 
