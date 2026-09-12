@@ -9,7 +9,8 @@ import {
   refreshSchema,
   updateProfileSchema,
   changePasswordSchema,
-  forgotPasswordSchema
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from '@/validators/auth.validator'
 
 export const authRouter = Router()
@@ -24,6 +25,11 @@ authRouter.post(
   '/forgot-password',
   validate(forgotPasswordSchema),
   authController.forgotPassword
+)
+authRouter.post(
+  '/reset-password',
+  validate(resetPasswordSchema),
+  authController.resetPassword
 )
 authRouter.post('/login', validate(loginSchema), authController.login)
 authRouter.post('/refresh', validate(refreshSchema), authController.refresh)

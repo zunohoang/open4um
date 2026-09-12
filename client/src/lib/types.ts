@@ -8,6 +8,7 @@ export interface User {
   role: Role
   status?: UserStatus
   creditBalance: number
+  avatar?: string | null
 }
 
 export interface AdminUser {

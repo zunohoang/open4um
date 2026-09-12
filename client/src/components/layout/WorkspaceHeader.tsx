@@ -174,9 +174,17 @@ export const WorkspaceHeader = ({
               {user?.name || 'Tài khoản'}
             </span>
 
-            {/* Ô tròn hiện chữ cái đầu của tên bên phải */}
-            <div className='flex h-6 w-6 items-center justify-center bg-orange-700 font-sans text-xs font-bold text-white'>
-              {initial}
+            {/* Ảnh đại diện hoặc ô chữ cái đầu của tên bên phải */}
+            <div className='flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-sans text-xs font-bold text-white'>
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className='h-full w-full object-cover'
+                />
+              ) : (
+                initial
+              )}
             </div>
 
             {/* Mũi tên chỉ thị mở/đóng */}
@@ -201,8 +209,16 @@ export const WorkspaceHeader = ({
             <div className='absolute right-0 mt-2 w-80 border border-stone-300 bg-white p-4 shadow-xl font-sans text-stone-800 z-50'>
               {/* Header Box: Thông tin định danh */}
               <div className='flex items-center gap-3 pb-3 border-b border-stone-200'>
-                <div className='flex h-9 w-9 shrink-0 items-center justify-center bg-orange-700 font-bold text-white text-sm'>
-                  {initial}
+                <div className='flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-bold text-white text-sm'>
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.name}
+                      className='h-full w-full object-cover'
+                    />
+                  ) : (
+                    initial
+                  )}
                 </div>
                 <div className='min-w-0 flex-1'>
                   <div className='truncate text-sm font-bold text-emerald-950'>
@@ -327,8 +343,18 @@ export const WorkspaceHeader = ({
                         }}
                         className='mt-2 flex w-full items-center justify-center gap-1.5 border border-stone-300 bg-white py-1.5 font-sans text-xs font-bold text-orange-700 transition hover:border-orange-700 hover:bg-orange-50'
                       >
-                        <span>Chỉnh sửa thông tin & Đổi mật khẩu</span>
+                        <span>Quản lý hồ sơ cá nhân</span>
                         <span>→</span>
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setOpen(false)
+                          navigate('/change-password')
+                        }}
+                        className='mt-1.5 flex w-full items-center justify-center gap-1.5 border border-stone-200 bg-stone-50 py-1.5 font-sans text-xs font-medium text-stone-700 transition hover:border-stone-400 hover:bg-white'
+                      >
+                        <span>Đổi mật khẩu tài khoản</span>
                       </button>
                     </div>
                   )}

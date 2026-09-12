@@ -70,7 +70,8 @@ const toPublicUser = (user: UserDocument) => ({
   email: user.email,
   role: user.role,
   status: user.status,
-  creditBalance: user.creditBalance
+  creditBalance: user.creditBalance,
+  avatar: user.avatar || null
 })
 
 export const sendRegisterOtp = async (email: string) => {
@@ -210,16 +211,68 @@ export const getProfile = async (userId: string) => {
   return toPublicUser(user)
 }
 
+export interface UpdateProfileInput {
+  name?: string
+  avatar?: string | null
+}
+
 export const updateProfile = async (
   userId: string,
-  name: string | undefined
+  data: string | UpdateProfileInput
 ) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
 
+  const { name, avatar } =
+    typeof data === 'string' ? { name: data, avatar: undefined } : data
+
+  // Luồng 5b: Trường Họ tên bị bỏ trống -> Thông báo "Họ tên không được để trống"
+  if (name !== undefined) {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      throw new AppError('Họ tên không được để trống', 400)
+    }
+  }
+
+  // Luồng 5a: Ảnh vượt quá dung lượng cho phép hoặc sai định dạng -> Thông báo lỗi tệp tin
+  if (avatar) {
+    if (avatar.startsWith('data:')) {
+      const match = avatar.match(
+        /^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i
+      )
+      if (!match) {
+        throw new AppError(
+          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+          400
+        )
+      }
+      const base64Data = match[2]
+      const approxSizeBytes = (base64Data.length * 3) / 4
+      // Kích thước tối đa 2MB = 2 * 1024 * 1024 bytes
+      if (approxSizeBytes > 2 * 1024 * 1024) {
+        throw new AppError(
+          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+          400
+        )
+      }
+    } else if (
+      !avatar.startsWith('http://') &&
+      !avatar.startsWith('https://') &&
+      !avatar.startsWith('/')
+    ) {
+      throw new AppError(
+        'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+        400
+      )
+    }
+  }
+
   const trimmedName = name?.trim()
-  // Nếu không truyền tên hoặc tên mới không có thay đổi so với hiện tại
-  if (!trimmedName || trimmedName === user.name) {
+  const nameChanged = trimmedName !== undefined && trimmedName !== user.name
+  const avatarChanged = avatar !== undefined && avatar !== user.avatar
+
+  // Nếu không có thay đổi nào so với hiện tại
+  if (!nameChanged && !avatarChanged) {
     return toPublicUser(user)
   }
 
@@ -248,8 +301,13 @@ export const updateProfile = async (
     )
   }
 
-  // 3. Cập nhật thông tin vào CSDL
-  user.name = trimmedName
+  // 3. Cập nhật thông tin mới vào CSDL
+  if (nameChanged && trimmedName) {
+    user.name = trimmedName
+  }
+  if (avatarChanged) {
+    user.avatar = avatar || null
+  }
   await user.save()
 
   // 4. Thiết lập cooldown và tăng bộ đếm lượt thay đổi trong Redis
@@ -324,4 +382,38 @@ export const forgotPassword = async (email: string) => {
   return {
     message: 'Mã xác thực đặt lại mật khẩu đã được gửi đến email của bạn'
   }
+}
+
+export const resetPassword = async (
+  email: string,
+  otp: string,
+  password: string
+) => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await UserModel.findOne({ email: normalizedEmail })
+  if (!user) {
+    throw new AppError(
+      'Tài khoản với email này không tồn tại trong hệ thống',
+      404
+    )
+  }
+
+  if (user.status === 'locked') {
+    throw new AppError(
+      'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.',
+      403
+    )
+  }
+
+  const storedOtp = await redis.get(forgotPasswordOtpKey(normalizedEmail))
+  if (!storedOtp || storedOtp !== otp) {
+    throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
+  }
+
+  user.passwordHash = await bcrypt.hash(password, 10)
+  await user.save()
+
+  await redis.del(forgotPasswordOtpKey(normalizedEmail))
+
+  return { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' }
 }

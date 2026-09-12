@@ -7,6 +7,7 @@ import { EditorPage } from '@/features/slide-editor/components/EditorPage'
 import { LibraryPage } from '@/features/library/components/LibraryPage'
 import { PresentationPage } from '@/features/presentation/components/PresentationPage'
 import { ProfilePage } from '@/features/auth/components/ProfilePage'
+import { ChangePasswordPage } from '@/features/auth/components/ChangePasswordPage'
 import { WorkspaceHeader } from '@/components/layout/WorkspaceHeader'
 import { UserLayout } from '@/components/layout/UserLayout'
 import { useAuthStore } from '@/features/auth/store/auth.store'
@@ -48,6 +49,7 @@ export const App = () => {
           <Routes>
             <Route path='/admin' element={<AdminPage />} />
             <Route path='/profile' element={<ProfilePage />} />
+            <Route path='/change-password' element={<ChangePasswordPage />} />
             <Route path='*' element={<Navigate to='/admin' replace />} />
           </Routes>
         </main>
@@ -69,6 +71,7 @@ export const App = () => {
         <Route path='/library' element={<LibraryPage viewMode='library' />} />
         <Route path='/trash' element={<LibraryPage viewMode='trash' />} />
         <Route path='/profile' element={<ProfilePage />} />
+        <Route path='/change-password' element={<ChangePasswordPage />} />
         <Route path='*' element={<Navigate to='/library' replace />} />
       </Route>
     </Routes>

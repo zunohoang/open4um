@@ -7,7 +7,8 @@ import {
   refresh,
   logout,
   forgotPassword,
-  updateProfile
+  updateProfile,
+  resetPassword
 } from '@/services/auth.service'
 import * as emailService from '@/services/email.service'
 
@@ -185,7 +186,8 @@ describe('auth.service unit tests', () => {
         email: 'test@example.com',
         role: 'user',
         status: 'active',
-        creditBalance: 20
+        creditBalance: 20,
+        avatar: null
       })
       expect(result).toHaveProperty('accessToken')
       expect(result).toHaveProperty('refreshToken')
@@ -252,6 +254,76 @@ describe('auth.service unit tests', () => {
         expect.stringMatching(/^\d{6}$/)
       )
       expect(result.message).toContain('đặt lại mật khẩu')
+    })
+  })
+
+  describe('resetPassword', () => {
+    it('ném lỗi 404 khi không tìm thấy email', async () => {
+      mockUserFindOne.mockResolvedValue(null)
+
+      await expect(
+        resetPassword('notfound@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: expect.stringContaining('không tồn tại')
+      })
+    })
+
+    it('ném lỗi 403 khi tài khoản bị khóa', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'locked@example.com',
+        status: 'locked'
+      })
+
+      await expect(
+        resetPassword('locked@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: expect.stringContaining('khóa')
+      })
+    })
+
+    it('ném lỗi 400 khi OTP không khớp hoặc hết hạn', async () => {
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active'
+      })
+      mockRedisGet.mockResolvedValue(null)
+
+      await expect(
+        resetPassword('valid@example.com', '123456', 'newpassword123')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining(
+          'Mã OTP không chính xác hoặc đã hết hạn'
+        )
+      })
+    })
+
+    it('đặt lại mật khẩu thành công và xóa OTP trong Redis', async () => {
+      const mockSave = jest.fn().mockResolvedValue(undefined)
+      mockUserFindOne.mockResolvedValue({
+        _id: 'u1',
+        email: 'valid@example.com',
+        status: 'active',
+        passwordHash: 'old_hash',
+        save: mockSave
+      })
+      mockRedisGet.mockResolvedValue('123456')
+      ;(bcrypt.hash as jest.Mock).mockResolvedValue('new_hash_123')
+
+      const result = await resetPassword(
+        'valid@example.com',
+        '123456',
+        'newpassword123'
+      )
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('newpassword123', 10)
+      expect(mockSave).toHaveBeenCalled()
+      expect(mockRedisDel).toHaveBeenCalledWith('otp:forgot:valid@example.com')
+      expect(result.message).toContain('thành công')
     })
   })
 
@@ -576,6 +648,71 @@ describe('auth.service unit tests', () => {
       )
       expect(mockRedisIncr).toHaveBeenCalledWith('ratelimit:profile:count:u1')
       expect(result.name).toBe('Updated Name')
+    })
+
+    it('ném lỗi 400 khi trường họ tên bị bỏ trống (Luồng 5b)', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20
+      })
+
+      await expect(updateProfile('u1', { name: '   ' })).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Họ tên không được để trống'
+      })
+    })
+
+    it('ném lỗi 400 khi ảnh đại diện sai định dạng hoặc vượt quá dung lượng (Luồng 5a)', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20
+      })
+
+      await expect(
+        updateProfile('u1', {
+          avatar: 'data:application/pdf;base64,JVBERi0xLjQK...'
+        })
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+      })
+    })
+
+    it('cập nhật cả họ tên và ảnh đại diện thành công', async () => {
+      const mockSave = jest.fn().mockResolvedValue(undefined)
+      const mockUser = {
+        _id: 'u1',
+        name: 'Old Name',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        creditBalance: 20,
+        avatar: null,
+        save: mockSave
+      }
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockRedisGet.mockResolvedValueOnce(null)
+      mockRedisGet.mockResolvedValueOnce('0')
+      mockRedisIncr.mockResolvedValueOnce(1)
+
+      const validAvatar =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      const result = await updateProfile('u1', {
+        name: 'New Name',
+        avatar: validAvatar
+      })
+
+      expect(mockUser.name).toBe('New Name')
+      expect(mockUser.avatar).toBe(validAvatar)
+      expect(result.avatar).toBe(validAvatar)
     })
   })
 })

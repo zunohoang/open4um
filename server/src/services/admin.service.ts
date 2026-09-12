@@ -83,13 +83,7 @@ export const updateUser = async (
   return user
 }
 
-export const lockUser = async (id: string, currentAdminId: string) => {
-  if (id === currentAdminId) {
-    throw new AppError(
-      'Không thể tự khóa tài khoản quản trị của chính mình',
-      400
-    )
-  }
+export const lockUser = async (id: string) => {
   const user = await UserModel.findById(id).select('-passwordHash')
   if (!user) {
     throw new AppError('Không tìm thấy người dùng', 404)
@@ -118,6 +112,25 @@ export const restoreUser = async (id: string) => {
   await user.save()
 
   return user
+}
+
+export const deleteUser = async (id: string) => {
+  const user = await UserModel.findById(id)
+  if (!user) {
+    throw new AppError('Không tìm thấy người dùng', 404)
+  }
+  if (user.role === 'admin') {
+    throw new AppError('Không thể xóa tài khoản quản trị viên', 403)
+  }
+
+  await Promise.all([
+    UserModel.findByIdAndDelete(id),
+    LectureModel.deleteMany({ userId: id }),
+    FolderModel.deleteMany({ userId: id }),
+    AiUsageLogModel.deleteMany({ userId: id })
+  ])
+
+  return { id, message: 'Đã xóa người dùng thành công' }
 }
 
 export const cleanupExpiredLockedUsers = async () => {

@@ -18,6 +18,12 @@ export const forgotPasswordSchema = z.object({
   email: z.string().email('Địa chỉ email không đúng định dạng')
 })
 
+export const resetPasswordSchema = z.object({
+  email: z.string().email('Địa chỉ email không đúng định dạng'),
+  otp: z.string().regex(/^\d{6}$/, 'Mã OTP phải gồm 6 chữ số'),
+  password: z.string().min(6, 'Mật khẩu phải có ít nhất 6 ký tự')
+})
+
 export const loginSchema = z.object({
   email: z.string().email('Địa chỉ email không đúng định dạng'),
   password: z.string().min(6, 'Mật khẩu phải có ít nhất 6 ký tự')
@@ -28,7 +34,8 @@ export const refreshSchema = z.object({
 })
 
 export const updateProfileSchema = z.object({
-  name: z.string().min(2, 'Tên phải có ít nhất 2 ký tự').optional()
+  name: z.string().trim().min(1, 'Họ tên không được để trống').optional(),
+  avatar: z.string().nullable().optional()
 })
 
 export const changePasswordSchema = z
