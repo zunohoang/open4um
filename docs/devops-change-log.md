@@ -31,6 +31,66 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Ổn định clean install và integration test backend
+
+### Mục tiêu
+
+Loại bỏ dependency Jest không được sử dụng, sửa lỗi MongoDB Testcontainers không thể khởi động trên kernel Linux hiện tại và bảo đảm Jest tự giải phóng MongoDB/Redis mà không cần `--forceExit`.
+
+### Nguyên nhân đã xác minh
+
+- Jest biến đổi TypeScript bằng `@swc/jest`; repository không có code hoặc cấu hình sử dụng `ts-jest`.
+- `ts-jest@29.4.12` yêu cầu TypeScript `<7`, trong khi backend dùng TypeScript `7.0.2`, làm `npm ci` thất bại do peer dependency conflict.
+- Integration test dùng image động `mongo:8`. Image này không thể khởi động trên kernel local `7.0.0-31` và báo `Health check failed: unhealthy`.
+- Khi setup MongoDB thất bại, `afterEach` vẫn xóa database và `afterAll` gọi `.stop()` trên container chưa được tạo, sinh thêm timeout và `TypeError` không phải lỗi nghiệp vụ.
+- Test tự đặt biến môi trường trong `server/tests/setup.ts`; thiếu file `.env` không phải nguyên nhân của lỗi integration test này.
+
+### Thay đổi
+
+- `server/package.json`, `server/package-lock.json`:
+  - Gỡ `ts-jest`; tiếp tục dùng `@swc/jest` theo cấu hình hiện có.
+  - Bỏ `--forceExit` khỏi script `npm test` sau khi đã xác minh toàn bộ test tự kết thúc bình thường.
+- `server/tests/integration/testDb.ts`:
+  - Khóa image Testcontainers thành `mongo:8.0.30` thay cho tag động `mongo:8`.
+  - Truyền `GLIBC_TUNABLES=glibc.pthread.rseq=1` để MongoDB chạy được trên kernel bị ảnh hưởng.
+  - Cho phép biến container ở trạng thái chưa khởi tạo và chỉ dọn database sau khi setup hoàn tất.
+  - Chỉ ngắt kết nối/dừng resource đã thực sự được tạo, tránh lỗi dây chuyền khi `beforeAll` thất bại.
+  - Tăng timeout setup lên 180 giây cho lần tải image đầu tiên trên CI; timeout cleanup là 60 giây và cleanup giữa test là 30 giây.
+- `docker-compose.dev.yml`:
+  - Đồng bộ MongoDB sang `mongo:8.0.30` và cùng biến `GLIBC_TUNABLES`.
+
+`GLIBC_TUNABLES` là workaround tương thích cho các máy dùng kernel bị ảnh hưởng. Có thể đánh giá gỡ workaround sau khi toàn bộ máy developer và Jenkins agent dùng kernel đã sửa lỗi.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server clean install | PASS | `npm --prefix server ci`; cài 896 package và không còn peer conflict `ts-jest`/TypeScript |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server TypeScript build | PASS | `npm --prefix server run build` |
+| Docker Compose config | PASS | Render `docker-compose.dev.yml` bằng biến môi trường kiểm tra và `docker compose ... config --quiet` |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Gọi Jest từ sai working directory | FAIL do lệnh kiểm tra | `npm --prefix server exec -- jest ...` đứng ở repository root nên không tìm thấy `jest.config.js`; không phải lỗi source |
+| Integration tests không `--forceExit` | PASS | 3/3 suites, 38/38 tests; 95.559 giây |
+| Toàn bộ server tests qua script chuẩn | PASS | `npm --prefix server test`; 16/16 suites, 152/152 tests; 21.382 giây; Jest tự thoát bình thường |
+
+### Vấn đề chưa xử lý trong bước này
+
+- Các cảnh báo dependency và 6 lỗ hổng từ `npm audit` chưa được tự động sửa; không chạy `npm audit fix --force` vì có thể gây breaking change.
+- Gate 0 của toàn dự án chưa hoàn tất: còn chuẩn hóa Node.js, bổ sung frontend typecheck/test, harden Docker image và readiness check trước khi tạo Jenkins pipeline.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Backend clean install và test gate | `TEST_PASS` |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Hợp nhất lịch sử `main` vào `developer`
 
 ### Mục tiêu

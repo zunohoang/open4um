@@ -18,11 +18,14 @@ export const clearDatabase = async () => {
 }
 
 export const setupTestDb = () => {
-  let mongoContainer: StartedMongoDBContainer
-  let redisContainer: StartedRedisContainer
+  let mongoContainer: StartedMongoDBContainer | undefined
+  let redisContainer: StartedRedisContainer | undefined
+  let setupComplete = false
 
   beforeAll(async () => {
-    mongoContainer = await new MongoDBContainer('mongo:8').start()
+    mongoContainer = await new MongoDBContainer('mongo:8.0.30')
+      .withEnvironment({ GLIBC_TUNABLES: 'glibc.pthread.rseq=1' })
+      .start()
     const mongoUri = `${mongoContainer.getConnectionString()}?directConnection=true`
     await mongoose.connect(mongoUri)
 
@@ -39,16 +42,33 @@ export const setupTestDb = () => {
     redis.options.host = redisContainer.getHost()
     redis.options.port = redisContainer.getMappedPort(6379)
     await redis.connect()
-  }, 60000)
+    setupComplete = true
+  }, 180000)
 
   afterEach(async () => {
-    await clearDatabase()
-  })
+    if (setupComplete) {
+      await clearDatabase()
+    }
+  }, 30000)
 
   afterAll(async () => {
-    redis.disconnect(false)
-    await mongoose.disconnect()
-    await mongoContainer.stop()
-    await redisContainer.stop()
-  })
+    setupComplete = false
+
+    if (redis.status !== 'end') {
+      redis.disconnect(false)
+    }
+
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect()
+    }
+
+    const containerCleanup = []
+    if (redisContainer) {
+      containerCleanup.push(redisContainer.stop())
+    }
+    if (mongoContainer) {
+      containerCleanup.push(mongoContainer.stop())
+    }
+    await Promise.all(containerCleanup)
+  }, 60000)
 }

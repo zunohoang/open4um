@@ -1,9 +1,10 @@
 services:
   mongo:
-    image: mongo:8
+    image: mongo:8.0.30
     container_name: absliderdb_mongo
     restart: unless-stopped
     environment:
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
       MONGO_INITDB_DATABASE: absliderdb
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
