@@ -31,6 +31,78 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — CI rehearsal trước khi tạo Jenkins pipeline
+
+### Mục tiêu
+
+Chạy thủ công đúng nhóm lệnh dự kiến đưa vào Jenkins từ một clean install, phân biệt quality gate chức năng với security gate và chỉ tạo pipeline khi các blocker mức cao đã được xử lý.
+
+### Phạm vi kiểm tra
+
+- Nhánh `developer` tại commit `e49d813d6b3638bafdd283b1bfa07bf0f06f99d8`.
+- Client và server được chạy `npm ci` riêng bằng Node `24.21.0`, npm `11.19.0` theo `.nvmrc`.
+- Chạy client lint/build; repository hiện chưa có client test script.
+- Chạy server lint/build và toàn bộ Jest test, bao gồm Testcontainers integration test.
+- Chạy production dependency audit ở ngưỡng `high`.
+- Build backend Docker image và validate Docker Compose.
+
+Shell tự động ban đầu dùng Node `24.18.0`, npm `11.16.0`, không khớp contract repository. Sau khi nạp `/home/duckcy/.nvm/nvm.sh` và chạy `nvm use`, toolchain đã khớp chính xác Node `24.21.0`, npm `11.19.0`. Jenkins agent sau này phải chủ động chọn toolchain, không dựa vào Node mặc định của shell.
+
+### Bằng chứng kiểm tra
+
+| Gate | Kết quả | Ghi chú |
+|---|---|---|
+| Git baseline | PASS | `HEAD` và `origin/developer` cùng ở `e49d813d6b3638bafdd283b1bfa07bf0f06f99d8` |
+| Client clean install | PASS có cảnh báo | 252 package; 2 moderate vulnerabilities; npm 11 cảnh báo 2 install script chưa allowlist |
+| Server clean install | PASS có cảnh báo | 897 package; Babel 8/Babel 7 peer warnings; 6 vulnerabilities; npm 11 cảnh báo 8 install script chưa allowlist |
+| Client lint | PASS | `npm --prefix client run lint` |
+| Client build/typecheck | PASS có cảnh báo | `tsc -b && vite build`; bundle chính 865.74 kB vượt ngưỡng cảnh báo 500 kB |
+| Client tests | NOT_AVAILABLE | `client/package.json` chưa có test script |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | `npm --prefix server run build` |
+| Server tests | PASS | 20/20 suite, 166/166 test |
+| Client production audit, threshold high | PASS | Exit `0`; còn 2 moderate qua `react-router-dom@6.30.6` / `react-router@6.30.6` |
+| Server production audit, threshold high | FAIL | Exit `1`; 4 moderate, 1 high, 1 critical |
+| `npm audit fix --dry-run` | NO_CHANGE | Không có bản sửa tự động không-force cho client hoặc server |
+| Backend Docker build | PASS | `abslider-server:ci-rehearsal`, image ID `sha256:4edcb6526a840c494c954a231352805ee2a83159e5cf6bf45d20591ab7a761fd` |
+| Docker runtime metadata | PASS | User `abslider`; healthcheck gọi `/api/v1/health/ready` |
+| Docker Compose config | PASS | `docker compose -f docker-compose.dev.yml config --quiet` với biến CI giả lập |
+| Worktree after commands | PASS | `npm ci`, audit, build và test không thay đổi file tracked |
+
+### Phân loại security findings
+
+- Critical/high của server:
+  - `bcrypt@5.1.1` → `@mapbox/node-pre-gyp@1.0.11` → `tar@6.2.1`.
+  - Registry hiện có `bcrypt@6.0.0`, hỗ trợ Node `>=18` và thay `node-pre-gyp` bằng `node-gyp-build`; cần nâng riêng và chạy lại toàn bộ test/smoke.
+- Moderate của server:
+  - `minio@8.0.7` → `query-string@7.1.3` / `decode-uri-component@0.2.2` và `stream-json@1.9.1`.
+  - `minio@8.0.7` đang là phiên bản mới nhất trên registry ở thời điểm kiểm tra; audit chỉ đề xuất downgrade major về `7.1.3`, nên không tự động áp dụng.
+- Moderate của client:
+  - `react-router-dom@6.30.6` → `react-router@6.30.6`.
+  - Bản vá được audit đề xuất là `react-router-dom@7.18.3`, một major upgrade; cần migration/test riêng.
+
+Không chạy `npm audit fix --force` và không downgrade MinIO chỉ để làm sạch báo cáo.
+
+### Blocker và bước tiếp theo
+
+1. Nâng `bcrypt` từ 5.1.1 lên 6.0.0 trong một commit riêng.
+2. Chạy clean install, full backend tests, Docker build/runtime smoke và audit lại.
+3. Chỉ khi server không còn high/critical mới tạo Jenkinsfile.
+4. Lập backlog riêng cho client test, React Router major migration, MinIO advisory, bundle splitting và npm install-script policy.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Functional CI rehearsal | `TEST_PASS` |
+| Security gate | `TEST_PARTIAL` — server high/critical còn tồn tại |
+| Jenkins pipeline | `PLANNED` — chưa tạo |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Khóa credential admin mặc định trên production
 
 ### Mục tiêu
