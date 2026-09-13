@@ -56,6 +56,14 @@ Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
 - Không sửa trực tiếp unit `/usr/lib/systemd/system/jenkins.service` do package quản lý.
 - Chưa thêm user `jenkins` vào group `docker`; quyền Docker sẽ được xử lý ở gate riêng vì có mức quyền tương đương root trên host.
 - Không chạy `apt autoremove` và không nâng đồng loạt 66 package ngoài phạm vi.
+- Hoàn tất setup wizard trên `http://127.0.0.1:8080`, tạo tài khoản quản trị riêng và vào được Dashboard; không ghi username/password vào repository hoặc nhật ký.
+- Các plugin cốt lõi đã cài:
+  - Pipeline, Pipeline Graph View.
+  - Git, GitHub Branch Source.
+  - Credentials Binding.
+  - NodeJS.
+  - Matrix Authorization Strategy.
+  - SSH Build Agents.
 
 ### Bằng chứng kiểm tra
 
@@ -68,7 +76,8 @@ Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
 | systemd override | PASS | `DropInPaths=/etc/systemd/system/jenkins.service.d/override.conf` |
 | Bind address | PASS | `[::ffff:127.0.0.1]:8080`; loopback only, không còn `*:8080` |
 | Docker privilege | NOT_CONFIGURED | Group `docker` hiện chỉ có user `duckcy`; user `jenkins` chưa được cấp quyền |
-| Jenkins setup wizard | NOT_CONFIGURED | Chưa mở khóa, chưa tạo admin, chưa cài plugin |
+| Jenkins setup wizard | PASS | Đã mở khóa, tạo admin riêng và vào Dashboard |
+| Core plugins | PASS | Các file `.jpi` cốt lõi tồn tại; không phát hiện file `.failed` |
 | Pipeline/job | NOT_CONFIGURED | Chưa tạo Jenkinsfile hoặc Multibranch Pipeline |
 
 ### Trạng thái
@@ -77,10 +86,10 @@ Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
 |---|---|
 | Jenkins package/service | `TEST_PASS` — host local |
 | Network exposure | `TEST_PASS` — loopback only |
-| Setup wizard/plugins | `PLANNED` |
+| Setup wizard/plugins | `TEST_PASS` — host local |
 | Docker agent capability | `PLANNED` |
-| Commit tài liệu | Chưa commit |
-| Push tài liệu | Chưa push |
+| Initial bootstrap documentation | `PUSHED` — `4c02db4a70d7f3c8ea4c96da79914ecfebe43708` |
+| Wizard documentation update | Chưa commit/push |
 | Production | Chưa deploy |
 
 ---
