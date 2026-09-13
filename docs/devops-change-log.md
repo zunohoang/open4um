@@ -84,8 +84,8 @@ Loại bỏ dependency Jest không được sử dụng, sửa lỗi MongoDB Tes
 | Mức | Trạng thái |
 |---|---|
 | Backend clean install và test gate | `TEST_PASS` |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `703b7efec308e846de110b4dd55c4f0f47d16627` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `703b7efec308e846de110b4dd55c4f0f47d16627` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
