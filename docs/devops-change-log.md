@@ -103,8 +103,8 @@ Hai lần kiểm tra ban đầu trong container thất bại do harness kiểm t
 | Server install/lint/build/test trên Node mục tiêu | `TEST_PASS` |
 | Backend Docker build | `TEST_PASS` — local only |
 | Workstation Node/npm | `TEST_PASS` — Node `24.21.0`, npm `11.19.0` |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `69fc5c1270e7a42396d07f4d7f3e982de1924c32` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `69fc5c1270e7a42396d07f4d7f3e982de1924c32` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
