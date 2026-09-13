@@ -213,11 +213,23 @@ Phạm vi của bước này chỉ là CI:
 - Sau khi Built-In Node được đặt về `0` executor, chạy lại Pipeline `abslider-ci/developer #2` trên commit `5c034693fe875d471efab0de82e99cadb8c5776c`.
 - Build #2 tiếp tục được Jenkins giao cho `abslider-agent-01`, chạy bằng `jenkins-agent` và không đọc được controller master key; đây là bằng chứng workload CI vẫn hoạt động khi controller không nhận build.
 - Build #2 tái sử dụng NodeJS Tool đã cache, hoàn tất `npm ci` trong khoảng 5 giây và unit test trong 1.156 giây; tổng thời gian từ lúc bắt đầu đến `Finished: SUCCESS` khoảng 11 giây.
+- Tạo Jenkins credential ID `github-abslider-readonly` theo loại `Username with password`; password là fine-grained GitHub PAT chỉ có quyền đọc tài nguyên public và không được ghi vào repository.
+- Gắn credential này vào GitHub Branch Source để controller xác thực các API request phục vụ branch/PR indexing. Theo hành vi thực tế của GitHub Branch Source, cùng credential cũng được dùng qua `GIT_ASKPASS` cho HTTPS checkout.
+- Lần scan có xác thực bắt đầu lúc 00:52:22, xử lý 6 branch và 1 pull request trong 8.1 giây, không còn thời gian chờ do anonymous API limiter.
+- Scan phát hiện `developer` đổi từ `1ee139c232aad32850f13b38f28a2a0172fcff93` sang `45ec9a9416d2f25e3a88c228c4079a17913edb87`, tìm thấy `Jenkinsfile` và tự lên lịch build cho branch.
+- Build #3 lấy `Jenkinsfile` và checkout đúng commit `45ec9a9416d2f25e3a88c228c4079a17913edb87`, chạy trên `abslider-agent-01` bằng user `jenkins-agent` với Node `24.21.0` và npm `11.19.0`.
+- Build #3 hoàn tất `npm ci` trong khoảng 5 giây và unit test trong 1.292 giây: 17/17 suites, 128/128 tests PASS; JUnit/coverage được lưu và Pipeline kết thúc `Finished: SUCCESS`.
+- GitHub từ chối hai lần cập nhật commit status với HTTP `403 Resource not accessible by personal access token`. Đây không làm Jenkins build thất bại nhưng GitHub chưa nhận được trạng thái CI, nên chưa thể dùng Jenkins làm required status check.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
-| Multibranch indexing | PASS có cảnh báo | Tìm thấy `Jenkinsfile` trên `developer`; indexing mất khoảng 15 phút do GitHub API anonymous rate limiter |
-| Git checkout | PASS | Checkout đúng commit `1ee139c`; system Git `2.43.0`; chưa cấu hình named Git tool |
+| Multibranch indexing anonymous | PASS có cảnh báo | Lần đầu tìm thấy `Jenkinsfile` trên `developer`; indexing mất khoảng 15 phút do GitHub API anonymous rate limiter |
+| GitHub scan credential | PASS | Dùng `github-abslider-readonly`; log xác nhận kết nối GitHub API bằng credential mô tả `GitHub public-read credential for ABSlider CI scan` |
+| Authenticated indexing | PASS | 6 branch và 1 pull request trong 8.1 giây; không còn Jenkins-imposed API limiter |
+| Change detection | PASS | Phát hiện `developer` đổi từ `1ee139c` sang `45ec9a9` và lên lịch build |
+| Authenticated checkout | PASS | Build #3 checkout đúng `45ec9a9`; GitHub Branch Source dùng `github-abslider-readonly` qua `GIT_ASKPASS` |
+| GitHub commit status | BLOCKED | GitHub trả HTTP `403` vì public-read PAT không có quyền tạo commit status |
+| Git checkout | PASS | Build #1 checkout `1ee139c`, #2 checkout `5c03469`, #3 checkout `45ec9a9`; system Git `2.43.0`; chưa cấu hình named Git tool |
 | NodeJS auto-install | PASS | Node `24.21.0`, npm `11.19.0` trên agent |
 | Agent identity/isolation | PASS | `jenkins-agent`; không đọc được controller master key |
 | Backend clean install | PASS có cảnh báo | Peer/deprecation và npm install-script warnings vẫn hiện nhưng lệnh exit `0` |
@@ -228,7 +240,7 @@ Phạm vi của bước này chỉ là CI:
 | Controller workload isolation | PASS | Sau khi Built-In Node được đặt `0` executor, build #2 vẫn được giao cho `abslider-agent-01` |
 | Repeat CI build | PASS | `abslider-ci/developer #2`, commit `5c034693fe875d471efab0de82e99cadb8c5776c` |
 | NodeJS Tool cache reuse | PASS | Build #2 dùng đúng Node `24.21.0`/npm `11.19.0` mà không phải giải nén lại tool |
-| Pipeline result | PASS | Cả `abslider-ci/developer #1` và `#2` đều kết thúc `Finished: SUCCESS` |
+| Pipeline result | PASS | `abslider-ci/developer #1`, `#2` và `#3` đều kết thúc `Finished: SUCCESS` |
 
 ### File bị ảnh hưởng
 
@@ -246,8 +258,10 @@ Phạm vi của bước này chỉ là CI:
 | JUnit/coverage output | `TEST_PASS` — local |
 | Jenkinsfile | `TEST_PASS` — Jenkins runtime trên agent |
 | Commit/push | `PUSHED` — `1ee139c232aad32850f13b38f28a2a0172fcff93` |
-| CI runtime | `TEST_PASS` — `abslider-ci/developer #1` và `#2` |
-| Automatic GitHub trigger | `PLANNED` — chưa cấu hình credential/webhook |
+| CI runtime | `TEST_PASS` — `abslider-ci/developer #1`, `#2` và `#3` |
+| GitHub API authentication | `TEST_PASS` — read-only credential, authenticated scan |
+| GitHub status publishing | `BLOCKED` — HTTP `403`; ưu tiên GitHub App được owner/admin cài cho repository với `Commit statuses: Read and write` |
+| Automatic GitHub trigger | `PLANNED` — authenticated manual scan đã PASS; chưa cấu hình periodic scan hoặc webhook |
 | CD/deployment | Ngoài phạm vi task |
 
 ---
