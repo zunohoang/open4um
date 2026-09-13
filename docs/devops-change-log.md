@@ -31,6 +31,61 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Khóa credential admin mặc định trên production
+
+### Mục tiêu
+
+Ngăn backend production tự tạo tài khoản quản trị bằng email/mật khẩu mặc định và buộc cấu hình sai phải fail-fast trước khi mở kết nối tới hạ tầng.
+
+### Thay đổi
+
+- Đưa toàn bộ cấu hình seed admin vào schema tập trung tại `server/src/config/env.ts`; `seed.ts` không còn đọc trực tiếp `process.env`.
+- Chuẩn hóa email admin về chữ thường sau khi trim.
+- `NODE_ENV=production` bắt buộc khai báo:
+  - `ADMIN_EMAIL`, đồng thời cấm `admin@abslider.com`.
+  - `ADMIN_PASSWORD`, đồng thời cấm `admin123456`.
+- Mật khẩu admin production phải có ít nhất 12 ký tự và đủ chữ thường, chữ hoa, chữ số, ký tự đặc biệt.
+- `ADMIN_NAME` mặc định là `Admin ABSlider`; `ADMIN_CREDIT_BALANCE` phải là số nguyên không âm và mặc định là `1000`.
+- Development/test vẫn giữ fallback seed cũ khi email hoặc mật khẩu để trống, nhằm không phá vỡ môi trường local và integration test hiện tại.
+- Sửa `.env.example` để không còn phát hành credential mặc định dưới dạng giá trị cấu hình sẵn; bổ sung `ADMIN_CREDIT_BALANCE`.
+- Thêm unit test cho credential thiếu, credential mặc định, mật khẩu yếu, cấu hình hợp lệ và fallback development.
+
+Validation được thực thi khi module cấu hình được nạp. Vì `server.ts` import cấu hình trước khi gọi `connectMongo()`, cấu hình production không hợp lệ dừng process trước khi kết nối MongoDB, Redis hoặc MinIO.
+
+### File bị ảnh hưởng
+
+- `server/.env.example`
+- `server/src/config/env.ts`
+- `server/src/lib/seed.ts`
+- `server/tests/unit/config/env.test.ts`
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Focused environment tests | PASS | 1/1 suite, 5/5 test |
+| Backend full tests | PASS | 20/20 suite, 166/166 test |
+| Backend lint | PASS | `npm --prefix server run lint` |
+| Backend build | PASS | `npm --prefix server run build` |
+| Production missing credentials | PASS | Process thoát mã `1`, báo thiếu cả `ADMIN_EMAIL` và `ADMIN_PASSWORD` |
+| Fail-fast ordering | PASS | Không có log kết nối MongoDB trước khi process từ chối cấu hình |
+| Docker build | PASS | Image local `abslider-server:admin-hardening-gate`, ID `sha256:6e122fddb6fd7e4af7314c9fd8652eef6bea0605a549696dc6a1372cb54b1641` |
+| Valid production runtime | PASS | Container non-root báo `healthy`, readiness trả `200` và graceful shutdown exit `0` |
+| Admin seed runtime | PASS | Email được chuẩn hóa thành `owner@example.com`; role `admin` và password được lưu dưới dạng hash |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-admin*` sau smoke test |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Production admin hardening | `TEST_PASS` — local only |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Readiness probe và graceful shutdown cho backend
 
 ### Mục tiêu
