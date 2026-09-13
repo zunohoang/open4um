@@ -31,6 +31,76 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Hardening backend Docker image và sửa MinIO registry
+
+### Mục tiêu
+
+Giảm build context và runtime attack surface của backend image, chạy ứng dụng bằng user không phải `root`, khóa base image theo digest và xác minh container khởi động thật với MongoDB, Redis, MinIO.
+
+### Thay đổi
+
+- Tạo `server/.dockerignore` để loại khỏi build context:
+  - `node_modules`, `dist`, `coverage`, `tests`.
+  - Toàn bộ `.env`/`.env.*`, log, npm debug log và metadata Git.
+- Tái cấu trúc `server/Dockerfile` thành ba stage:
+  - `build`: clean install đầy đủ và biên dịch TypeScript.
+  - `production-dependencies`: clean install chỉ production dependencies và xóa npm cache.
+  - `runtime`: Alpine thuần, chỉ chứa Node binary, CA certificates, `libstdc++`, `dist` và production `node_modules`.
+- Khóa Node base image bằng cả tag và manifest digest:
+  - `node:24.21.0-alpine3.24@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2`.
+- Khóa Alpine runtime image bằng digest:
+  - `alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b`.
+- Tạo user/group `abslider` cố định UID/GID `10001`, chuyển quyền `dist` và `node_modules`, sau đó đặt `USER abslider`.
+- Runtime không chứa npm/yarn và chạy trực tiếp `/usr/local/bin/node dist/server.js`.
+- Sửa `docker-compose.dev.yml`:
+  - Thay image không pull được `minio/minio:latest` bằng release đã khóa `quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z`.
+  - Digest MinIO đã xác minh: `sha256:064117214caceaa8d8a90ef7caa58f2b2aeb316b5156afe9ee8da5b4d83e12c8`.
+
+Registry `quay.io/minio/minio` và release trên được đối chiếu từ tài liệu container chính thức của MinIO: `https://min.io/docs/minio/container/index.html`.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Dockerfile build | PASS | `docker build`; final local image `abslider-server:docker-hardening-gate` |
+| Final local image ID | PASS | `sha256:21dd4586cdd8f623d54b2cc41c36d4cd4dbf1bbd35792f6708145d46d3e33c82` |
+| Build context archive | PASS | Giảm từ 272,752,640 byte xuống 624,640 byte, khoảng 99.77% |
+| Runtime image size | PASS | Giảm từ 75,174,510 byte xuống 60,813,220 byte, khoảng 19.1% |
+| Runtime Node | PASS | Node `v24.21.0` |
+| Runtime identity | PASS | `abslider`, UID/GID `10001`; Node process PID 1 cũng chạy UID/GID `10001` |
+| Runtime package managers | PASS | Không có npm hoặc yarn |
+| Native dependency | PASS | `require('bcrypt')` load thành công trong final image |
+| Docker Compose config | PASS | `docker compose ... config --quiet` với biến kiểm tra |
+| MinIO pinned pull | PASS | Pull từ Quay theo release tag và digest đã ghi nhận |
+| Dependency readiness | PASS | MongoDB ping, Redis `PONG`, MinIO live endpoint thành công trên network smoke tạm |
+| Backend runtime smoke | PASS | Kết nối MongoDB, Redis, MinIO; migration/seed hoàn tất; `GET /api/v1/health` trả `{"success":true,"data":{"status":"ok"}}` |
+| Temporary resource cleanup | PASS | Hai lượt container/network smoke đều dùng container `--rm`; tất cả container và network tạm đã được xóa |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+Lần chạy smoke đầu tiên phát hiện `minio/minio:latest` trả `pull access denied`. Đây là lỗi cấu hình Compose thực tế, không phải lỗi backend; đã chuyển sang registry Quay theo hướng dẫn chính thức và smoke test lại thành công.
+
+### Vấn đề chưa xử lý trong bước này
+
+- `/api/v1/health` vẫn là liveness tĩnh, chưa chứng minh dependency readiness; sẽ tách liveness/readiness ở bước tiếp theo.
+- `server/src/server.ts` chưa giữ HTTP server handle và chưa graceful shutdown MongoDB/Redis khi nhận `SIGTERM`/`SIGINT`.
+- `server/src/lib/seed.ts` còn fallback admin email/password mặc định; chưa an toàn cho production.
+- Image mới chỉ tồn tại local, chưa push registry và chưa triển khai.
+- Dependency vulnerabilities và Babel peer warnings vẫn cần lượt audit riêng; không chạy `npm audit fix --force`.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Docker build hardening | `TEST_PASS` |
+| Non-root runtime | `TEST_PASS` |
+| Runtime smoke với dependency thật | `TEST_PASS` — local only |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Chuẩn hóa Node.js 24 cho repository và backend image
 
 ### Mục tiêu
