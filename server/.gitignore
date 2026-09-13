@@ -23,6 +23,7 @@ pnpm-debug.log*
 
 # Testing & Coverage
 coverage/
+reports/
 .nyc_output/
 
 # Temp, cache & uploads

@@ -16,6 +16,8 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "test": "jest --runInBand",
+    "test:unit": "jest tests/unit --runInBand",
+    "test:unit:ci": "jest tests/unit --runInBand --ci --coverage --reporters=default --reporters=jest-junit",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },
@@ -56,11 +58,16 @@
     "eslint-plugin-prettier": "^5.5.6",
     "globals": "^17.12.0",
     "jest": "^30.5.1",
+    "jest-junit": "17.0.0",
     "prettier": "^3.9.6",
     "supertest": "^7.2.2",
     "testcontainers": "^12.1.0",
     "tsc-alias": "^1.9.4",
     "tsx": "^4.19.2",
     "typescript": "7.0.2"
+  },
+  "jest-junit": {
+    "outputDirectory": "reports/junit",
+    "outputName": "server-unit.xml"
   }
 }

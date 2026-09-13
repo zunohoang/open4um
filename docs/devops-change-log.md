@@ -154,8 +154,70 @@ Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller tr
 | Jenkins agent foreground smoke | `TEST_PASS` — kết nối WebSocket thành công |
 | Persistent systemd service | `TEST_PASS` — host local |
 | Agent job execution | `PLANNED` — chưa chạy Pipeline smoke |
-| Repository documentation | `IMPLEMENTED_LOCAL` — chưa commit/push |
+| Repository documentation | `PUSHED` — `41bec707dbf1d342e50dadea0c0730a4e57fe66f` |
 | Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Khởi tạo Jenkins CI cho backend unit test
+
+### Mục tiêu và phạm vi
+
+Tạo Pipeline-as-Code để Jenkins tự động clean-install và chạy backend unit test cho hai nhánh `developer`, `main` cùng pull request hướng vào hai nhánh này.
+
+Phạm vi của bước này chỉ là CI:
+
+- Không có stage deploy, publish image hoặc thay đổi môi trường chạy ứng dụng.
+- Không chạy Docker/Testcontainers hay backend integration test.
+- Chưa chạy frontend unit test vì `client/package.json` hiện chưa có test script.
+- Coverage được thu thập và lưu làm artifact nhưng chưa đặt ngưỡng fail do dự án chưa có coverage contract được nhóm phê duyệt.
+
+### Thay đổi
+
+- Cấu hình Jenkins NodeJS Tool `nodejs-24`, auto-install chính xác Node.js `24.21.0`; việc tải/cài thực tế trên agent sẽ xảy ra ở lần chạy Pipeline đầu tiên.
+- Thêm `server/package.json` scripts:
+  - `test:unit`: chạy riêng `tests/unit` tuần tự.
+  - `test:unit:ci`: chạy unit test ở CI mode, thu coverage và xuất JUnit XML.
+- Thêm dev dependency cố định `jest-junit@17.0.0` và cập nhật `server/package-lock.json`.
+- Ignore `server/reports/` vì đây là test output sinh tự động.
+- Tạo `Jenkinsfile` tại repository root với các đặc tính:
+  - Chỉ nhận agent có labels `linux && node24` và dùng tool `nodejs-24`.
+  - Giới hạn context vào `developer`, `main` hoặc pull request có target là một trong hai nhánh này.
+  - Xác minh agent chạy bằng `jenkins-agent`, không đọc được controller master key, và dùng đúng Node `24.21.0`/npm `11.19.0`.
+  - Chạy `npm ci --no-audit --no-fund` trong `server` rồi chạy `npm run test:unit:ci`.
+  - Publish `server/reports/junit/server-unit.xml`, archive coverage, giới hạn lịch sử build/artifact, chặn build trùng, timeout 20 phút và dọn workspace.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Backend clean install | PASS có cảnh báo | 866 package; còn cảnh báo Babel peer/deprecation và npm install-script policy đã ghi nhận từ trước |
+| Unit test selection | PASS | 17 file dưới `server/tests/unit`; không chọn 4 integration test |
+| Backend unit tests | PASS | 17/17 suites, 128/128 tests, 0 snapshot |
+| JUnit report | PASS | XML ghi `tests=128`, `failures=0`, `errors=0` |
+| Coverage collection | PASS | Statements `76.96%`, branches `57.08%`, functions `79.24%`, lines `78.34%` |
+| Backend lint | PASS | `npm run lint` |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Jenkins runtime | NOT_RUN | `Jenkinsfile` chưa được commit/push nên chưa có Pipeline run trên agent |
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile`
+- `server/package.json`
+- `server/package-lock.json`
+- `server/.gitignore`
+- `docs/devops-change-log.md`
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Backend unit-test command | `TEST_PASS` — local |
+| JUnit/coverage output | `TEST_PASS` — local |
+| Jenkinsfile | `IMPLEMENTED_LOCAL` — chưa xác minh bằng Jenkins runtime |
+| Commit/push | Chưa thực hiện |
+| CI runtime | Chưa chạy |
+| CD/deployment | Ngoài phạm vi task |
 
 ---
 
