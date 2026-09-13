@@ -31,6 +31,60 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Nâng bcrypt 6 và loại security gate high/critical
+
+### Mục tiêu
+
+Loại chuỗi dependency production có lỗ hổng high/critical đã phát hiện trong CI rehearsal, nhưng không dùng `npm audit fix --force` và không thay đổi các dependency ngoài phạm vi.
+
+### Thay đổi
+
+- Nâng dependency trực tiếp `bcrypt` từ `^5.1.1` lên `^6.0.0`.
+- Cập nhật `server/package-lock.json` bằng Node `24.21.0`, npm `11.19.0`.
+- Lockfile loại bỏ 35 package, trong đó có chuỗi dễ tổn thương:
+  - `@mapbox/node-pre-gyp@1.0.11`.
+  - `tar@6.2.1`.
+- Bcrypt 6 dùng `node-gyp-build` và vẫn giữ API `hash`, `compare`, `getRounds` tương thích với code hiện tại.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server clean install | PASS có cảnh báo | `npm ci`; 863 package sau audit, còn Babel peer/deprecation và install-script warnings |
+| Dependency tree | PASS | Chỉ còn `bcrypt@6.0.0`; không còn `@mapbox/node-pre-gyp` hoặc `tar` trong cây server |
+| Local native bcrypt smoke | PASS | Hash/compare đúng, cost rounds `10` |
+| Production security gate | PASS | `npm audit --omit=dev --audit-level=high` exit `0`; không còn high/critical |
+| Remaining advisories | TRACKED | 4 moderate thuộc `minio@8.0.7` và dependency con; audit chỉ đề xuất downgrade breaking về MinIO 7.1.3 |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | `npm --prefix server run build` |
+| Server full tests | PASS | 20/20 suite, 166/166 test |
+| Docker build | PASS | Image local `abslider-server:bcrypt6-gate`, ID `sha256:c5d57174a79af879b843ef416a7bd2ddb2d0c419389b10e4cd57090271af015c` |
+| Docker native bcrypt | PASS | Runtime image load và thực thi `bcrypt@6.0.0` thành công |
+| Docker runtime readiness | PASS | Container chạy user `abslider` và chuyển sang `healthy` |
+| Authentication smoke | PASS | Đăng nhập admin đã seed trả HTTP `200`, `success=true` |
+| SIGTERM shutdown | PASS | Container exit code `0` |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-bcrypt*` sau smoke test |
+
+### File bị ảnh hưởng
+
+- `server/package.json`
+- `server/package-lock.json`
+- `docs/devops-change-log.md`
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Bcrypt upgrade | `TEST_PASS` — local only |
+| High/critical production dependency gate | `TEST_PASS` |
+| Moderate advisories | `TEST_PARTIAL` — đã ghi backlog, chưa có upgrade an toàn |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — CI rehearsal trước khi tạo Jenkins pipeline
 
 ### Mục tiêu
