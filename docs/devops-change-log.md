@@ -78,8 +78,8 @@ Loại chuỗi dependency production có lỗ hổng high/critical đã phát hi
 | Bcrypt upgrade | `TEST_PASS` — local only |
 | High/critical production dependency gate | `TEST_PASS` |
 | Moderate advisories | `TEST_PARTIAL` — đã ghi backlog, chưa có upgrade an toàn |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `5ed9b23f8e83a84f64a104b6d7826281bf26992b` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `5ed9b23f8e83a84f64a104b6d7826281bf26992b` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
