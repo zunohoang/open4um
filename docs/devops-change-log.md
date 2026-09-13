@@ -31,6 +31,85 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Chuẩn hóa Node.js 24 cho repository và backend image
+
+### Mục tiêu
+
+Loại bỏ độ lệch phiên bản Node.js giữa môi trường phát triển, client, server và backend Docker image; tạo một contract phiên bản có thể tái sử dụng cho Jenkins agent sau này.
+
+### Phiên bản chuẩn
+
+| Thành phần | Phiên bản |
+|---|---|
+| Node.js | `24.21.0` LTS |
+| npm | `11.19.0` |
+| Alpine Linux trong backend image | `3.24` |
+| `@types/node` | Major 24; lockfile hiện resolve `24.13.4` |
+| Base image | `node:24.21.0-alpine3.24` |
+| Base image digest đã kiểm tra | `sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2` |
+
+Node 24 được chọn vì là nhánh LTS còn được hỗ trợ; Node 20 trong Dockerfile cũ đã EOL. Nguồn kiểm tra: `https://nodejs.org/en/about/previous-releases` và Docker Official Image `node`.
+
+### Thay đổi
+
+- Tạo `.nvmrc` với giá trị `24.21.0` để NVM trên workstation và Jenkins agent có một nguồn phiên bản chung.
+- `client/package.json` và `server/package.json`:
+  - Thêm `packageManager: npm@11.19.0`.
+  - Thêm `engines.node: >=24.21.0 <25` và `engines.npm: >=11.19.0 <12`.
+  - Nâng `@types/node` từ major 22 lên major 24.
+- Tạo lại metadata tương ứng trong `client/package-lock.json` và `server/package-lock.json` bằng npm `11.19.0` chạy trong image Node mục tiêu.
+- Chuyển cả build stage và runtime stage của `server/Dockerfile` từ tag động `node:20-alpine` sang `node:24.21.0-alpine3.24`.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Official Node image | PASS | `node:24.21.0-alpine3.24` trả Node `v24.21.0`, npm `11.19.0` |
+| Workstation NVM install | PASS | Tải Node `v24.21.0`, checksum SHA-256 khớp; npm `11.19.0` |
+| Client lockfile update | PASS | Chạy bằng npm `11.19.0`; `@types/node` resolve `24.13.4` |
+| Server lockfile update | PASS có cảnh báo | Chạy bằng npm `11.19.0`; còn Babel peer warnings |
+| Client clean install | PASS có cảnh báo | 251 package; còn 2 lỗ hổng moderate và cảnh báo install scripts |
+| Client lint | PASS | Chạy trong Node `24.21.0` image |
+| Client build | PASS có cảnh báo | Vite build thành công; bundle chính khoảng 865.74 kB vượt cảnh báo 500 kB |
+| Server clean install | PASS có cảnh báo | 895 package; còn 6 lỗ hổng: 4 moderate, 1 high, 1 critical |
+| Server lint | PASS | Chạy trong Node `24.21.0` image |
+| Server build | PASS | Chạy trong Node `24.21.0` image |
+| Server tests | PASS | Node `24.21.0`, npm `11.19.0`; 16/16 suites và 152/152 tests; 24.152 giây |
+| Backend Docker build | PASS | Local image `abslider-server:node24-gate`, image ID `sha256:f290da071ec09ff0748ea1ba1791f1498281568eba4d93f34455bd5ae4d714d2`, khoảng 75.17 MB |
+| Backend runtime version | PASS | Container trả Node `v24.21.0`, npm `11.19.0` |
+| Temporary test volume cleanup | PASS | Đã xóa `abslider_node24_server_test_20260913` sau khi test |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Workstation client gate | PASS có cảnh báo | Clean install, lint và build PASS bằng Node `24.21.0`; còn bundle-size warning |
+| Workstation server gate | PASS có cảnh báo | Clean install, lint, build PASS; 16/16 suites và 152/152 tests PASS trong 24.657 giây |
+
+Hai lần kiểm tra ban đầu trong container thất bại do harness kiểm tra, không phải source:
+
+- Anonymous `/workspace/node_modules` volume do Docker tạo thuộc `root`, nên UID 1000 không thể chạy `npm ci`. Đã sửa bằng cách chuẩn bị quyền volume trước khi chạy dưới user không phải root.
+- Lần chạy Testcontainers đầu tiên dùng `su node`, làm mất supplementary Docker group và báo `Could not find a working container runtime strategy`. Đã chạy lại trực tiếp với UID/GID 1000 và Docker socket group 984; toàn bộ 152 tests PASS.
+
+### Vấn đề chưa xử lý trong bước này
+
+- Không chạy `npm audit fix --force`; các lỗ hổng và Babel peer warnings cần một lượt dependency audit riêng.
+- Backend Docker build context khoảng 256 MB vì chưa có `server/.dockerignore`.
+- Backend runtime vẫn chạy bằng `root` và vẫn chứa npm; sẽ xử lý trong bước Docker hardening.
+- Jenkins agent chưa được tạo nên mới có contract phiên bản, chưa có bằng chứng runtime Jenkins.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Repository Node/npm contract | `TEST_PASS` |
+| Client install/lint/build trên Node mục tiêu | `TEST_PASS` |
+| Server install/lint/build/test trên Node mục tiêu | `TEST_PASS` |
+| Backend Docker build | `TEST_PASS` — local only |
+| Workstation Node/npm | `TEST_PASS` — Node `24.21.0`, npm `11.19.0` |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Ổn định clean install và integration test backend
 
 ### Mục tiêu
