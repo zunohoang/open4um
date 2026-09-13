@@ -94,8 +94,8 @@ Lần chạy smoke đầu tiên phát hiện `minio/minio:latest` trả `pull ac
 | Docker build hardening | `TEST_PASS` |
 | Non-root runtime | `TEST_PASS` |
 | Runtime smoke với dependency thật | `TEST_PASS` — local only |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `c6658118649a070e616011d61782752a6e45f9c4` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `c6658118649a070e616011d61782752a6e45f9c4` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
