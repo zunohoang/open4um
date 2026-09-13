@@ -58,6 +58,33 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
     })
   })
 
+  describe('POST /api/v1/auth/send-register-otp', () => {
+    it('trả 422 khi email không hợp lệ', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/send-register-otp')
+        .send({ email: 'not-an-email' })
+
+      expect(res.status).toBe(422)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 200 và thông báo khi gửi OTP thành công', async () => {
+      mockedAuthService.sendRegisterOtp.mockResolvedValue({
+        message: 'Mã xác thực đã được gửi đến email của bạn'
+      })
+
+      const res = await request(app)
+        .post('/api/v1/auth/send-register-otp')
+        .send({ email: 'test@example.com' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(mockedAuthService.sendRegisterOtp).toHaveBeenCalledWith(
+        'test@example.com'
+      )
+    })
+  })
+
   describe('POST /api/v1/auth/register', () => {
     it('trả 422 khi dữ liệu đầu vào không hợp lệ', async () => {
       const res = await request(app).post('/api/v1/auth/register').send({

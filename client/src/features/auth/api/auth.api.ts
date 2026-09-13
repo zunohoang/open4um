@@ -34,6 +34,15 @@ export const authApi = {
       .data,
   profile: async () =>
     (await apiClient.get<{ data: User }>('/auth/me')).data.data,
+  updateProfile: async (data: { name?: string; avatar?: string | null }) =>
+    (await apiClient.patch<{ data: User }>('/auth/profile', data)).data.data,
+  changePassword: async (data: {
+    oldPassword: string
+    newPassword: string
+    confirmPassword: string
+  }) =>
+    (await apiClient.patch<{ message: string }>('/auth/change-password', data))
+      .data,
   refresh: async (refreshToken: string) =>
     (
       await apiClient.post<{ data: { accessToken: string } }>('/auth/refresh', {
