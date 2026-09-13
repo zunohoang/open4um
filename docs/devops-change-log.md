@@ -31,6 +31,84 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Readiness probe và graceful shutdown cho backend
+
+### Mục tiêu
+
+Tách liveness khỏi dependency readiness để Docker/Jenkins có thể nhận biết đúng trạng thái phục vụ của backend, đồng thời đóng HTTP server, cron job, MongoDB và Redis có kiểm soát khi container nhận tín hiệu dừng.
+
+### Thay đổi
+
+- Giữ nguyên `GET /api/v1/health` để tương thích với smoke check hiện có.
+- Thêm `GET /api/v1/health/live`:
+  - Chỉ chứng minh tiến trình Express còn sống.
+  - Không gọi MongoDB, Redis hoặc MinIO.
+- Thêm `GET /api/v1/health/ready`:
+  - Ping MongoDB và Redis, đồng thời kiểm tra bucket `media` trên MinIO.
+  - Trả `200` và `status: ready` khi cả ba dependency đều hoạt động.
+  - Trả `503` và `status: not_ready` khi có dependency lỗi hoặc server đang shutdown.
+  - Chỉ công bố trạng thái `up/down`, không trả chi tiết exception hoặc thông tin kết nối.
+- Thêm timeout cấu hình được cho từng dependency check qua `HEALTH_CHECK_TIMEOUT_MS`, mặc định 3 giây.
+- Backend giữ HTTP server handle và đăng ký một lần cho `SIGTERM`, `SIGINT`.
+- Khi shutdown:
+  - Đánh dấu server là not-ready và chống xử lý tín hiệu lặp.
+  - Dừng hai cron job.
+  - Chờ HTTP server đóng trong `SHUTDOWN_TIMEOUT_MS`, mặc định 10 giây; ép đóng connection nếu quá hạn.
+  - Ngắt MongoDB và Redis; đặt exit code `1` nếu có bước cleanup lỗi.
+- Hai hàm khởi tạo cron trả lại task handle để lifecycle có thể dừng lịch chạy.
+- Thêm Docker `HEALTHCHECK` gọi readiness bằng Node runtime sẵn có, không cài thêm `curl` hoặc `wget`.
+- Bổ sung unit test cho contract route, tổng hợp dependency readiness, trạng thái shutdown, tính idempotent và timeout cưỡng bức đóng HTTP connection.
+
+### File bị ảnh hưởng
+
+- `server/.env.example`
+- `server/Dockerfile`
+- `server/src/config/env.ts`
+- `server/src/cron/index.ts`
+- `server/src/cron/lockedUserCleanup.cron.ts`
+- `server/src/cron/trashCleanup.cron.ts`
+- `server/src/lib/gracefulShutdown.ts`
+- `server/src/routes/health.routes.ts`
+- `server/src/server.ts`
+- `server/src/services/health.service.ts`
+- `server/tests/unit/lib/gracefulShutdown.test.ts`
+- `server/tests/unit/routes/health.routes.test.ts`
+- `server/tests/unit/services/health.service.test.ts`
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Focused tests | PASS | 3/3 suite, 9/9 test |
+| Backend full tests | PASS | 19/19 suite, 161/161 test |
+| Backend lint | PASS | `npm --prefix server run lint` |
+| Backend build | PASS | `npm --prefix server run build` |
+| Docker build | PASS | Image local `abslider-server:readiness-gate`, ID `sha256:fed212b33f4f40f9d27237248c969b719fce2ba1b8666c2d9494af8e7d00e201` |
+| Docker health metadata | PASS | Interval 30 giây, timeout 5 giây, start period 30 giây, 3 retries |
+| Runtime identity | PASS | Container chạy bằng user `abslider` |
+| Runtime readiness | PASS | Docker báo `healthy`; MongoDB, Redis, MinIO đều `up` |
+| Endpoint compatibility | PASS | `/api/v1/health`, `/health/live`, `/health/ready` đều trả `200` trong smoke environment khỏe mạnh |
+| Dependency failure/recovery | PASS | Dừng Redis làm readiness trả `503` với riêng Redis `down`; khởi động lại Redis làm readiness phục hồi `200` |
+| SIGTERM shutdown | PASS | Log có bắt đầu/kết thúc graceful shutdown, container exit code `0` |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-readiness*` sau smoke test |
+
+### Vấn đề còn lại
+
+- Fallback admin `admin@abslider.com` / `admin123456` vẫn còn trong seed; sẽ harden ở bước kế tiếp trước khi dựng Jenkins.
+- Image chỉ được build và kiểm tra local, chưa push registry hoặc deploy.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Readiness và graceful shutdown | `TEST_PASS` — local only |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Hardening backend Docker image và sửa MinIO registry
 
 ### Mục tiêu

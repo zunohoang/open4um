@@ -5,6 +5,8 @@ const envSchema = z.object({
     .enum(['development', 'production', 'test'])
     .default('development'),
   PORT: z.coerce.number().default(4000),
+  HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   MONGO_URI: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(16),
