@@ -98,8 +98,8 @@ Parents:
 | Mức | Trạng thái |
 |---|---|
 | Conflict resolution | `TEST_PARTIAL` |
-| Merge commit | `COMMITTED_LOCAL` |
-| Remote branch `developer` | Chưa có bằng chứng push |
+| Merge commit | `PUSHED` — `67a08e8` |
+| Remote branch `developer` | `PUSHED` — xác minh tại `c46a1a9` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
@@ -115,4 +115,32 @@ Parents:
 
 ### Trạng thái
 
-`COMMITTED_LOCAL` — xem commit chứa mục này trong Git history; chưa có bằng chứng push tại thời điểm ghi nhận.
+`PUSHED` — commit `c46a1a9` đã được xác minh trên `refs/heads/developer`.
+
+---
+
+## 2026-09-13 — Xuất bản nhánh `developer`
+
+### Thay đổi
+
+- Push nhánh local `developer` lên `origin/developer`.
+- Đổi upstream của local branch từ `origin/develop` sang `origin/developer`.
+- Chưa xóa nhánh cũ `origin/develop`; việc xóa chỉ thực hiện sau khi retarget pull request, cập nhật tài liệu/cấu hình và có xác nhận của nhóm.
+
+### Bằng chứng
+
+```text
+local:    c46a1a9c98da6f28ba819d6148f2c1f745f10137
+upstream: c46a1a9c98da6f28ba819d6148f2c1f745f10137
+remote:   c46a1a9c98da6f28ba819d6148f2c1f745f10137 refs/heads/developer
+```
+
+`git status --short --branch`:
+
+```text
+## developer...origin/developer
+```
+
+### Trạng thái
+
+`PUSHED` — nhánh `developer` và hai commit `67a08e8`, `c46a1a9` đã có trên remote.
