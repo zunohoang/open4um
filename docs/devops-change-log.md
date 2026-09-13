@@ -31,6 +31,60 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-13 — Bootstrap Jenkins controller local trên Ubuntu
+
+### Mục tiêu
+
+Cài Jenkins LTS phục vụ học tập và xây CI cho hai nhánh `developer`/`main`, đồng thời giới hạn giao diện controller về loopback trước khi mở khóa hoặc cấu hình credential.
+
+### Thay đổi trên host
+
+- Host: Ubuntu 24.04.4 LTS, kernel `7.0.0-31-generic`, kiến trúc amd64.
+- Cài `fontconfig` và OpenJDK 21 từ Ubuntu repository:
+  - `openjdk-21-jre 21.0.12+8-1~24.04`.
+  - `openjdk-21-jre-headless 21.0.12+8-1~24.04`.
+- Thêm Jenkins Debian stable repository bằng signing key `jenkins.io-2026.key`.
+- Cài Jenkins LTS `2.568.3` bằng APT.
+- Jenkins chạy dưới system user/group riêng `jenkins:jenkins`, UID `125`, GID `127`.
+- Tạo systemd drop-in `/etc/systemd/system/jenkins.service.d/override.conf`:
+
+```ini
+[Service]
+Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
+```
+
+- Không sửa trực tiếp unit `/usr/lib/systemd/system/jenkins.service` do package quản lý.
+- Chưa thêm user `jenkins` vào group `docker`; quyền Docker sẽ được xử lý ở gate riêng vì có mức quyền tương đương root trên host.
+- Không chạy `apt autoremove` và không nâng đồng loạt 66 package ngoài phạm vi.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Java runtime | PASS | OpenJDK `21.0.12` |
+| Jenkins package | PASS | `jenkins 2.568.3 install ok installed` |
+| systemd enable | PASS | `UnitFileState=enabled` |
+| systemd runtime | PASS | `ActiveState=active`, `SubState=running` |
+| systemd override | PASS | `DropInPaths=/etc/systemd/system/jenkins.service.d/override.conf` |
+| Bind address | PASS | `[::ffff:127.0.0.1]:8080`; loopback only, không còn `*:8080` |
+| Docker privilege | NOT_CONFIGURED | Group `docker` hiện chỉ có user `duckcy`; user `jenkins` chưa được cấp quyền |
+| Jenkins setup wizard | NOT_CONFIGURED | Chưa mở khóa, chưa tạo admin, chưa cài plugin |
+| Pipeline/job | NOT_CONFIGURED | Chưa tạo Jenkinsfile hoặc Multibranch Pipeline |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Jenkins package/service | `TEST_PASS` — host local |
+| Network exposure | `TEST_PASS` — loopback only |
+| Setup wizard/plugins | `PLANNED` |
+| Docker agent capability | `PLANNED` |
+| Commit tài liệu | Chưa commit |
+| Push tài liệu | Chưa push |
+| Production | Chưa deploy |
+
+---
+
 ## 2026-09-13 — Nâng bcrypt 6 và loại security gate high/critical
 
 ### Mục tiêu
