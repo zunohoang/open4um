@@ -102,8 +102,8 @@ Tách liveness khỏi dependency readiness để Docker/Jenkins có thể nhận
 | Mức | Trạng thái |
 |---|---|
 | Readiness và graceful shutdown | `TEST_PASS` — local only |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `54f511907d48a27acdf8cceae33686d88bca5593` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `54f511907d48a27acdf8cceae33686d88bca5593` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
