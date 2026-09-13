@@ -153,7 +153,7 @@ Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller tr
 | Controller secret isolation | `TEST_PASS` — host local |
 | Jenkins agent foreground smoke | `TEST_PASS` — kết nối WebSocket thành công |
 | Persistent systemd service | `TEST_PASS` — host local |
-| Agent job execution | `PLANNED` — chưa chạy Pipeline smoke |
+| Agent job execution | `TEST_PASS` — Jenkins CI build `abslider-ci/developer #1` |
 | Repository documentation | `PUSHED` — `41bec707dbf1d342e50dadea0c0730a4e57fe66f` |
 | Production | Chưa deploy |
 
@@ -174,7 +174,7 @@ Phạm vi của bước này chỉ là CI:
 
 ### Thay đổi
 
-- Cấu hình Jenkins NodeJS Tool `nodejs-24`, auto-install chính xác Node.js `24.21.0`; việc tải/cài thực tế trên agent sẽ xảy ra ở lần chạy Pipeline đầu tiên.
+- Cấu hình Jenkins NodeJS Tool `nodejs-24`, auto-install chính xác Node.js `24.21.0`; Jenkins đã cài tool này trên agent ở lần chạy Pipeline đầu tiên.
 - Thêm `server/package.json` scripts:
   - `test:unit`: chạy riêng `tests/unit` tuần tự.
   - `test:unit:ci`: chạy unit test ở CI mode, thu coverage và xuất JUnit XML.
@@ -198,7 +198,31 @@ Phạm vi của bước này chỉ là CI:
 | Coverage collection | PASS | Statements `76.96%`, branches `57.08%`, functions `79.24%`, lines `78.34%` |
 | Backend lint | PASS | `npm run lint` |
 | Whitespace/error markers | PASS | `git diff --check` |
-| Jenkins runtime | NOT_RUN | `Jenkinsfile` chưa được commit/push nên chưa có Pipeline run trên agent |
+| Jenkins runtime trước push | NOT_RUN | Đây là trạng thái trước khi commit `1ee139c` được push và Jenkins chạy build đầu tiên |
+
+### Bằng chứng Jenkins runtime ngày 2026-09-14
+
+- Multibranch Pipeline: `abslider-ci` / display name `ABSlider CI`.
+- Jenkins lấy `Jenkinsfile` từ đúng commit `1ee139c232aad32850f13b38f28a2a0172fcff93` trên nhánh `developer`.
+- Build chạy trên `abslider-agent-01` tại `/var/lib/jenkins-agent/workspace/abslider-ci_developer`.
+- NodeJS Plugin tự giải nén Node.js `24.21.0` vào tool directory của agent.
+- Pipeline xác minh đúng Node `v24.21.0`, npm `11.19.0`, node `abslider-agent-01`, user `jenkins-agent` và controller master key không đọc được.
+- `npm ci --no-audit --no-fund` cài 866 package trong khoảng 13 giây.
+- Unit test hoàn tất trong 1.662 giây: 17/17 suites và 128/128 tests PASS.
+- Jenkins ghi nhận JUnit result, archive coverage, dọn workspace và kết thúc `Finished: SUCCESS`.
+
+| Kiểm tra runtime | Kết quả | Ghi chú |
+|---|---|---|
+| Multibranch indexing | PASS có cảnh báo | Tìm thấy `Jenkinsfile` trên `developer`; indexing mất khoảng 15 phút do GitHub API anonymous rate limiter |
+| Git checkout | PASS | Checkout đúng commit `1ee139c`; system Git `2.43.0`; chưa cấu hình named Git tool |
+| NodeJS auto-install | PASS | Node `24.21.0`, npm `11.19.0` trên agent |
+| Agent identity/isolation | PASS | `jenkins-agent`; không đọc được controller master key |
+| Backend clean install | PASS có cảnh báo | Peer/deprecation và npm install-script warnings vẫn hiện nhưng lệnh exit `0` |
+| Backend unit tests | PASS | 17/17 suites, 128/128 tests |
+| JUnit publish | PASS | Jenkins hiển thị 128 tests, không failure |
+| Coverage artifact | PASS | Coverage được archive trước khi workspace bị xóa |
+| GitHub Checks publish | NOT_CONFIGURED | `[Checks API] No suitable checks publisher found`; không làm build thất bại |
+| Pipeline result | PASS | `abslider-ci/developer #1` — `Finished: SUCCESS` |
 
 ### File bị ảnh hưởng
 
@@ -214,9 +238,10 @@ Phạm vi của bước này chỉ là CI:
 |---|---|
 | Backend unit-test command | `TEST_PASS` — local |
 | JUnit/coverage output | `TEST_PASS` — local |
-| Jenkinsfile | `IMPLEMENTED_LOCAL` — chưa xác minh bằng Jenkins runtime |
-| Commit/push | Chưa thực hiện |
-| CI runtime | Chưa chạy |
+| Jenkinsfile | `TEST_PASS` — Jenkins runtime trên agent |
+| Commit/push | `PUSHED` — `1ee139c232aad32850f13b38f28a2a0172fcff93` |
+| CI runtime | `TEST_PASS` — `abslider-ci/developer #1` |
+| Automatic GitHub trigger | `PLANNED` — chưa cấu hình credential/webhook |
 | CD/deployment | Ngoài phạm vi task |
 
 ---
