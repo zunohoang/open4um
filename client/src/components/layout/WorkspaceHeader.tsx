@@ -9,8 +9,6 @@ interface WorkspaceHeaderProps {
   children?: ReactNode
 }
 
-type TabType = 'profile' | 'settings' | 'feedback'
-
 const getInitial = (name?: string) => {
   if (!name) return 'U'
   const trimmed = name.trim()
@@ -31,8 +29,6 @@ export const WorkspaceHeader = ({
   const [open, setOpen] = useState(false)
   const [showBellToast, setShowBellToast] = useState(false)
   const [showHelpToast, setShowHelpToast] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabType>('profile')
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Đóng box khi click ra ngoài
@@ -49,11 +45,6 @@ export const WorkspaceHeader = ({
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [open])
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 2500)
-  }
 
   const initial = getInitial(user?.name)
 
@@ -246,224 +237,58 @@ export const WorkspaceHeader = ({
                 </div>
               </div>
 
-              {/* Thông báo thao tác (nếu có) */}
-              {toastMessage && (
-                <div className='my-2 border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-center text-xs font-semibold text-emerald-800'>
-                  ✅ {toastMessage}
+              <div className='my-3 space-y-2.5 text-xs text-stone-600'>
+                <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                  <span>Mã tài khoản:</span>
+                  <span className='font-mono font-bold text-emerald-950'>
+                    #{user?.id ? user.id.slice(-6) : '---'}
+                  </span>
                 </div>
-              )}
-
-              {isAdmin ? (
-                /* Thông tin tinh gọn cho Quản trị viên */
-                <div className='my-3 space-y-2.5 text-xs text-stone-600'>
-                  <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                    <span>Mã tài khoản:</span>
-                    <span className='font-mono font-bold text-emerald-950'>
-                      #{user?.id ? user.id.slice(-6) : '---'}
-                    </span>
-                  </div>
-                  <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                    <span>Quyền hạn:</span>
-                    <span className='font-semibold text-orange-800'>
-                      Quản trị viên
-                    </span>
-                  </div>
+                <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                  <span>Gói thành viên:</span>
+                  <span className='font-semibold text-stone-800'>
+                    {isAdmin ? 'Quản trị hệ thống' : 'Tiêu chuẩn (AI Studio)'}
+                  </span>
                 </div>
-              ) : (
-                <>
-                  {/* Các ngăn thẻ chuyển đổi tab (dạng gạch chân editorial) */}
-                  <div className='my-3 flex border-b border-stone-200 text-xs font-semibold'>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('profile')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'profile'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Hồ sơ
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('settings')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'settings'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Cài đặt
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('feedback')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'feedback'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Góp ý
-                    </button>
-                  </div>
-
-                  {/* Ngăn 1: Hồ sơ tài khoản */}
-                  {activeTab === 'profile' && (
-                    <div className='space-y-2.5 text-xs text-stone-600'>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Mã tài khoản:</span>
-                        <span className='font-mono font-bold text-emerald-950'>
-                          #{user?.id ? user.id.slice(-6) : '---'}
-                        </span>
-                      </div>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Gói thành viên:</span>
-                        <span className='font-semibold text-stone-800'>
-                          {isAdmin
-                            ? 'Quản trị hệ thống'
-                            : 'Tiêu chuẩn (AI Studio)'}
-                        </span>
-                      </div>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Số dư hiện tại:</span>
-                        <span className='font-bold text-orange-700 font-mono'>
-                          {user?.creditBalance ?? 0} credit
-                        </span>
-                      </div>
-                      <div className='border border-stone-200 bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-500'>
-                        💡 Số dư credit dùng để tự động tạo outline và sinh nội
-                        dung slide bài giảng thông minh.
-                      </div>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setOpen(false)
-                          navigate('/profile')
-                        }}
-                        className='mt-2 flex w-full items-center justify-center gap-1.5 border border-stone-300 bg-white py-1.5 font-sans text-xs font-bold text-orange-700 transition hover:border-orange-700 hover:bg-orange-50'
-                      >
-                        <span>Quản lý hồ sơ cá nhân</span>
-                        <span>→</span>
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setOpen(false)
-                          navigate('/change-password')
-                        }}
-                        className='mt-1.5 flex w-full items-center justify-center gap-1.5 border border-stone-200 bg-stone-50 py-1.5 font-sans text-xs font-medium text-stone-700 transition hover:border-stone-400 hover:bg-white'
-                      >
-                        <span>Đổi mật khẩu tài khoản</span>
-                      </button>
+                {!isAdmin && (
+                  <>
+                    <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                      <span>Số dư hiện tại:</span>
+                      <span className='font-bold text-orange-700 font-mono'>
+                        {user?.creditBalance ?? 0} credit
+                      </span>
                     </div>
-                  )}
-
-                  {/* Ngăn 2: Cài đặt (Blank inputs giữ nguyên) */}
-                  {activeTab === 'settings' && (
-                    <div className='space-y-3 text-xs'>
-                      <div>
-                        <label
-                          htmlFor='theme-select'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Giao diện hiển thị
-                        </label>
-                        <select
-                          id='theme-select'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                          defaultValue='warm'
-                        >
-                          <option value='warm'>Tông màu ấm (Mặc định)</option>
-                          <option value='light'>Sáng (Minimal Light)</option>
-                          <option value='dark'>Tối (Dark Mode)</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor='lang-select'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Ngôn ngữ hệ thống
-                        </label>
-                        <select
-                          id='lang-select'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                          defaultValue='vi'
-                        >
-                          <option value='vi'>Tiếng Việt (Vietnamese)</option>
-                          <option value='en'>Tiếng Anh (English)</option>
-                        </select>
-                      </div>
-
-                      <label className='flex items-center gap-2 text-stone-700'>
-                        <input
-                          type='checkbox'
-                          defaultChecked
-                          className='border-stone-300 text-orange-700 focus:ring-orange-600'
-                        />
-                        <span>Tự động lưu nội dung bài giảng</span>
-                      </label>
-
-                      <button
-                        type='button'
-                        onClick={() =>
-                          showToast('Đã lưu tùy chọn cài đặt thành công')
-                        }
-                        className='w-full bg-emerald-950 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-stone-900'
-                      >
-                        Lưu cài đặt
-                      </button>
+                    <div className='border border-stone-200 bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-500'>
+                      💡 Số dư credit dùng để tự động tạo outline và sinh nội
+                      dung slide bài giảng thông minh.
                     </div>
-                  )}
+                  </>
+                )}
 
-                  {/* Ngăn 3: Góp ý & Báo lỗi (Blank inputs giữ nguyên) */}
-                  {activeTab === 'feedback' && (
-                    <div className='space-y-2.5 text-xs'>
-                      <div>
-                        <label
-                          htmlFor='feedback-topic'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Chủ đề góp ý
-                        </label>
-                        <input
-                          id='feedback-topic'
-                          type='text'
-                          placeholder='Ví dụ: Thêm mẫu bố cục slide mới...'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                        />
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor='feedback-content'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Nội dung góp ý
-                        </label>
-                        <textarea
-                          id='feedback-content'
-                          rows={2}
-                          placeholder='Chia sẻ phản hồi hoặc đề xuất cải tiến...'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700 resize-none'
-                        />
-                      </div>
-
-                      <button
-                        type='button'
-                        onClick={() =>
-                          showToast('Cảm ơn bạn đã gửi ý kiến đóng góp!')
-                        }
-                        className='w-full bg-orange-700 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800'
-                      >
-                        Gửi phản hồi
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
+                <div className='pt-1 space-y-1.5'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setOpen(false)
+                      navigate('/profile')
+                    }}
+                    className='flex w-full items-center justify-center gap-1.5 border border-stone-300 bg-white py-2 font-sans text-xs font-bold text-orange-700 transition hover:border-orange-700 hover:bg-orange-50'
+                  >
+                    <span>Quản lý hồ sơ cá nhân</span>
+                    <span>→</span>
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setOpen(false)
+                      navigate('/change-password')
+                    }}
+                    className='flex w-full items-center justify-center gap-1.5 border border-stone-200 bg-stone-50 py-2 font-sans text-xs font-medium text-stone-700 transition hover:border-stone-400 hover:bg-white'
+                  >
+                    <span>Đổi mật khẩu tài khoản</span>
+                  </button>
+                </div>
+              </div>
 
               {/* Footer: Lối vào Profile, Lối vào admin & Nút Đăng xuất */}
               <div className='mt-3.5 space-y-1 border-t border-stone-200 pt-2.5'>

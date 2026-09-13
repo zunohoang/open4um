@@ -50,18 +50,6 @@ export const ProfilePage = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cooldown, setCooldown] = useState(0)
 
-  // State cài đặt giao diện
-  const [theme, setTheme] = useState(
-    localStorage.getItem('app_theme') || 'warm'
-  )
-  const [language, setLanguage] = useState(
-    localStorage.getItem('app_lang') || 'vi'
-  )
-  const [autoSave, setAutoSave] = useState(
-    localStorage.getItem('app_autosave') !== 'false'
-  )
-  const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null)
-
   // STT 2: Tải dữ liệu hồ sơ mới nhất từ CSDL khi mở trang
   useEffect(() => {
     let isMounted = true
@@ -205,16 +193,6 @@ export const ProfilePage = () => {
     } finally {
       setIsSaving(false)
     }
-  }
-
-  // Lưu tùy chọn hiển thị
-  const handleSaveSettings = (e: FormEvent) => {
-    e.preventDefault()
-    localStorage.setItem('app_theme', theme)
-    localStorage.setItem('app_lang', language)
-    localStorage.setItem('app_autosave', String(autoSave))
-    setSettingsSuccess('Đã lưu tùy chọn giao diện & hệ thống thành công!')
-    setTimeout(() => setSettingsSuccess(null), 3000)
   }
 
   const initial = getInitial(user?.name)
@@ -559,91 +537,6 @@ export const ProfilePage = () => {
             </section>
           </div>
         </div>
-
-        {/* Khối Cài đặt giao diện & Hệ thống */}
-        <section className='border border-stone-300 bg-stone-50 p-6 sm:p-7'>
-          <div className='border-b border-stone-200 pb-3'>
-            <span className='text-[10px] font-bold tracking-wider uppercase text-orange-700'>
-              HỆ THỐNG
-            </span>
-            <h3 className='mt-1 text-lg font-bold text-emerald-950'>
-              Tùy chọn hiển thị & Trải nghiệm
-            </h3>
-            <p className='mt-0.5 text-xs text-stone-500'>
-              Cấu hình giao diện và phương thức làm việc phù hợp với bạn.
-            </p>
-          </div>
-
-          {settingsSuccess && (
-            <div className='mt-4 border border-emerald-300 bg-emerald-50 p-3 text-xs font-bold text-emerald-800'>
-              ✅ {settingsSuccess}
-            </div>
-          )}
-
-          <form onSubmit={handleSaveSettings} className='mt-5 space-y-4'>
-            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-              <div>
-                <label
-                  htmlFor='pref-theme'
-                  className='block text-xs font-bold text-stone-700 uppercase'
-                >
-                  Giao diện hiển thị
-                </label>
-                <select
-                  id='pref-theme'
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value)}
-                  className='mt-1.5 w-full border border-stone-300 bg-white p-2.5 text-xs outline-orange-700'
-                >
-                  <option value='warm'>
-                    Tông màu ấm (Editorial Warm - Mặc định)
-                  </option>
-                  <option value='light'>Sáng tối giản (Minimal Light)</option>
-                  <option value='dark'>Tối (Dark Mode Studio)</option>
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor='pref-lang'
-                  className='block text-xs font-bold text-stone-700 uppercase'
-                >
-                  Ngôn ngữ giao diện
-                </label>
-                <select
-                  id='pref-lang'
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className='mt-1.5 w-full border border-stone-300 bg-white p-2.5 text-xs outline-orange-700'
-                >
-                  <option value='vi'>Tiếng Việt (Vietnamese)</option>
-                  <option value='en'>Tiếng Anh (English)</option>
-                </select>
-              </div>
-            </div>
-
-            <label className='flex items-center gap-2.5 text-xs text-stone-700 cursor-pointer select-none pt-1'>
-              <input
-                type='checkbox'
-                checked={autoSave}
-                onChange={(e) => setAutoSave(e.target.checked)}
-                className='h-4 w-4 border-stone-300 text-orange-700 focus:ring-orange-600'
-              />
-              <span className='font-semibold'>
-                Tự động lưu nội dung bài giảng khi đang chỉnh sửa
-              </span>
-            </label>
-
-            <div className='pt-2'>
-              <button
-                type='submit'
-                className='border border-stone-300 bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-stone-800 transition hover:border-emerald-950 hover:bg-stone-100'
-              >
-                Lưu tùy chọn
-              </button>
-            </div>
-          </form>
-        </section>
       </div>
     </div>
   )
