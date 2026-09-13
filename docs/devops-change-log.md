@@ -89,7 +89,45 @@ Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
 | Setup wizard/plugins | `TEST_PASS` — host local |
 | Docker agent capability | `PLANNED` |
 | Initial bootstrap documentation | `PUSHED` — `4c02db4a70d7f3c8ea4c96da79914ecfebe43708` |
-| Wizard documentation update | Chưa commit/push |
+| Wizard documentation update | `PUSHED` — `a1f39223cd7545ca531ac6ec5f9121e525b08c4d` |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Tạo danh tính hệ điều hành riêng cho Jenkins build agent
+
+### Mục tiêu
+
+Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller trên cùng host. Agent dùng tài khoản hệ điều hành riêng, không có login shell, chưa được cấp Docker và không được đọc secret của controller.
+
+### Thay đổi trên host
+
+- Tạo system group `jenkins-agent`.
+- Tạo system user `jenkins-agent`, UID `997`, primary GID `983`.
+- Đặt home/workspace tại `/var/lib/jenkins-agent` với owner `jenkins-agent:jenkins-agent` và mode `0750`.
+- Đặt shell `/usr/sbin/nologin` để tài khoản không dùng cho đăng nhập tương tác.
+- Chưa thêm `jenkins-agent` vào group `docker`; quyền này chỉ cấp sau khi node kết nối và gate cách ly đạt.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| System identity | PASS | `jenkins-agent`, UID `997`, primary group `jenkins-agent` GID `983` |
+| Home permission | PASS | `drwxr-x--- jenkins-agent:jenkins-agent /var/lib/jenkins-agent` |
+| Login shell | PASS | `/usr/sbin/nologin` |
+| Java runtime của agent | PASS | OpenJDK `21.0.12` |
+| Controller secret isolation | PASS | Agent không đọc được `/var/lib/jenkins/secrets/master.key` |
+| Docker privilege | NOT_CONFIGURED | Agent chưa thuộc group `docker` |
+| Jenkins node connection | NOT_CONFIGURED | Chưa tạo permanent agent trên Jenkins Dashboard |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Host account | `TEST_PASS` — host local |
+| Controller secret isolation | `TEST_PASS` — host local |
+| Jenkins agent node | `PLANNED` |
+| Repository documentation | `IMPLEMENTED_LOCAL` — chưa commit/push |
 | Production | Chưa deploy |
 
 ---
