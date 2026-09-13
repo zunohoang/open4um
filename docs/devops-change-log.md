@@ -107,6 +107,21 @@ Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller tr
 - Đặt home/workspace tại `/var/lib/jenkins-agent` với owner `jenkins-agent:jenkins-agent` và mode `0750`.
 - Đặt shell `/usr/sbin/nologin` để tài khoản không dùng cho đăng nhập tương tác.
 - Chưa thêm `jenkins-agent` vào group `docker`; quyền này chỉ cấp sau khi node kết nối và gate cách ly đạt.
+- Đăng ký permanent node `abslider-agent-01` trên Jenkins:
+  - Remote root `/var/lib/jenkins-agent`.
+  - Một executor.
+  - Labels `linux node24`.
+  - Usage chỉ nhận job có label khớp.
+  - Launch method inbound: agent chủ động kết nối tới controller.
+- Tải Jenkins Remoting `agent.jar` từ chính controller và chạy bằng user `jenkins-agent`.
+- Lưu inbound-agent secret ngoài repository tại `/etc/jenkins-agent/secret`, owner `root:jenkins-agent`, mode `0640`; agent nhận secret qua đối số `-secret @file` thay vì để giá trị xuất hiện trong process arguments.
+- Tạo `/var/lib/jenkins-agent/remoting`, owner `jenkins-agent:jenkins-agent`, mode `0700` làm Remoting work directory.
+- Cài bản `agent.jar` dùng cho service tại `/usr/local/lib/jenkins-agent/agent.jar`, owner `root:root`, mode `0644`, để build user không thể tự thay thế executable của service.
+- Tạo và enable `/etc/systemd/system/jenkins-agent.service`:
+  - Chạy trực tiếp Java process bằng `jenkins-agent:jenkins-agent`, không qua shell wrapper.
+  - Tự khởi động cùng host và tự restart khi process lỗi.
+  - Chỉ cho phép ghi vào `/var/lib/jenkins-agent`.
+  - Bật `NoNewPrivileges`, private `/tmp` và các bảo vệ kernel/control-group của systemd.
 
 ### Bằng chứng kiểm tra
 
@@ -118,7 +133,17 @@ Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller tr
 | Java runtime của agent | PASS | OpenJDK `21.0.12` |
 | Controller secret isolation | PASS | Agent không đọc được `/var/lib/jenkins/secrets/master.key` |
 | Docker privilege | NOT_CONFIGURED | Agent chưa thuộc group `docker` |
-| Jenkins node connection | NOT_CONFIGURED | Chưa tạo permanent agent trên Jenkins Dashboard |
+| Jenkins node registration | PASS | Node `abslider-agent-01` xuất hiện trên Dashboard |
+| Secret provisioning lần đầu | FAIL | File secret có `size=1`, chỉ chứa newline nên chưa có credential thực |
+| Remoting work directory lần đầu | FAIL | `-failIfWorkDirIsMissing` dừng tiến trình vì thiếu `/var/lib/jenkins-agent/remoting` |
+| Secret provisioning sau sửa | PASS | Nhập đủ 64 ký tự; file có `size=65`, quyền `-rw-r----- root:jenkins-agent` |
+| Remoting work directory sau sửa | PASS | Agent đọc được secret và ghi được vào thư mục `remoting` |
+| Jenkins node connection | PASS | Remoting `3355.3357.v931d3c992987`; `WebSocket connection open`; `Connected` |
+| systemd unit validation | PASS | `systemd-analyze verify` không báo lỗi |
+| Persistent service | PASS | `enabled`, `active/running`, PID `102398`, `NRestarts=0` tại thời điểm kiểm tra |
+| Service identity/hardening | PASS | `User=jenkins-agent`, `Group=jenkins-agent`, `NoNewPrivileges=yes` |
+| Root-owned Remoting binary | PASS | `-rw-r--r-- root:root`, kích thước `1406408` byte |
+| Persistent controller connection | PASS | Có TCP session `ESTABLISHED` giữa agent và controller qua loopback port `8080` |
 
 ### Trạng thái
 
@@ -126,7 +151,9 @@ Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller tr
 |---|---|
 | Host account | `TEST_PASS` — host local |
 | Controller secret isolation | `TEST_PASS` — host local |
-| Jenkins agent node | `PLANNED` |
+| Jenkins agent foreground smoke | `TEST_PASS` — kết nối WebSocket thành công |
+| Persistent systemd service | `TEST_PASS` — host local |
+| Agent job execution | `PLANNED` — chưa chạy Pipeline smoke |
 | Repository documentation | `IMPLEMENTED_LOCAL` — chưa commit/push |
 | Production | Chưa deploy |
 
