@@ -79,8 +79,8 @@ Validation được thực thi khi module cấu hình được nạp. Vì `serve
 | Mức | Trạng thái |
 |---|---|
 | Production admin hardening | `TEST_PASS` — local only |
-| Commit | Chưa commit |
-| Push | Chưa push |
+| Commit | `COMMITTED_LOCAL` — `cf9c5af901a66503bf1e01700bc933b1a6b6bb5d` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `cf9c5af901a66503bf1e01700bc933b1a6b6bb5d` |
 | CI/CD | Chưa triển khai |
 | Production | Chưa deploy |
 
