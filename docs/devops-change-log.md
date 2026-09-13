@@ -210,6 +210,9 @@ Phạm vi của bước này chỉ là CI:
 - `npm ci --no-audit --no-fund` cài 866 package trong khoảng 13 giây.
 - Unit test hoàn tất trong 1.662 giây: 17/17 suites và 128/128 tests PASS.
 - Jenkins ghi nhận JUnit result, archive coverage, dọn workspace và kết thúc `Finished: SUCCESS`.
+- Sau khi Built-In Node được đặt về `0` executor, chạy lại Pipeline `abslider-ci/developer #2` trên commit `5c034693fe875d471efab0de82e99cadb8c5776c`.
+- Build #2 tiếp tục được Jenkins giao cho `abslider-agent-01`, chạy bằng `jenkins-agent` và không đọc được controller master key; đây là bằng chứng workload CI vẫn hoạt động khi controller không nhận build.
+- Build #2 tái sử dụng NodeJS Tool đã cache, hoàn tất `npm ci` trong khoảng 5 giây và unit test trong 1.156 giây; tổng thời gian từ lúc bắt đầu đến `Finished: SUCCESS` khoảng 11 giây.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
@@ -222,7 +225,10 @@ Phạm vi của bước này chỉ là CI:
 | JUnit publish | PASS | Jenkins hiển thị 128 tests, không failure |
 | Coverage artifact | PASS | Coverage được archive trước khi workspace bị xóa |
 | GitHub Checks publish | NOT_CONFIGURED | `[Checks API] No suitable checks publisher found`; không làm build thất bại |
-| Pipeline result | PASS | `abslider-ci/developer #1` — `Finished: SUCCESS` |
+| Controller workload isolation | PASS | Sau khi Built-In Node được đặt `0` executor, build #2 vẫn được giao cho `abslider-agent-01` |
+| Repeat CI build | PASS | `abslider-ci/developer #2`, commit `5c034693fe875d471efab0de82e99cadb8c5776c` |
+| NodeJS Tool cache reuse | PASS | Build #2 dùng đúng Node `24.21.0`/npm `11.19.0` mà không phải giải nén lại tool |
+| Pipeline result | PASS | Cả `abslider-ci/developer #1` và `#2` đều kết thúc `Finished: SUCCESS` |
 
 ### File bị ảnh hưởng
 
@@ -240,7 +246,7 @@ Phạm vi của bước này chỉ là CI:
 | JUnit/coverage output | `TEST_PASS` — local |
 | Jenkinsfile | `TEST_PASS` — Jenkins runtime trên agent |
 | Commit/push | `PUSHED` — `1ee139c232aad32850f13b38f28a2a0172fcff93` |
-| CI runtime | `TEST_PASS` — `abslider-ci/developer #1` |
+| CI runtime | `TEST_PASS` — `abslider-ci/developer #1` và `#2` |
 | Automatic GitHub trigger | `PLANNED` — chưa cấu hình credential/webhook |
 | CD/deployment | Ngoài phạm vi task |
 
