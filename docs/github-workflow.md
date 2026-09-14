@@ -5,7 +5,7 @@
 Áp dụng cho repository **ABSlider** trên GitHub (quản lý mã nguồn tập trung cho cả `client` và `server`), team 5 người: PM (Hoàng), Tester (Duy), 2 Developer (Nam, Thạch), DevOps (Đức). Mô hình nhánh: **Git Flow**. Commit theo **Conventional Commits**.
 
 > [!NOTE]
-> Toàn bộ dự án `ABSlider` là **1 repository Git duy nhất** trên GitHub. Tuy nhiên, hai phần `client` và `server` được **triển khai (host) tại 2 nơi độc lập** (`client` trên nền tảng web tĩnh như Vercel, `server` trên VPS qua Docker).
+> Toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**. Jenkins chịu trách nhiệm CI; GitHub Actions chỉ build/publish image sau khi Jenkins PASS đúng commit. Client và server đều chạy bằng Docker Compose trên VPS, phía sau Nginx.
 
 
 ---
@@ -93,148 +93,73 @@ chore(deps): nâng cấp TanStack Query lên v5.60
 
 ---
 
-## 4. GitHub Actions — CI
+## 4. Jenkins — CI bắt buộc
 
-Vì toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**, các workflow CI được đặt tập trung tại `.github/workflows/` ở thư mục gốc của repo. Mỗi phần `client` và `server` có workflow riêng biệt, áp dụng **path filtering** (`paths`) để chỉ kích hoạt khi có thay đổi trong thư mục tương ứng khi mở PR nhắm vào `develop` hoặc `main`.
+Jenkins Multibranch Pipeline đọc `Jenkinsfile` tại root repository và là nguồn CI duy nhất. Pipeline áp dụng cho `develop`, `main` và pull request hướng vào hai nhánh này.
 
-```yaml
-# .github/workflows/ci-client.yml
-name: CI - Client
-on:
-  pull_request:
-    branches: [develop, main]
-    paths:
-      - 'client/**'
-      - '.github/workflows/ci-client.yml'
+Luồng CI hiện tại:
 
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: 'client/package.json'
-          cache: 'npm'
-          cache-dependency-path: 'client/package-lock.json'
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm run test
-      - run: npm run build
-```
+1. GitHub Branch Source index branch/PR bằng GitHub App `github-app-abslider-ci`.
+2. Jenkins checkout revision cần kiểm tra trên agent `abslider-agent-01`.
+3. Pipeline xác minh branch/PR context, identity agent và Node.js/npm contract.
+4. Client/server chạy clean install song song.
+5. Client lint/build và server lint/build chạy song song.
+6. Backend unit test xuất JUnit và coverage artifact.
+7. Jenkins publish commit status có context bắt đầu bằng `continuous-integration/jenkins/` về đúng SHA trên GitHub.
 
-```yaml
-# .github/workflows/ci-server.yml
-name: CI - Server
-on:
-  pull_request:
-    branches: [develop, main]
-    paths:
-      - 'server/**'
-      - '.github/workflows/ci-server.yml'
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: 'server/package.json'
-          cache: 'npm'
-          cache-dependency-path: 'server/package-lock.json'
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm run test   # Jest + Supertest, MongoDB Memory Server tự khởi tạo trong test
-      - run: npm run build
-```
+Controller chỉ listen trên loopback nên chưa nhận webhook từ Internet. Multibranch Pipeline dùng `Periodically if not otherwise run` mỗi 15 phút làm trigger dự phòng; có thể scan thủ công khi cần phản hồi ngay.
 
 ### Branch protection checklist (`main` và `develop`)
 
-- [ ] Require status check pass trước khi merge (`CI - Client` hoặc `CI - Server` tùy PR sửa phần nào).
+- [ ] Require Jenkins status check pass trước khi merge (`continuous-integration/jenkins/pr-merge` cho PR).
 - [ ] Require tối thiểu 1 approve review.
 - [ ] Require nhánh up-to-date với base trước khi merge.
 - [ ] Không cho phép force-push / xóa nhánh `main`, `develop`.
 
 ---
 
-## 5. Triển khai (CD) & Nơi Host tách biệt
+## 5. GitHub Actions — image publishing và CD
 
-Dù chung 1 repository Git trên GitHub, **nơi host của `client` và `server` tách biệt hoàn toàn**:
+Trách nhiệm được tách rõ để Jenkins không cần quyền Docker, registry hoặc production secret:
 
-### 5.1. Backend (`server`) trên VPS
+| Thành phần | Trách nhiệm |
+|---|---|
+| Jenkins | CI client/server và publish commit status |
+| GitHub Actions | Chờ Jenkins PASS đúng SHA, build và publish image GHCR |
+| VPS | Chạy hai Compose project tách biệt: Development và Production |
 
-`server` deploy lên **VPS** qua Docker + SSH, tự động kích hoạt khi có push vào `main` (production) mà có thay đổi tại thư mục `server/`. Workflow đặt tại `.github/workflows/cd-server.yml`:
+Workflow `.github/workflows/publish-images.yml` chạy khi push vào `develop` hoặc `main` và có thể chạy thủ công trên đúng hai nhánh này. Workflow chỉ tiếp tục khi status Jenkins mới nhất của chính `github.sha` là `success`; trạng thái `failure`/`error` làm workflow dừng, còn `missing`/`pending` được chờ tối đa 25 phút.
 
-```yaml
-# .github/workflows/cd-server.yml
-name: CD - Server
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'server/**'
-      - '.github/workflows/cd-server.yml'
+### 5.1. Artifact contract
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build & push Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }} .
-          docker tag ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }} ${{ secrets.DOCKER_IMAGE }}:latest
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-          docker push ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}
-          docker push ${{ secrets.DOCKER_IMAGE }}:latest
-      - name: Deploy qua SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            docker pull ${{ secrets.DOCKER_IMAGE }}:latest
-            docker compose -f /opt/abslider/docker-compose.yml up -d --no-deps backend
+- Client: `ghcr.io/zunohoang/open4um-client:<commit-sha>`.
+- Server: `ghcr.io/zunohoang/open4um-server:<commit-sha>`.
+- Tag `develop`/`main` chỉ là con trỏ thuận tiện. Compose/deploy bắt buộc dùng reference theo digest `image@sha256:...` được registry trả về.
+- Client của `develop` compile API URL `https://dev-slides-api.sbltcup.dev/api/v1`; client của `main` compile `https://slides-api.sbltcup.dev/api/v1`.
+- Workflow dùng `GITHUB_TOKEN` với quyền tối thiểu `contents: read`, `statuses: read`, `packages: write`; không cần PAT hoặc SSH key trong giai đoạn publish image.
+- Workflow chỉ chạy trên push/dispatch của nhánh tin cậy, không publish package từ pull request.
+
+GitHub Actions hiện **chưa deploy VPS**. Sau lần publish đầu tiên phải xác minh package liên kết đúng repository, visibility phù hợp và có thể pull manifest theo digest trước khi cấp deploy credential.
+
+### 5.2. Luồng CD mục tiêu
+
+```text
+PR/push -> Jenkins CI -> GitHub commit status
+
+develop + Jenkins PASS
+  -> GitHub Actions build/push image theo SHA
+  -> deploy Development
+  -> readiness/smoke check
+
+main + Jenkins PASS
+  -> build/push Production image
+  -> manual approval
+  -> deploy Production
+  -> readiness/smoke check
+  -> rollback digest trước nếu lỗi
 ```
 
-**GitHub Repo Secrets cần cấu hình** (`Settings → Secrets and variables → Actions` trên repo ABSlider):
-
-| Secret | Mô tả |
-|---|---|
-| `VPS_HOST` | IP/domain của VPS |
-| `VPS_USER` | User SSH deploy (không dùng root) |
-| `VPS_SSH_KEY` | Private key SSH (public key đã add vào `~/.ssh/authorized_keys` trên VPS) |
-| `DOCKER_IMAGE` | Tên image, VD `ghcr.io/absliderteam/server` |
-| `DOCKER_USERNAME` / `DOCKER_PASSWORD` | Đăng nhập registry chứa image |
-
-Trên VPS, MongoDB/Redis/MinIO chạy cùng qua `docker-compose.yml`; biến môi trường thật (`.env`) đặt sẵn trên VPS tại `/opt/abslider/.env`, **không** đi qua GitHub Actions.
-
-### 5.2. Frontend (`client`) trên Nền tảng Web tĩnh (Vercel)
-
-Hạ tầng deploy Frontend tách riêng hoàn toàn với Backend:
-- Đặt trên nền tảng **Vercel** (kết nối trực tiếp với GitHub repo `ABSlider`).
-- **Cấu hình Project trên Vercel**:
-  - **Root Directory**: Chọn `client`.
-  - **Framework Preset**: Vite.
-  - **Build Command**: `npm run build`.
-  - **Output Directory**: `dist`.
-  - **Environment Variables**: Cấu hình `VITE_API_BASE_URL` trỏ tới domain Backend trên VPS (VD: `https://api.abslider.com/api/v1`).
-- **Cơ chế CI/CD**: Vercel tự động nhận diện commit/PR từ GitHub repo:
-  - Khi mở PR hoặc push lên `develop`: Vercel tạo Preview Deployment để kiểm thử.
-  - Khi merge vào `main`: Tự động deploy bản Production chính thức. Không cần cấu hình SSH hay Docker cho Frontend.
+Phần SSH/deploy chỉ được thêm sau khi deploy wrapper, secret file riêng cho từng môi trường, GitHub Environment và rollback manifest đã sẵn sàng. Runtime secret vẫn đặt ngoài repository tại VPS; không truyền toàn bộ `.env` qua workflow.
 
 
 ---

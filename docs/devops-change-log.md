@@ -31,6 +31,55 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-14 — Chốt Jenkins CI và GitHub Actions publish image GHCR
+
+### Mục tiêu và quyết định
+
+Giữ Jenkins làm quality gate duy nhất, còn GitHub Actions chỉ nhận nhiệm vụ build/publish artifact sau khi Jenkins PASS đúng commit SHA. Lượt này chưa cấp SSH credential, chưa thay đổi VPS và chưa deploy Development/Production.
+
+Luồng đã chốt:
+
+```text
+PR/push -> Jenkins CI -> GitHub commit status
+
+develop + Jenkins PASS -> build/push image theo SHA -> Development (giai đoạn sau)
+main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai đoạn sau)
+```
+
+### Thay đổi repository
+
+- Thêm `.github/workflows/publish-images.yml`, chỉ trigger trên push vào `develop`/`main` hoặc dispatch thủ công trên đúng hai nhánh.
+- Workflow gọi GitHub Commit Status API và chỉ chấp nhận context bắt đầu bằng `continuous-integration/jenkins/` của đúng `github.sha`:
+  - `success`: tiếp tục build/publish.
+  - `failure` hoặc `error`: dừng ngay.
+  - `missing` hoặc `pending`: poll mỗi 15 giây, tối đa 25 phút.
+- Checkout action được khóa theo commit `d23441a48e516b6c34aea4fa41551a30e30af803` (`actions/checkout` v6).
+- Build client/server cho `linux/amd64`, gắn OCI source/revision/ref labels và tag chính xác bằng commit SHA.
+- Client `develop` compile với API Development; client `main` compile với API Production.
+- Publish hai package `ghcr.io/zunohoang/open4um-client` và `ghcr.io/zunohoang/open4um-server` bằng `GITHUB_TOKEN`. Quyền workflow giới hạn ở `contents: read`, `statuses: read`, `packages: write`.
+- Sau push, workflow kiểm tra digest registry có dạng `sha256:<64 hex>`, ghi reference theo digest vào job summary và mới cập nhật tag tiện lợi `develop`/`main`. Deploy sau này bắt buộc dùng digest, không dùng tag động.
+- Không chạy workflow từ `pull_request`, không thêm PAT, registry password hoặc SSH key.
+- Cập nhật `docs/github-workflow.md`, loại mô tả cũ về GitHub Actions làm CI, deploy server bằng tag `latest` và host client trên Vercel.
+
+### Gate và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| YAML và shell syntax | `TEST_PASS` | `js-yaml` parse PASS; toàn bộ `run` block qua `bash -n` |
+| GitHub Actions validator | `TEST_PASS` | `actionlint v1.7.12` chính chủ, archive checksum PASS và workflow không có diagnostic |
+| Workflow formatting | `TEST_PASS` | Prettier không báo lỗi cho `publish-images.yml` |
+| Jenkins exact-SHA filter | `TEST_PASS` — static/API | Mock `success`/`missing` PASS; Status API của `6bc11aa` trả `continuous-integration/jenkins/pr-merge=success` |
+| Whitespace/error markers | `TEST_PASS` | `git diff --check` không trả lỗi |
+| Repository commit/push | `IMPLEMENTED_LOCAL` | Ba file thay đổi chưa commit/push |
+| GitHub Actions runtime | `NOT_STARTED` | Chỉ chạy sau khi workflow được commit/push; chưa được ghi nhận là publish thành công |
+| GHCR client/server package | `NOT_STARTED` | Chỉ tạo sau khi commit được push và Jenkins PASS |
+| Package visibility/anonymous pull | `NOT_STARTED` | Phải xác minh sau lần publish đầu tiên |
+| Development deploy | `NOT_STARTED` | Chưa có deploy wrapper/GitHub Environment/SSH credential |
+| Production deploy/approval/rollback | `NOT_STARTED` | Chỉ làm sau Development live gate |
+| VPS/DNS/Nginx/TLS | `UNCHANGED` | Ngoài phạm vi lượt này |
+
+---
+
 ## 2026-09-14 — Tạo runtime contract tách biệt cho ABSlider Production/Development
 
 ### Mục tiêu
