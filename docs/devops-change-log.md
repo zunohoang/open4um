@@ -74,7 +74,7 @@ Chuyển nguyên trạng Jenkins controller cùng build agent từ workstation l
 
 - Trước reboot, disable `pm2-deploy.service`, `postgresql.service`, cluster `postgresql@16-main` và hai backup timers; đổi `/etc/postgresql/16/main/start.conf` từ `auto` sang `manual` sau khi tạo bản backup có timestamp.
 - Sau reboot, các unit Life-OS trên vẫn `disabled/inactive`, PostgreSQL cluster down, hai container staging vẫn exited và không có listener `3001`, `3002`, `5432`.
-- Chưa xóa archive migration trên VPS, fresh-controller backup, archive local hoặc `JENKINS_HOME` local. Các bản sao chứa Jenkins secrets và chỉ được cleanup sau khi duyệt đúng path; chúng không phải backup dài hạn đã được phê duyệt.
+- Sau khi post-reboot workload và timer gate PASS, xóa theo phê duyệt đúng ba target tạm: archive migration trên VPS, fresh-controller backup trên VPS và archive migration local. Kiểm tra độc lập xác nhận cả ba path không còn; active `/var/lib/jenkins` trên VPS vẫn healthy và `/var/lib/jenkins` local vẫn được giữ làm rollback ngắn hạn. Các target được xóa trực tiếp, không chuyển vào Trash.
 - Jenkins System Admin email vẫn là placeholder `nobody@nowhere`; cần đặt địa chỉ vận hành thật trước khi bật notification email.
 
 ### Gate và trạng thái
@@ -91,7 +91,7 @@ Chuyển nguyên trạng Jenkins controller cùng build agent từ workstation l
 | Local Jenkins retirement | `TEST_PASS` | Controller/agent local `disabled/inactive`, port 8080 đóng |
 | Life-OS persistent pause | `TEST_PASS` | Vẫn disabled/inactive sau reboot; dữ liệu chưa bị xóa |
 | Access control | `RISK_ACCEPTED` | Chỉ `duckcy` có Administer nhưng nhóm dùng chung tài khoản này |
-| Migration artifact cleanup | `NOT_STARTED` | Ba bản sao nhạy cảm còn giữ để rollback; cần duyệt path trước khi xóa |
+| Migration artifact cleanup | `TEST_PASS` | Ba target tạm đã xóa và xác minh absent; giữ local `JENKINS_HOME` làm rollback |
 | Jenkins admin email | `NOT_CONFIGURED` | Vẫn là `nobody@nowhere` |
 | GitHub webhook | `NOT_CONFIGURED` | Dùng periodic scan 15 phút đã runtime PASS |
 | ABSlider Development/Production deploy | `NOT_STARTED` | CI hoàn tất; CD/VPS application runtime chưa triển khai |
