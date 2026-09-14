@@ -107,7 +107,11 @@ Luồng CI hiện tại:
 6. Backend unit test xuất JUnit và coverage artifact.
 7. Jenkins publish commit status có context bắt đầu bằng `continuous-integration/jenkins/` về đúng SHA trên GitHub.
 
-Controller chỉ listen trên loopback nên chưa nhận webhook từ Internet. Multibranch Pipeline dùng `Periodically if not otherwise run` mỗi 15 phút làm trigger dự phòng; có thể scan thủ công khi cần phản hồi ngay.
+Jenkins controller và agent chạy 24/7 trên VPS dưới hai system user tách biệt. Jetty chỉ listen tại `127.0.0.1:8080`; Nginx công bố giao diện qua `https://ci.sbltcup.dev/`, còn UFW không cho Internet truy cập trực tiếp port `8080`. Controller, agent và Nginx đều được systemd tự khởi động cùng host và đã vượt qua reboot/runtime gate.
+
+GitHub webhook chưa được cấu hình. Multibranch Pipeline dùng `Periodically if not otherwise run` với interval 15 phút; sau lần reboot VPS, một scan có cause `Started by timer` đã tự chạy và kết thúc `SUCCESS`. Có thể scan thủ công khi cần phản hồi ngay.
+
+Jenkins dùng user database nội bộ, tắt public signup và Global Matrix Authorization. `anonymous`/`authenticated` không được cấp quyền; tài khoản vận hành hiện có `Overall/Administer`. Nhóm đã chọn dùng chung tài khoản quản trị này, nên chấp nhận mất audit trail theo từng người và mở rộng blast radius nếu credential bị lộ. Không ghi hoặc truyền Jenkins password qua repository.
 
 ### Branch protection checklist (`main` và `develop`)
 

@@ -31,6 +31,78 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-15 — Chuyển Jenkins CI lên VPS và xác minh hoạt động 24/7
+
+### Mục tiêu và phạm vi
+
+Chuyển nguyên trạng Jenkins controller cùng build agent từ workstation lên VPS `life-os-prod-01`, công bố giao diện qua HTTPS và xác minh CI vẫn tự hoạt động sau reboot. Jenkins tiếp tục chỉ làm quality gate; GitHub Actions vẫn build/publish image GHCR và chưa deploy ứng dụng ABSlider.
+
+### Migration controller và agent
+
+- Dừng controller local để tạo snapshot nhất quán của `JENKINS_HOME`, sau đó khởi động lại tạm thời làm rollback trong lúc chuyển dữ liệu.
+- Chuyển archive `abslider-jenkins-home-20260914T161422Z.tar.gz`, kích thước `212180267` byte, SHA-256 `0073a1c346327e4b041161dbad2c5607cfd62106486d1bfa9179660f9d63810a` lên VPS và xác minh checksum hai đầu trùng nhau.
+- Restore controller bằng đúng Jenkins `2.568.3`/Java 21, giữ job `abslider-ci`, node `abslider-agent-01`, GitHub App credential `github-app-abslider-ci`, lịch sử build và cấu hình plugin.
+- Controller chạy bằng system user `jenkins`, Built-In Node có 0 executor và chỉ bind `127.0.0.1:8080`.
+- Tạo lại system user `jenkins-agent`, cài root-owned Remoting binary và inbound secret ngoài repository; systemd service chạy bằng `jenkins-agent:jenkins-agent`, `NoNewPrivileges=yes`, `Restart=always` và phụ thuộc `jenkins.service`/`network-online.target`.
+- Agent không thuộc group `docker`, không ghi được Docker socket và không đọc được controller master key. Việc build/publish image tiếp tục do GitHub Actions đảm nhiệm.
+- Sau khi VPS vượt qua runtime gate, disable controller và agent trên workstation. Cả hai service local hiện `disabled/inactive`, port local `8080` không còn listen; dữ liệu local vẫn được giữ làm rollback ngắn hạn.
+
+### DNS, Nginx, TLS và quyền truy cập
+
+- Tạo DNS A `ci.sbltcup.dev -> 163.128.42.78`, TTL 300; chưa tạo AAAA.
+- Thêm Nginx reverse proxy riêng cho Jenkins, gồm WebSocket/forwarded headers; không thay đổi hai virtual host Life-OS.
+- Let's Encrypt cấp certificate ECDSA riêng cho `ci.sbltcup.dev`, hết hạn `2026-12-13`; Certbot đã deploy vào Nginx và renewal timer `enabled/active`.
+- Kiểm tra từ workstation: `https://ci.sbltcup.dev/login` trả HTTP `200`, TLS verification code `0`; HTTP chuyển hướng `301` sang HTTPS.
+- Port public `80`, `443`, `8686` tiếp tục truy cập được; `8080` bị chặn từ Internet và Jenkins backend chỉ listen loopback.
+- Jenkins Location URL được đổi thành `https://ci.sbltcup.dev/`, nên commit status mới trên GitHub mở được từ xa.
+- Chuyển authorization từ `FullControlOnceLoggedIn` sang Global Matrix Authorization, tắt signup, không cấp quyền cho `anonymous` hoặc nhóm `authenticated`; probe ẩn danh vào dashboard/job trả `403`.
+- Nhóm quyết định dùng chung tài khoản `duckcy` có `Overall/Administer`. Đây là rủi ro đã chấp nhận: không có attribution theo từng người và mọi người dùng chung đều có quyền quản trị Jenkins; không ghi password vào repository hoặc nhật ký.
+
+### Runtime và reboot evidence
+
+- Lần chạy đầu trên VPS (`PR-13 #8`) thất bại ở client build vì clean install lạnh không có native optional package `lightningcss-linux-x64-gnu`. Log npm xác nhận optional dependency bị loại trong lần đó.
+- Hai clean-install chẩn đoán độc lập sau đó, gồm default và explicit glibc, đều cài đúng GNU/musl packages và load `lightningcss` thành công; không sửa source hoặc lockfile chỉ dựa trên lỗi transient.
+- `PR-13 #9` chạy lại trên VPS và PASS toàn bộ: client/server clean install, lint/build, 18/18 unit-test suite và 142/142 test; JUnit/coverage được publish và GitHub được thông báo.
+- Sau khi đổi Jenkins Location URL, `PR-13 #10` tiếp tục PASS và GitHub status của commit `a76713147e6f995301ae7e12628832aac1861e2e` trỏ tới HTTPS public.
+- Reboot VPS lúc `2026-09-14 17:16 UTC`: boot ID đổi từ `7b02b04f-e4d8-40f0-909d-023c131329ee` sang `ca2869b6-1e8b-40ed-87af-2c5cb2af9540`; kernel đổi từ `6.8.0-138-generic` sang `6.8.0-139-generic`.
+- Sau reboot, Jenkins controller, agent và Nginx đều `enabled/active`; HTTPS vẫn trả `200`, TLS hợp lệ và port `8080` vẫn không public.
+- `PR-13 #11` là workload proof sau reboot: chạy trên `abslider-agent-01` bằng Node `24.21.0`/npm `11.19.0`; client/backend lint/build PASS, 18/18 suite và 142/142 test PASS, JUnit/coverage được lưu, GitHub notification thành công và Pipeline kết thúc `SUCCESS`.
+- GitHub Commit Status API xác nhận context `continuous-integration/jenkins/pr-merge=success` với target URL `https://ci.sbltcup.dev/job/abslider-ci/job/PR-13/11/display/redirect`.
+- Periodic scan sau reboot tự chạy lúc `2026-09-14 17:18 UTC` với cause `Started by timer`, hoàn tất branch indexing trong 10 giây và kết thúc `SUCCESS`. Đây là bằng chứng timer vẫn hoạt động mà không cần workstation.
+
+### Life-OS và tài nguyên rollback
+
+- Trước reboot, disable `pm2-deploy.service`, `postgresql.service`, cluster `postgresql@16-main` và hai backup timers; đổi `/etc/postgresql/16/main/start.conf` từ `auto` sang `manual` sau khi tạo bản backup có timestamp.
+- Sau reboot, các unit Life-OS trên vẫn `disabled/inactive`, PostgreSQL cluster down, hai container staging vẫn exited và không có listener `3001`, `3002`, `5432`.
+- Chưa xóa archive migration trên VPS, fresh-controller backup, archive local hoặc `JENKINS_HOME` local. Các bản sao chứa Jenkins secrets và chỉ được cleanup sau khi duyệt đúng path; chúng không phải backup dài hạn đã được phê duyệt.
+- Jenkins System Admin email vẫn là placeholder `nobody@nowhere`; cần đặt địa chỉ vận hành thật trước khi bật notification email.
+
+### Gate và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Controller migration | `DEPLOYED` | Jenkins `2.568.3` chạy trên VPS, job/credential/history được restore |
+| Isolated build agent | `DEPLOYED` | systemd agent active; không có Docker/controller-secret privilege |
+| Public Jenkins URL | `DEPLOYED` | `https://ci.sbltcup.dev/`, TLS hợp lệ, HTTP redirect |
+| Network isolation | `TEST_PASS` | Backend `8080` chỉ loopback và không truy cập được từ Internet |
+| Post-reboot workload | `TEST_PASS` | `PR-13 #11`, 18/18 suite, 142/142 test PASS |
+| Automatic periodic scan | `TEST_PASS` | `Started by timer` sau reboot, indexing `SUCCESS` |
+| GitHub status link | `TEST_PASS` | Context success và target URL HTTPS public |
+| Local Jenkins retirement | `TEST_PASS` | Controller/agent local `disabled/inactive`, port 8080 đóng |
+| Life-OS persistent pause | `TEST_PASS` | Vẫn disabled/inactive sau reboot; dữ liệu chưa bị xóa |
+| Access control | `RISK_ACCEPTED` | Chỉ `duckcy` có Administer nhưng nhóm dùng chung tài khoản này |
+| Migration artifact cleanup | `NOT_STARTED` | Ba bản sao nhạy cảm còn giữ để rollback; cần duyệt path trước khi xóa |
+| Jenkins admin email | `NOT_CONFIGURED` | Vẫn là `nobody@nowhere` |
+| GitHub webhook | `NOT_CONFIGURED` | Dùng periodic scan 15 phút đã runtime PASS |
+| ABSlider Development/Production deploy | `NOT_STARTED` | CI hoàn tất; CD/VPS application runtime chưa triển khai |
+
+### File repository bị ảnh hưởng
+
+- `docs/github-workflow.md`
+- `docs/devops-change-log.md`
+
+---
+
 ## 2026-09-14 — Chốt Jenkins CI và GitHub Actions publish image GHCR
 
 ### Mục tiêu và quyết định
