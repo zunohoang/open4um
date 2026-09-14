@@ -33,8 +33,8 @@ pipeline {
       steps {
         script {
           def targetBranch = env.CHANGE_ID ? env.CHANGE_TARGET : env.BRANCH_NAME
-          if (!['developer', 'main'].contains(targetBranch)) {
-            error("CI is restricted to developer/main; received ${targetBranch}")
+          if (!['develop', 'main'].contains(targetBranch)) {
+            error("CI is restricted to develop/main; received ${targetBranch}")
           }
         }
 

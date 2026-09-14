@@ -24,7 +24,8 @@ const userSchema = new Schema(
     },
     lockedAt: { type: Date, default: null },
     scheduledDeleteAt: { type: Date, default: null },
-    creditBalance: { type: Number, default: 100 }
+    creditBalance: { type: Number, default: 100 },
+    avatar: { type: String, default: null }
   },
   { timestamps: true }
 )

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 interface WorkspaceHeaderProps {
@@ -7,8 +8,6 @@ interface WorkspaceHeaderProps {
   onLogout: () => void
   children?: ReactNode
 }
-
-type TabType = 'profile' | 'settings' | 'feedback'
 
 const getInitial = (name?: string) => {
   if (!name) return 'U'
@@ -23,14 +22,13 @@ export const WorkspaceHeader = ({
   onLogout,
   children
 }: WorkspaceHeaderProps) => {
+  const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const isAdmin = user?.role === 'admin'
 
   const [open, setOpen] = useState(false)
   const [showBellToast, setShowBellToast] = useState(false)
   const [showHelpToast, setShowHelpToast] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabType>('profile')
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Đóng box khi click ra ngoài
@@ -47,11 +45,6 @@ export const WorkspaceHeader = ({
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [open])
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 2500)
-  }
 
   const initial = getInitial(user?.name)
 
@@ -172,9 +165,17 @@ export const WorkspaceHeader = ({
               {user?.name || 'Tài khoản'}
             </span>
 
-            {/* Ô tròn hiện chữ cái đầu của tên bên phải */}
-            <div className='flex h-6 w-6 items-center justify-center bg-orange-700 font-sans text-xs font-bold text-white'>
-              {initial}
+            {/* Ảnh đại diện hoặc ô chữ cái đầu của tên bên phải */}
+            <div className='flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-sans text-xs font-bold text-white'>
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className='h-full w-full object-cover'
+                />
+              ) : (
+                initial
+              )}
             </div>
 
             {/* Mũi tên chỉ thị mở/đóng */}
@@ -199,8 +200,16 @@ export const WorkspaceHeader = ({
             <div className='absolute right-0 mt-2 w-80 border border-stone-300 bg-white p-4 shadow-xl font-sans text-stone-800 z-50'>
               {/* Header Box: Thông tin định danh */}
               <div className='flex items-center gap-3 pb-3 border-b border-stone-200'>
-                <div className='flex h-9 w-9 shrink-0 items-center justify-center bg-orange-700 font-bold text-white text-sm'>
-                  {initial}
+                <div className='flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-bold text-white text-sm'>
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.name}
+                      className='h-full w-full object-cover'
+                    />
+                  ) : (
+                    initial
+                  )}
                 </div>
                 <div className='min-w-0 flex-1'>
                   <div className='truncate text-sm font-bold text-emerald-950'>
@@ -228,206 +237,86 @@ export const WorkspaceHeader = ({
                 </div>
               </div>
 
-              {/* Thông báo thao tác (nếu có) */}
-              {toastMessage && (
-                <div className='my-2 border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-center text-xs font-semibold text-emerald-800'>
-                  ✅ {toastMessage}
+              <div className='my-3 space-y-2.5 text-xs text-stone-600'>
+                <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                  <span>Mã tài khoản:</span>
+                  <span className='font-mono font-bold text-emerald-950'>
+                    #{user?.id ? user.id.slice(-6) : '---'}
+                  </span>
                 </div>
-              )}
-
-              {isAdmin ? (
-                /* Thông tin tinh gọn cho Quản trị viên */
-                <div className='my-3 space-y-2.5 text-xs text-stone-600'>
-                  <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                    <span>Mã tài khoản:</span>
-                    <span className='font-mono font-bold text-emerald-950'>
-                      #{user?.id ? user.id.slice(-6) : '---'}
-                    </span>
-                  </div>
-                  <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                    <span>Quyền hạn:</span>
-                    <span className='font-semibold text-orange-800'>
-                      Quản trị viên
-                    </span>
-                  </div>
+                <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                  <span>Gói thành viên:</span>
+                  <span className='font-semibold text-stone-800'>
+                    {isAdmin ? 'Quản trị hệ thống' : 'Tiêu chuẩn (AI Studio)'}
+                  </span>
                 </div>
-              ) : (
-                <>
-                  {/* Các ngăn thẻ chuyển đổi tab (dạng gạch chân editorial) */}
-                  <div className='my-3 flex border-b border-stone-200 text-xs font-semibold'>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('profile')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'profile'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Hồ sơ
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('settings')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'settings'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Cài đặt
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setActiveTab('feedback')}
-                      className={`flex-1 py-2 text-center transition ${
-                        activeTab === 'feedback'
-                          ? 'border-b-2 border-orange-700 font-bold text-emerald-950'
-                          : 'text-stone-500 hover:text-emerald-950'
-                      }`}
-                    >
-                      Góp ý
-                    </button>
-                  </div>
-
-                  {/* Ngăn 1: Hồ sơ tài khoản */}
-                  {activeTab === 'profile' && (
-                    <div className='space-y-2.5 text-xs text-stone-600'>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Mã tài khoản:</span>
-                        <span className='font-mono font-bold text-emerald-950'>
-                          #{user?.id ? user.id.slice(-6) : '---'}
-                        </span>
-                      </div>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Gói thành viên:</span>
-                        <span className='font-semibold text-stone-800'>
-                          {isAdmin
-                            ? 'Quản trị hệ thống'
-                            : 'Tiêu chuẩn (AI Studio)'}
-                        </span>
-                      </div>
-                      <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                        <span>Số dư hiện tại:</span>
-                        <span className='font-bold text-orange-700 font-mono'>
-                          {user?.creditBalance ?? 0} credit
-                        </span>
-                      </div>
-                      <div className='border border-stone-200 bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-500'>
-                        💡 Số dư credit dùng để tự động tạo outline và sinh nội
-                        dung slide bài giảng thông minh.
-                      </div>
+                {!isAdmin && (
+                  <>
+                    <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                      <span>Số dư hiện tại:</span>
+                      <span className='font-bold text-orange-700 font-mono'>
+                        {user?.creditBalance ?? 0} credit
+                      </span>
                     </div>
-                  )}
-
-                  {/* Ngăn 2: Cài đặt (Blank inputs giữ nguyên) */}
-                  {activeTab === 'settings' && (
-                    <div className='space-y-3 text-xs'>
-                      <div>
-                        <label
-                          htmlFor='theme-select'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Giao diện hiển thị
-                        </label>
-                        <select
-                          id='theme-select'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                          defaultValue='warm'
-                        >
-                          <option value='warm'>Tông màu ấm (Mặc định)</option>
-                          <option value='light'>Sáng (Minimal Light)</option>
-                          <option value='dark'>Tối (Dark Mode)</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor='lang-select'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Ngôn ngữ hệ thống
-                        </label>
-                        <select
-                          id='lang-select'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                          defaultValue='vi'
-                        >
-                          <option value='vi'>Tiếng Việt (Vietnamese)</option>
-                          <option value='en'>Tiếng Anh (English)</option>
-                        </select>
-                      </div>
-
-                      <label className='flex items-center gap-2 text-stone-700'>
-                        <input
-                          type='checkbox'
-                          defaultChecked
-                          className='border-stone-300 text-orange-700 focus:ring-orange-600'
-                        />
-                        <span>Tự động lưu nội dung bài giảng</span>
-                      </label>
-
-                      <button
-                        type='button'
-                        onClick={() =>
-                          showToast('Đã lưu tùy chọn cài đặt thành công')
-                        }
-                        className='w-full bg-emerald-950 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-stone-900'
-                      >
-                        Lưu cài đặt
-                      </button>
+                    <div className='border border-stone-200 bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-500'>
+                      💡 Số dư credit dùng để tự động tạo outline và sinh nội
+                      dung slide bài giảng thông minh.
                     </div>
-                  )}
+                  </>
+                )}
 
-                  {/* Ngăn 3: Góp ý & Báo lỗi (Blank inputs giữ nguyên) */}
-                  {activeTab === 'feedback' && (
-                    <div className='space-y-2.5 text-xs'>
-                      <div>
-                        <label
-                          htmlFor='feedback-topic'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Chủ đề góp ý
-                        </label>
-                        <input
-                          id='feedback-topic'
-                          type='text'
-                          placeholder='Ví dụ: Thêm mẫu bố cục slide mới...'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700'
-                        />
-                      </div>
+                <div className='pt-1 space-y-1.5'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setOpen(false)
+                      navigate('/profile')
+                    }}
+                    className='flex w-full items-center justify-center gap-1.5 border border-stone-300 bg-white py-2 font-sans text-xs font-bold text-orange-700 transition hover:border-orange-700 hover:bg-orange-50'
+                  >
+                    <span>Quản lý hồ sơ cá nhân</span>
+                    <span>→</span>
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setOpen(false)
+                      navigate('/change-password')
+                    }}
+                    className='flex w-full items-center justify-center gap-1.5 border border-stone-200 bg-stone-50 py-2 font-sans text-xs font-medium text-stone-700 transition hover:border-stone-400 hover:bg-white'
+                  >
+                    <span>Đổi mật khẩu tài khoản</span>
+                  </button>
+                </div>
+              </div>
 
-                      <div>
-                        <label
-                          htmlFor='feedback-content'
-                          className='block font-semibold text-stone-700'
-                        >
-                          Nội dung góp ý
-                        </label>
-                        <textarea
-                          id='feedback-content'
-                          rows={2}
-                          placeholder='Chia sẻ phản hồi hoặc đề xuất cải tiến...'
-                          className='mt-1 w-full border border-stone-300 bg-white p-2 text-xs outline-orange-700 resize-none'
-                        />
-                      </div>
-
-                      <button
-                        type='button'
-                        onClick={() =>
-                          showToast('Cảm ơn bạn đã gửi ý kiến đóng góp!')
-                        }
-                        className='w-full bg-orange-700 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800'
-                      >
-                        Gửi phản hồi
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Footer: Lối vào admin (nếu người dùng thường có link) & Nút Đăng xuất */}
+              {/* Footer: Lối vào Profile, Lối vào admin & Nút Đăng xuất */}
               <div className='mt-3.5 space-y-1 border-t border-stone-200 pt-2.5'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setOpen(false)
+                    navigate('/profile')
+                  }}
+                  className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-stone-700 hover:bg-stone-100 transition'
+                >
+                  <svg
+                    xmlns='http://www.w3.org/2000/svg'
+                    fill='none'
+                    viewBox='0 0 24 24'
+                    strokeWidth={1.75}
+                    stroke='currentColor'
+                    className='h-4 w-4 text-orange-700'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      d='M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z'
+                    />
+                  </svg>
+                  <span>Hồ sơ cá nhân & Đổi mật khẩu</span>
+                </button>
+
                 {!isAdmin && onAdmin && (
                   <button
                     type='button'

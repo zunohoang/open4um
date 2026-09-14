@@ -31,6 +31,50 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-14 — Hợp nhất `developer` về `develop` và đổi contract CI
+
+### Mục tiêu
+
+Giữ `develop` làm nhánh tích hợp dài hạn cùng với `main`, thay cho quyết định tạm thời dùng `developer`. Không dùng staging, không rebase/force-push và không làm mất các commit profile mới đã có trên `develop`.
+
+### Baseline và cách hợp nhất
+
+- Fetch remote trước khi merge: `origin/developer=1132083`, `origin/develop=ea9a852`, merge-base `4d60dea`.
+- Tại baseline này, `develop` có 4 commit riêng và `developer` có 29 commit riêng.
+- Từ local `developer`, chạy `git merge --no-ff --no-commit origin/develop` để đưa thay đổi mới của nhóm vào source branch trước khi mở pull request `developer → develop`.
+- Các thay đổi profile/auth từ `develop` đã tự merge cùng các thay đổi readiness, security và CI từ `developer`.
+- Git chỉ báo một file conflict trực tiếp: `server/package-lock.json`. Không ghép conflict thủ công từng dòng; dùng lockfile của nhánh đích `develop` làm nền rồi tái tạo từ `server/package.json` đã auto-merge bằng Node `24.21.0` và npm `11.19.0`.
+- `server/package.json` sau auto-merge giữ cả Babel 7 từ `develop` và các contract DevOps từ `developer`: Node/npm engines, bcrypt 6, Jest CI scripts, `jest-junit` và không còn `ts-jest`.
+- Đổi allowlist trong `Jenkinsfile` từ `developer/main` thành `develop/main`. Các mục lịch sử bên dưới vẫn giữ nguyên tên nhánh tại thời điểm chúng xảy ra; không sửa lại lịch sử.
+- Tái tạo `server/package-lock.json` bằng `npm install --package-lock-only --ignore-scripts --no-audit --no-fund`, sau đó `npm ci` xác minh lockfile hợp lệ. Không còn unmerged index entry hoặc conflict marker.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Client clean install | PASS có cảnh báo | 254 package; npm cảnh báo 2 install script chưa allowlist |
+| Server clean install | PASS có cảnh báo | 852 package trên lockfile cuối; npm cảnh báo deprecated package và 8 install script chưa allowlist |
+| Client lint | PASS | `npm --prefix client run lint` |
+| Client build/typecheck | PASS có cảnh báo | 427 module; bundle chính 883.40 kB vượt warning threshold 500 kB |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | TypeScript build và alias rewrite thành công |
+| Toàn bộ server tests | PASS | 20/20 suite, 175/175 test, 0 snapshot; 23.845 giây trên lockfile cuối |
+| Unmerged entries | PASS | `git diff --name-only --diff-filter=U` và `git ls-files -u` không trả kết quả |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+### Trạng thái kiểm tra
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Merge initiation | `IMPLEMENTED_LOCAL` | Merge đang mở trên local `developer`; chưa commit hoặc push |
+| Conflict resolution | `TEST_PASS` | Lockfile đã tái tạo; không còn unmerged entry |
+| Jenkins branch contract | `IMPLEMENTED_LOCAL` | Allowlist đã đổi thành `develop`, `main`; chưa chạy Jenkins runtime |
+| Client/server quality gates | `TEST_PASS` | Client lint/build và server lint/build/full test đều PASS |
+| Pull request `developer → develop` | `PLANNED` | Chỉ mở sau khi toàn bộ local gate PASS |
+| Remote branch deletion | `NOT_STARTED` | Chỉ xóa `developer` sau khi merge PR, retarget PR và xác minh Jenkins trên `develop` |
+
+---
+
 ## 2026-09-13 — Bootstrap Jenkins controller local trên Ubuntu
 
 ### Mục tiêu

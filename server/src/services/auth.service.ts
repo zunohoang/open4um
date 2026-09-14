@@ -27,6 +27,15 @@ const forgotPasswordOtpKey = (email: string) =>
 const forgotPasswordCooldownKey = (email: string) =>
   `otp:cooldown:forgot:${email.toLowerCase()}`
 
+export const PROFILE_UPDATE_COOLDOWN_SECONDS = 60 // Cooldown 60s giữa 2 lần cập nhật
+export const PROFILE_UPDATE_WINDOW_SECONDS = 3600 // Khung thời gian 1 giờ
+export const PROFILE_UPDATE_MAX_PER_WINDOW = 5 // Tối đa 5 lần trong 1 giờ
+
+export const profileCooldownKey = (userId: string) =>
+  `ratelimit:profile:cooldown:${userId}`
+export const profileCountKey = (userId: string) =>
+  `ratelimit:profile:count:${userId}`
+
 const generateOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString()
 }
@@ -61,7 +70,8 @@ const toPublicUser = (user: UserDocument) => ({
   email: user.email,
   role: user.role,
   status: user.status,
-  creditBalance: user.creditBalance
+  creditBalance: user.creditBalance,
+  avatar: user.avatar || null
 })
 
 export const sendRegisterOtp = async (email: string) => {
@@ -201,14 +211,117 @@ export const getProfile = async (userId: string) => {
   return toPublicUser(user)
 }
 
+export interface UpdateProfileInput {
+  name?: string
+  avatar?: string | null
+}
+
 export const updateProfile = async (
   userId: string,
-  name: string | undefined
+  data: string | UpdateProfileInput
 ) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  if (name !== undefined) user.name = name
+
+  const { name, avatar } =
+    typeof data === 'string' ? { name: data, avatar: undefined } : data
+
+  // Luồng 5b: Trường Họ tên bị bỏ trống -> Thông báo "Họ tên không được để trống"
+  if (name !== undefined) {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      throw new AppError('Họ tên không được để trống', 400)
+    }
+  }
+
+  // Luồng 5a: Ảnh vượt quá dung lượng cho phép hoặc sai định dạng -> Thông báo lỗi tệp tin
+  if (avatar) {
+    if (avatar.startsWith('data:')) {
+      const match = avatar.match(
+        /^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i
+      )
+      if (!match) {
+        throw new AppError(
+          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+          400
+        )
+      }
+      const base64Data = match[2]
+      const approxSizeBytes = (base64Data.length * 3) / 4
+      // Kích thước tối đa 2MB = 2 * 1024 * 1024 bytes
+      if (approxSizeBytes > 2 * 1024 * 1024) {
+        throw new AppError(
+          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+          400
+        )
+      }
+    } else if (
+      !avatar.startsWith('http://') &&
+      !avatar.startsWith('https://') &&
+      !avatar.startsWith('/')
+    ) {
+      throw new AppError(
+        'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
+        400
+      )
+    }
+  }
+
+  const trimmedName = name?.trim()
+  const nameChanged = trimmedName !== undefined && trimmedName !== user.name
+  const avatarChanged = avatar !== undefined && avatar !== user.avatar
+
+  // Nếu không có thay đổi nào so với hiện tại
+  if (!nameChanged && !avatarChanged) {
+    return toPublicUser(user)
+  }
+
+  // 1. Kiểm tra cooldown chống spam liên tục giữa 2 lần cập nhật (mặc định 60s)
+  const cooldown = await redis.get(profileCooldownKey(userId))
+  if (cooldown) {
+    const ttl = await redis.ttl(profileCooldownKey(userId))
+    const remaining = ttl > 0 ? ttl : PROFILE_UPDATE_COOLDOWN_SECONDS
+    throw new AppError(
+      `Bạn đang cập nhật quá nhanh. Vui lòng đợi ${remaining} giây trước khi thử lại.`,
+      429
+    )
+  }
+
+  // 2. Kiểm tra giới hạn số lần cập nhật trong 1 giờ (tối đa 5 lần)
+  const currentCountStr = await redis.get(profileCountKey(userId))
+  const currentCount = currentCountStr ? parseInt(currentCountStr, 10) : 0
+  if (currentCount >= PROFILE_UPDATE_MAX_PER_WINDOW) {
+    const ttl = await redis.ttl(profileCountKey(userId))
+    const remainingMinutes = Math.ceil(
+      (ttl > 0 ? ttl : PROFILE_UPDATE_WINDOW_SECONDS) / 60
+    )
+    throw new AppError(
+      `Bạn đã thay đổi thông tin cá nhân quá nhiều lần (tối đa ${PROFILE_UPDATE_MAX_PER_WINDOW} lần/giờ). Vui lòng thử lại sau ${remainingMinutes} phút.`,
+      429
+    )
+  }
+
+  // 3. Cập nhật thông tin mới vào CSDL
+  if (nameChanged && trimmedName) {
+    user.name = trimmedName
+  }
+  if (avatarChanged) {
+    user.avatar = avatar || null
+  }
   await user.save()
+
+  // 4. Thiết lập cooldown và tăng bộ đếm lượt thay đổi trong Redis
+  await redis.set(
+    profileCooldownKey(userId),
+    '1',
+    'EX',
+    PROFILE_UPDATE_COOLDOWN_SECONDS
+  )
+  const newCount = await redis.incr(profileCountKey(userId))
+  if (newCount === 1) {
+    await redis.expire(profileCountKey(userId), PROFILE_UPDATE_WINDOW_SECONDS)
+  }
+
   return toPublicUser(user)
 }
 
