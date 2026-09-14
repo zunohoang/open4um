@@ -53,10 +53,50 @@ pipeline {
       }
     }
 
-    stage('Install Backend Dependencies') {
-      steps {
-        dir('server') {
-          sh 'npm ci --no-audit --no-fund'
+    stage('Install Dependencies') {
+      parallel {
+        stage('Install Client Dependencies') {
+          steps {
+            dir('client') {
+              sh 'npm ci --no-audit --no-fund'
+            }
+          }
+        }
+
+        stage('Install Backend Dependencies') {
+          steps {
+            dir('server') {
+              sh 'npm ci --no-audit --no-fund'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Static Quality Gates') {
+      parallel {
+        stage('Client Lint and Build') {
+          steps {
+            dir('client') {
+              sh '''
+                set -eu
+                npm run lint
+                npm run build
+              '''
+            }
+          }
+        }
+
+        stage('Backend Lint and Build') {
+          steps {
+            dir('server') {
+              sh '''
+                set -eu
+                npm run lint
+                npm run build
+              '''
+            }
+          }
         }
       }
     }

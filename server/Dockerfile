@@ -1,16 +1,16 @@
 ARG NODE_IMAGE=node:24.21.0-alpine3.24@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2
 
-FROM ${NODE_IMAGE} AS build
+FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
+
+FROM dependencies AS build
 COPY . .
 RUN npm run build
 
-FROM ${NODE_IMAGE} AS production-dependencies
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+FROM dependencies AS production-dependencies
+RUN npm prune --omit=dev && npm cache clean --force
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ \

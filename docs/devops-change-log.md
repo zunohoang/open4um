@@ -31,6 +31,98 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-14 — Tạo runtime contract tách biệt cho ABSlider Production/Development
+
+### Mục tiêu
+
+Chuẩn bị một artifact/runtime contract có thể dùng chung cho hai môi trường trên cùng VPS mà không dùng chung container, network hoặc volume. Chưa triển khai VPS, chưa publish registry và chưa thay đổi DNS/Nginx/TLS trong bước này.
+
+### Thay đổi repository
+
+- Khóa CORS backend theo danh sách `CORS_ALLOWED_ORIGINS` phân tách bằng dấu phẩy. Request không có `Origin` vẫn được phép cho health check/server-to-server; origin browser không nằm trong allowlist không nhận header CORS.
+- Production chỉ chấp nhận origin HTTPS, không chấp nhận localhost hoặc URL có credential/path/query/fragment.
+- Tách MinIO client nội bộ khỏi client ký URL public:
+  - `MINIO_ENDPOINT` và `MINIO_USE_SSL` dùng cho kết nối container nội bộ.
+  - `MINIO_PUBLIC_ENDPOINT` bắt buộc là HTTPS origin trên production và được dùng để tạo presigned download URL.
+  - Hai client đặt region cố định `us-east-1` để ký URL không cần dò region qua endpoint public.
+- Thêm frontend multi-stage image:
+  - Build bằng Node `24.21.0` đã khóa digest.
+  - Compile `VITE_API_BASE_URL` và email-verification flag bằng build arguments.
+  - Runtime dùng Nginx `1.28.0-alpine` đã khóa digest, chạy bằng user `nginx`, listen port `8080`, có SPA fallback và `/health`.
+- Tối ưu backend Dockerfile để chỉ chạy một `npm ci`; build và production prune dùng chung dependencies layer. Thay đổi này được thực hiện sau khi hai lượt build riêng biệt lần lượt timeout ở một trong hai lệnh `npm ci` trùng lặp.
+- Thêm `deploy/compose.yml` dùng chung cho hai môi trường:
+  - Không dùng `container_name` hoặc volume `name` cố định.
+  - Bắt buộc dùng project name khác nhau, dự kiến `abslider-production` và `abslider-develop`; Compose tự prefix network/volume theo project.
+  - MongoDB/Redis không publish port. Frontend, backend và MinIO API chỉ bind vào `127.0.0.1`; MinIO console không publish.
+  - MongoDB `8.0.30`, Redis 7 Alpine và MinIO release được khóa theo digest; có dependency health checks và log rotation.
+  - Image client/server được nhận từ env để sau này điền image digest bất biến, không hard-code mutable deployment tag.
+- Thêm `deploy/.env.example` chỉ chứa placeholder và port/domain mẫu; production/development phải dùng hai secret file bên ngoài repository và không tái sử dụng database, MinIO, JWT, admin hoặc email credential.
+- Mở rộng Jenkinsfile: clean-install client/server song song, chạy lint/build cho cả hai và tiếp tục backend unit-test/JUnit/coverage. Chưa cấp Docker hoặc SSH/production secret cho CI agent và chưa thêm deploy stage.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server lint/build | PASS | ESLint và TypeScript/alias build đều exit `0` |
+| Server focused tests | PASS | 3/3 suite, 19/19 test |
+| Server full tests | PASS | 21/21 suite, 180/180 test, 0 snapshot; 22.642 giây |
+| Jenkins backend unit command | PASS | 18/18 suite, 142/142 test; JUnit và coverage được sinh |
+| Client lint | PASS | ESLint exit `0` |
+| Client build/typecheck | PASS có cảnh báo | 427 module; bundle chính 883.40 kB vượt warning 500 kB |
+| Compose render | PASS | `docker compose ... config --quiet` với env placeholder và project name riêng |
+| Frontend image build | PASS có cảnh báo | Image local `sha256:0696da09...`, 21,406,141 byte; còn 2 moderate dependency advisories và install-script warnings |
+| Backend image build | PASS có cảnh báo | Image local cuối `sha256:5078010e...`, 60,790,613 byte; còn 4 moderate dependency advisories và install-script warnings |
+| Initial backend image builds | FAIL do network | Hai lượt đầu gặp npm registry `ETIMEDOUT` ở hai stage `npm ci` khác nhau; không phải source/dependency resolution failure |
+| Backend Docker dependency flow | PASS | Sau khi dùng một clean-install layer, build và `npm prune --omit=dev` hoàn tất |
+| Compose runtime smoke | PASS | Project tạm cuối `abslider-gate1-final`; MongoDB, Redis, MinIO, server và client đều `healthy` |
+| Dependency readiness | PASS | `/api/v1/health/ready` trả MongoDB/Redis/MinIO đều `up` |
+| Frontend/MinIO health | PASS | Frontend `/health` trả `ok`; MinIO live check exit `0` |
+| CORS allowlist | PASS | `slides.sbltcup.dev` nhận đúng `Access-Control-Allow-Origin`; origin không tin cậy không nhận header này |
+| Frontend API build contract | PASS | Runtime asset chứa `https://slides-api.sbltcup.dev/api/v1` |
+| MinIO public URL contract | PASS | Presign smoke trả origin `https://slides-media.sbltcup.dev` và có signature; không in giá trị signature |
+| Runtime identity | PASS | Client UID/GID `101`; server UID/GID `10001`; cả hai non-root |
+| Loopback exposure | PASS | Client `4100`, server `4101`, MinIO `4102` chỉ bind `127.0.0.1`; MongoDB/Redis không publish |
+| Native bcrypt runtime | PASS | Hash/compare chạy thành công trong backend final image |
+| Temporary smoke cleanup | PASS | Xóa đúng hai project smoke, network và các volume tạm; xác minh không còn resource `abslider-gate1-20260914*` hoặc `abslider-gate1-final*` |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile`
+- `client/.dockerignore`
+- `client/Dockerfile`
+- `client/nginx.conf`
+- `deploy/.env.example`
+- `deploy/README.md`
+- `deploy/compose.yml`
+- `server/.env.example`
+- `server/Dockerfile`
+- `server/src/app.ts`
+- `server/src/config/cors.ts`
+- `server/src/config/env.ts`
+- `server/src/lib/minio.ts`
+- `server/src/services/lecture.service.ts`
+- `server/tests/setup.ts`
+- `server/tests/unit/config/cors.test.ts`
+- `server/tests/unit/config/env.test.ts`
+- `docs/devops-change-log.md`
+
+### Trạng thái và bước còn lại
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Production env/CORS/MinIO contract | `TEST_PASS` | Đã test tĩnh và runtime local |
+| Frontend/backend images | `TEST_PASS` | Chỉ là local images; chưa publish registry |
+| Dual-environment Compose | `TEST_PASS` | Render và isolated runtime smoke local PASS; chưa chạy trên VPS |
+| Jenkins quality gate mở rộng | `IMPLEMENTED_LOCAL` | Chưa có Jenkins runtime evidence cho Jenkinsfile mới |
+| DNS/Nginx/TLS | `NOT_STARTED` | Các domain `slides*`/`ci` chưa trỏ VPS |
+| Registry/deploy/rollback | `NOT_STARTED` | Chưa có GHCR package, digest release manifest hoặc VPS deploy credential |
+| Production release từ `main` | `BLOCKED` | `main` còn cũ; chỉ merge `develop → main` sau CI/development live gate |
+| Repository commit/push | `IMPLEMENTED_LOCAL` | Chưa commit/push thay đổi Gate 1 |
+| VPS deployment | `NOT_STARTED` | Không ghi nhận `DEPLOYED` trước khi có live-check qua HTTPS |
+
+---
+
 ## 2026-09-14 — Audit VPS dùng chung và tạo service account ABSlider
 
 ### Mục tiêu và phạm vi
@@ -138,7 +230,7 @@ Rà soát VPS `life-os-prod-01` trước khi tạm dừng Life-OS và triển kh
 | Life-OS shutdown | `TEST_PASS` | Timers disabled; PM2 stopped; containers preserved/stopped; PostgreSQL down; không còn port `3001/3002/5432` |
 | ABSlider deployment readiness | `BLOCKED` | Main chậm 41 commit; thiếu frontend image, prod/dev Compose, CORS/MinIO public contract và deploy/rollback assets |
 | Jenkins VPS deployment | `NOT_STARTED` | Jenkins hiện chỉ có controller local loopback; chưa cài/public TLS/read-only PM account trên VPS |
-| Repository documentation | `IMPLEMENTED_LOCAL` | Cập nhật trên local `develop`; chưa commit/push |
+| Repository documentation | `PUSHED` | Commit `5ceecdd` đã được push lên `origin/develop` |
 
 ---
 

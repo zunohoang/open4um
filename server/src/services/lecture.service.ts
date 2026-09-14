@@ -5,7 +5,7 @@ import { AiUsageLogModel } from '@/models/aiUsageLog.model'
 import { UserModel } from '@/models/user.model'
 import { getCreditConfig } from '@/services/admin.service'
 import { FolderModel } from '@/models/folder.model'
-import { minioClient, BUCKET_MEDIA } from '@/lib/minio'
+import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
 import {
   generateOutlineFromPrompt,
   buildSlidesFromOutline,
@@ -246,7 +246,10 @@ export const applySlideOperation = async (
   } else if (operation.operation === 'delete') {
     slides.splice(sourceIndex, 1)
   } else if (operation.operation === 'duplicate') {
-    const clone = { ...slides[sourceIndex], id: `slide-${crypto.randomUUID()}` }
+    const clone = {
+      ...slides[sourceIndex],
+      id: `slide-${crypto.randomUUID()}`
+    }
     slides.splice(sourceIndex + 1, 0, clone)
   } else if (operation.operation === 'update') {
     slides[sourceIndex] = {
@@ -373,7 +376,7 @@ export const exportLecture = async (userId: string, id: string) => {
       }
     )
 
-    downloadUrl = await minioClient.presignedGetObject(
+    downloadUrl = await minioPresignClient.presignedGetObject(
       BUCKET_MEDIA,
       objectKey,
       24 * 60 * 60
