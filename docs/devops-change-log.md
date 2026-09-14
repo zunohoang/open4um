@@ -31,6 +31,117 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-14 — Audit VPS dùng chung và tạo service account ABSlider
+
+### Mục tiêu và phạm vi
+
+Rà soát VPS `life-os-prod-01` trước khi tạm dừng Life-OS và triển khai ABSlider/Jenkins trên cùng host. Audit chỉ đọc metadata cần thiết, không đọc hoặc ghi giá trị secret. Sau audit, tạo riêng system account `abslider-deploy` để sở hữu runtime ABSlider; tài khoản này không dành cho PM hoặc đăng nhập tương tác.
+
+### Baseline VPS trước thay đổi
+
+- Ubuntu `24.04.4 LTS`, kernel `6.8.0-138-generic`, 2 vCPU.
+- RAM 3.8 GiB, khoảng 2.9 GiB available; swap 2 GiB chưa sử dụng.
+- Root filesystem 38 GiB, đã dùng 15 GiB, còn 24 GiB; inode sử dụng 9%.
+- Host báo cần reboot và có 26 package có thể nâng cấp; chưa update, autoremove hoặc reboot trong lượt này.
+- Nginx, Docker, PostgreSQL, PM2, Fail2ban và Certbot timer đang active.
+- Life-OS production API chạy bằng PM2 tại port `3001`; staging API/PostgreSQL chạy trong Compose project `life-os-staging`.
+- Bốn health check production/staging qua loopback và HTTPS đều trả HTTP `200` trước khi có thay đổi.
+
+### Kết quả audit dữ liệu và khả năng khôi phục
+
+- Bản dump mới nhất của Life-OS production và staging đều tồn tại, có permission `0600 deploy:deploy`.
+- Kiểm tra checksum của cả hai dump: PASS.
+- `pg_restore --list` cho cả hai dump: PASS; đây là bằng chứng archive đọc được, chưa phải full restore drill.
+- Docker volume staging `life-os-postgres-staging` và bind mount Knowledge vẫn còn nguyên.
+- Các file env Life-OS production/staging có permission `0600 deploy:deploy`; audit không đọc giá trị bên trong.
+- `life-os-staging-backup.service` gần nhất thành công.
+- `life-os-production-backup.service` gần nhất exit code `1` và đang ở trạng thái `failed`, dù local dump production hợp lệ. Journal xác nhận tiến trình Restic dừng với `Fatal: Please specify repository location (-r or --repository-file)`; service chạy bằng `deploy` qua `/usr/bin/timeout --foreground 2h /home/deploy/bin/life-os-backup-production`.
+- Đối chiếu production/staging cho thấy production chỉ source `restic.env` và `production.env`, trong khi staging có contract auto-export và validate biến bắt buộc. Kiểm tra không in giá trị xác nhận `RESTIC_REPOSITORY=SHELL_ONLY`, `RESTIC_PASSWORD_FILE=SHELL_ONLY`, `RESTIC_PASSWORD=UNSET`. Vì hai biến cần thiết không được export sang process con, Restic không nhận repository/password-file. Đây là nguyên nhân gốc đã xác minh; chưa sửa hoặc chạy lại backup ở thời điểm ghi nhận này.
+- Sao lưu script thành `/home/deploy/bin/life-os-backup-production.before-export-fix-20260914T083618+0000`, sau đó bọc hai lệnh source bằng `set -a`/`set +a`. `bash -n` PASS; script và bản backup đều giữ owner `deploy:deploy`, mode `0700`.
+- Probe chẩn đoán sau sửa xác nhận `RESTIC_REPOSITORY` và `RESTIC_PASSWORD_FILE` đều đã export. `timeout 60s restic cat config` PASS khi chạy bằng đúng identity/home `deploy`; repository và password file truy cập được mà không in giá trị. Chưa chạy backup service thật ở thời điểm ghi nhận này.
+- Chạy lại `life-os-production-backup.service` lúc 08:55 UTC sau khi production API health PASS. Restic xử lý hai file, ghi khoảng 97 KiB vào repository và lưu snapshot `973167d3` thành công. Bước `forget --prune` sau đó thất bại vì repository còn lock mang PID `2528351`, tạo lúc 08:36 UTC trên cùng host/user; service kết thúc exit `1`. Chưa unlock cho tới khi xác minh PID không còn sống và không có backup production/staging nào đang chạy.
+- Xác minh lock `f9f2455c...` là stale: `/proc/2528351` không tồn tại; production service ở `failed`, staging service `inactive/dead` với kết quả success; `pgrep` không tìm thấy process Restic/backup của user `deploy`. `restic list locks` chỉ liệt kê lock này. Đủ điều kiện chạy `restic unlock` mặc định; không dùng `--remove-all`.
+- Chạy `restic unlock` mặc định bằng user `deploy`; Restic báo xóa đúng một lock. `restic list locks` ngay sau đó trả danh sách trống và kiểm tra ID mục tiêu xác nhận lock không còn. Chưa dùng `--remove-all` và chưa xóa snapshot/dữ liệu backup.
+- Chạy lại service lần cuối lúc 09:15 UTC. Google Drive API trả `403 RATE_LIMIT_EXCEEDED` tạm thời cho một object nhưng Restic tự retry và ghi thành công sau một lần thử lại. Snapshot production mới `2946938d` được lưu; `forget --prune` thoát thành công, script in `Production backup completed`, systemd trả `Result=success`, `ExecMainStatus=0`, `inactive/dead`; production API vẫn healthy. `ExecMainCode=1` là systemd `CLD_EXITED`, không phải exit status lỗi.
+- Log retention cho thấy production `forget` đang xét cả snapshot staging/cutover và chia nhiều nhóm theo đường dẫn dump có timestamp; mỗi nhóm chỉ có một snapshot và đều được giữ. Chưa thấy snapshot bị xóa trong lần chạy này, nhưng policy hiện tại vừa thiếu giới hạn tag production vừa có dấu hiệu không gom các lần backup cùng môi trường, nên cần sửa contract retention sau restore drill.
+- Restore drill đúng snapshot `2946938d` vào thư mục tạm riêng thành công: khôi phục dump 97,008 byte và checksum 96 byte; `sha256sum --check` trả `OK`, `pg_restore --list` PASS. Thư mục restore tạm được cleanup theo path guard và `restic list locks` sau restore trống. Đây là archive-level restore proof; chưa restore vào một PostgreSQL database tạm và chưa khởi động ứng dụng trên dữ liệu phục hồi.
+- Retention dry-run dùng `--tag production --group-by host,tags` chỉ xét production: giữ `16a23a7b`, `2946938d` và dự kiến bỏ snapshot trùng cùng ngày `973167d3`. Dry-run tương ứng cho staging chỉ xét tag staging: giữ 17 snapshot thế hệ có `knowledge-files` cùng một snapshot staging cũ không có tag này, dự kiến bỏ 6 snapshot cũ `2208a570`, `fa64d48e`, `e8c46d5f`, `0987a4dd`, `b0d49973`, `79d476e6`. Snapshot cutover không bị chọn; dry-run không để lại lock. Chưa patch script vì thay đổi sẽ kích hoạt xóa thật ở lần timer/service kế tiếp và cần xác nhận phạm vi xóa.
+
+### Phát hiện mạng và bảo mật
+
+- Nginx config syntax PASS qua `sudo nginx -t`.
+- Fail2ban active với jail `sshd`.
+- Baseline từ ngoài VPS cho thấy các port `80`, `443`, `8686` và `3001` truy cập được; `3002`, `5432`, `8080`, `9000`, `9001` đóng hoặc bị lọc.
+- Baseline SSH cho phép root/password/X11 vì dòng `Include /etc/ssh/sshd_config.d/*.conf` trong file chính bị comment, làm drop-in `60-life-os.conf` không có hiệu lực.
+- Sao lưu cả file chính và drop-in với hậu tố thời gian trước khi sửa. Kích hoạt `Include`, giữ port `8686` ở drop-in và loại khai báo port trùng khỏi file chính.
+- `sshd -t` PASS trước và sau khi chuẩn hóa. Effective config sau sửa: `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`, `X11Forwarding no`, `AllowUsers deploy`.
+- Reload `ssh.service` thành công; service vẫn `active/running`, `ExecMainStatus=0`. Một kết nối mới từ ngoài host dùng `BatchMode=yes`, chỉ cho phép public key và tắt password fallback đã đăng nhập thành công bằng user `deploy`.
+- Bật UFW cho cả IPv4/IPv6 với logging `low`; policy là deny incoming, allow outgoing và deny routed. Chỉ allow inbound TCP `8686`, `80`, `443`.
+- Kiểm tra từ ngoài sau khi bật UFW: `80`, `443`, `8686` kết nối được; `3001` timeout và không còn bypass Nginx từ Internet. Life-OS production API vẫn bind `*:3001`, nên vẫn cần cân nhắc đổi về loopback khi bảo trì cấu hình runtime.
+- Sau firewall, `https://api.sbltcup.dev/health/db` và `https://staging-api.sbltcup.dev/health/db` đều tiếp tục trả HTTP `200`.
+- DNS `ci.sbltcup.dev` và các domain `slides*` chưa resolve tại thời điểm audit.
+- TLS hiện tại của `api.sbltcup.dev` và `staging-api.sbltcup.dev` hợp lệ; Certbot timer active.
+
+### Tạo service account ABSlider
+
+- Tạo system group/user `abslider-deploy`, UID `999`, GID `987`.
+- Home `/var/lib/abslider-deploy`, mode `0750`, owner `abslider-deploy:abslider-deploy`.
+- Shell `/usr/sbin/nologin`; password ở trạng thái locked.
+- Không thêm user vào group `sudo` hoặc `docker`; user không ghi được `/var/run/docker.sock`.
+- Xác minh user không đọc được env của Life-OS production hoặc staging.
+- Tạo layout quyền tối thiểu:
+  - `/opt/abslider` và `/opt/abslider/bin`: `root:root`, mode `0755`.
+  - `/opt/abslider/releases`: `abslider-deploy:abslider-deploy`, mode `0750`.
+  - `/opt/abslider/shared`: `root:abslider-deploy`, mode `0750`.
+- PM không dùng chung system account này. Khi Jenkins trên VPS hoạt động, PM sẽ cần Jenkins account riêng chỉ có quyền đọc build/view/job, không có quyền Credentials, Configure hoặc Deploy.
+
+### Đánh giá tài nguyên trước khi tạm dừng Life-OS
+
+- Source tree Life-OS khoảng 1.1 GiB; local backup 3.5 MiB; PostgreSQL production data 65 MiB; active Docker volume 67.69 MiB. Root filesystem vẫn còn khoảng 24 GiB nên không có áp lực phải chuyển rồi xóa dữ liệu local.
+- `docker system df` ghi nhận 19 image dùng tổng cộng 7.01 GiB, trong đó 3.328 GiB được đánh dấu reclaimable. Đây là kho image dùng chung, không quy toàn bộ cho Life-OS; chưa chạy `docker system prune`, image prune hoặc volume prune.
+- RAM toàn host đang dùng khoảng 922 MiB và còn 2.9 GiB available; swap chưa dùng. Hai container staging dùng khoảng 180.6 MiB và 63.87 MiB; PM2 production API dùng khoảng 120.8 MiB.
+- Kết luận: không archive/xóa raw source, env, database hoặc Docker volume lên Google Drive. Tạm dừng service là đủ để giải phóng RAM/CPU và vẫn giữ rollback nhanh; Restic tiếp tục là kênh backup mã hóa đã restore-test.
+
+### Tạm dừng Life-OS có khả năng khôi phục
+
+- Disable và stop hai timer `life-os-production-backup.timer`, `life-os-staging-backup.timer`; cả hai xác minh `disabled/inactive`, tránh backup chạy khi database đã dừng.
+- Chạy `pm2 save` khi process definition production còn đầy đủ, sau đó `pm2 stop life-os-api`; PM2 giữ process ID `0` ở trạng thái `stopped`, không dùng `pm2 delete`.
+- Chạy `docker compose stop` cho project `life-os-staging`; API container dừng bằng SIGTERM với exit `143`, PostgreSQL container exit `0`. Container, image, bind mount và volume vẫn được giữ; không chạy `down` hoặc `down -v`.
+- Stop `postgresql@16-main.service`; `pg_lsclusters` xác nhận cluster `16/main` ở trạng thái `down`, data directory vẫn tại `/var/lib/postgresql/16/main`.
+- Không còn listener TCP `3001`, `3002`, `5432`. Nginx, Docker, SSH, UFW, Fail2ban và dữ liệu backup không bị dừng/xóa.
+- Sau pause, RAM host giảm từ khoảng 922 MiB xuống 620 MiB và available tăng từ 2.9 GiB lên 3.2 GiB; swap vẫn chưa sử dụng.
+- Rollback dự kiến: start PostgreSQL production, start Compose staging, `pm2 start life-os-api`, rồi enable/start lại hai backup timer sau khi health check PASS. Chưa thực hiện rollback vì Life-OS đang chủ động được tạm dừng.
+
+### Readiness triển khai ABSlider sau khi giải phóng VPS
+
+- Fetch remote sau khi merge PR #14: `origin/develop=0fb2f5b`, `origin/main=74ccef9`; `main` không có commit riêng và đang chậm 41 commit so với `develop`. Không deploy source `main` cũ. Cần hoàn thiện hạ tầng trên `develop`, qua CI/preview gate, sau đó merge `develop → main` mới phát hành production.
+- Repository mới có backend `server/Dockerfile` và `docker-compose.dev.yml` cho MongoDB/Redis/MinIO local. Chưa có frontend Dockerfile, Compose runtime production/develop, host Nginx assets, deploy/rollback script hoặc image-publish contract.
+- `docker-compose.dev.yml` dùng tên container/volume cố định nên không thể dùng nguyên trạng cho hai môi trường trên cùng VPS; compose runtime cần bỏ `container_name`, tách project/volume/network và chỉ bind application ports về loopback.
+- `Jenkinsfile` hiện chỉ clean-install và chạy backend unit tests. Chưa lint/build client, lint/build server, build/publish immutable image, deploy theo branch hoặc rollback.
+- Backend đang dùng `cors()` không giới hạn origin. MinIO client chỉ có một endpoint với `useSSL=false`; URL presigned tạo từ endpoint nội bộ sẽ không dùng được an toàn qua domain HTTPS công khai. Hai contract này phải được sửa và test trước public deployment.
+- DNS `slides.sbltcup.dev`, `slides-cup.sbltcup.dev`, `slides-api.sbltcup.dev`, các domain develop và `ci.sbltcup.dev` chưa resolve; TLS/Nginx chỉ cấu hình sau khi DNS trỏ đúng VPS.
+
+### Trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| VPS read-only inventory | `TEST_PASS` | OS, resource, service, port, Docker, PM2, PostgreSQL, Nginx, TLS và DNS đã kiểm tra |
+| Local backup readability | `TEST_PASS` | Production/staging checksum và `pg_restore --list` PASS |
+| Archive restore drill | `TEST_PASS` | Snapshot `2946938d` restore PASS; checksum OK; `pg_restore --list` PASS; không để lại lock |
+| Full PostgreSQL restore drill | `NOT_RUN` | Chưa restore vào database tạm hoặc chạy ứng dụng trên dữ liệu phục hồi |
+| Production off-site backup | `TEST_PASS` | Service cuối `Result=success`, snapshot `2946938d`; archive restore proof PASS |
+| Backup retention contract | `TEST_PARTIAL` | Contract `tag + group-by host,tags` dry-run PASS và chỉ chọn đúng môi trường; chưa patch vì sẽ làm 7 snapshot cũ bị xóa ở lần chạy thật |
+| SSH hardening | `TEST_PASS` | Syntax PASS; root/password/KbdInteractive/X11 bị tắt; public-key session mới qua port `8686` PASS sau reload |
+| Firewall | `TEST_PASS` | UFW active cho IPv4/IPv6; chỉ mở `80/443/8686`; external `3001` timeout; hai HTTPS health check vẫn `200` |
+| ABSlider service account | `TEST_PASS` | Locked/nologin, không Docker/sudo và không đọc env Life-OS |
+| Life-OS storage pressure | `TEST_PASS` | Còn khoảng 24 GiB; không cần archive/xóa local và không chạy Docker prune |
+| Life-OS shutdown | `TEST_PASS` | Timers disabled; PM2 stopped; containers preserved/stopped; PostgreSQL down; không còn port `3001/3002/5432` |
+| ABSlider deployment readiness | `BLOCKED` | Main chậm 41 commit; thiếu frontend image, prod/dev Compose, CORS/MinIO public contract và deploy/rollback assets |
+| Jenkins VPS deployment | `NOT_STARTED` | Jenkins hiện chỉ có controller local loopback; chưa cài/public TLS/read-only PM account trên VPS |
+| Repository documentation | `IMPLEMENTED_LOCAL` | Cập nhật trên local `develop`; chưa commit/push |
+
+---
+
 ## 2026-09-14 — Hợp nhất `developer` về `develop` và đổi contract CI
 
 ### Mục tiêu
@@ -81,8 +192,9 @@ Giữ `develop` làm nhánh tích hợp dài hạn cùng với `main`, thay cho 
 | Conflict resolution | `TEST_PASS` | Lockfile đã tái tạo; không còn unmerged entry |
 | Jenkins branch contract | `TEST_PASS` | Filter `develop main PR-*` và PR target contract đã được xác minh bằng Jenkins `PR-14` |
 | Client/server quality gates | `TEST_PASS` | Client lint/build và server lint/build/full test đều PASS |
-| Pull request `developer → develop` | `OPEN_CI_PASS` | GitHub PR #14; Jenkins PR build 17/17 suite, 137/137 test PASS; chưa merge |
-| Remote branch deletion | `NOT_STARTED` | Chỉ xóa `developer` sau khi merge PR, retarget PR và xác minh Jenkins trên `develop` |
+| Pull request `developer → develop` | `MERGED` | GitHub PR #14 được merge vào `develop` tại `0fb2f5b`; Jenkins PR build trước merge đạt 17/17 suite, 137/137 test PASS |
+| Jenkins post-merge `develop` | `NOT_VERIFIED` | Chưa có bằng chứng runtime của child job `develop` sau merge |
+| Remote branch deletion | `NOT_STARTED` | Chỉ xóa `developer` sau khi retarget PR và xác minh Jenkins trên `develop` |
 
 ---
 
