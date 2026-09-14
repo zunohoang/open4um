@@ -230,6 +230,12 @@ Phạm vi của bước này chỉ là CI:
 - Build #6 ghi JUnit/coverage, kết thúc `Finished: SUCCESS` và log xác nhận `GitHub has been notified of this commit’s build result`; không còn HTTP `403`.
 - GitHub Commit Status API được kiểm tra độc lập: aggregate state `success`, một context `continuous-integration/jenkins/branch`, description `This commit looks good` cho commit `0a6b798`.
 - Status `target_url` hiện trỏ tới Jenkins loopback `127.0.0.1`, nên chỉ mở được trên host này; publish status đã hoạt động nhưng chia sẻ build log cho thành viên từ xa vẫn chưa khả dụng.
+- Sau khi GitHub App vượt qua scan, checkout, test và commit-status gate, xóa hai bản private key cục bộ dùng khi bootstrap: `/home/duckcy/Downloads/abslider-jenkins-duckcy.2026-09-13.private-key.pem` và `/home/duckcy/Downloads/abslider-jenkins-duckcy.pkcs8.pem`.
+- Kiểm tra lại cả hai đường dẫn bằng `test -e` đều trả kết quả `PASS: đã xóa`; private key dùng vận hành CI vẫn nằm trong Jenkins credential `github-app-abslider-ci`, không nằm trong repository.
+- Danh sách Jenkins Global Credentials sau cleanup chỉ còn `github-app-abslider-ci`; credential cũ `github-abslider-readonly` đã được xóa.
+- Fine-grained PAT `jenkins-abslider-scan` đã được xóa; GitHub hiển thị banner `Deleted personal access token` và danh sách `No fine-grained tokens created`.
+- Sau khi bỏ PAT và credential Jenkins cũ, chạy lại repository scan. Jenkins kết nối GitHub API bằng App ID `4932639`, dùng duy nhất credential `github-app-abslider-ci` để checkout commit `3e2e7fece5d150c3f52104b15ef2d341ed669d86`, chạy 17/17 suite và 128/128 test PASS, thông báo kết quả commit lên GitHub và kết thúc `Finished: SUCCESS`.
+- Đây là bằng chứng CI không còn phụ thuộc PAT cũ. Lần chạy được khởi tạo từ scan thủ công nên chưa phải bằng chứng webhook hoặc periodic scan tự kích hoạt.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
@@ -241,6 +247,10 @@ Phạm vi của bước này chỉ là CI:
 | GitHub commit status qua PAT | BLOCKED | GitHub trả HTTP `403` vì public-read PAT không có quyền tạo commit status |
 | GitHub App installation | PASS | App ID `4932639` được owner cài và giới hạn vào `zunohoang/open4um` |
 | Jenkins GitHub App credential | PASS | Credential ID `github-app-abslider-ci`; private key PKCS#8 hợp lệ và lưu trong Jenkins Credentials |
+| Local GitHub App key cleanup | PASS | Hai file PEM/PKCS#8 trong `/home/duckcy/Downloads` đã bị xóa; `test -e` xác nhận cả hai không còn tồn tại |
+| Legacy Jenkins credential cleanup | PASS | Global Credentials chỉ còn `github-app-abslider-ci`; không còn `github-abslider-readonly` |
+| Legacy PAT cleanup | PASS | GitHub xác nhận đã xóa token và danh sách fine-grained PAT hiện trống |
+| Post-cleanup GitHub App CI | PASS | Scan/build dùng `github-app-abslider-ci`, checkout `3e2e7fe`, 17/17 suite và 128/128 test PASS, publish commit status thành công |
 | GitHub App indexing | PASS | Kết nối bằng App credential; scan 6 branch và 1 pull request trong 5.1 giây |
 | GitHub commit status qua App | PASS | Build #6 thông báo GitHub thành công; public Status API trả context `continuous-integration/jenkins/branch` ở state `success` |
 | GitHub status target URL | LIMITATION | Link build trỏ tới `http://127.0.0.1:8080/...`; chỉ truy cập được trên Jenkins host |
@@ -276,6 +286,7 @@ Phạm vi của bước này chỉ là CI:
 | CI runtime | `TEST_PASS` — `abslider-ci/developer #1`, `#2`, `#3` và `#6` |
 | GitHub API authentication | `TEST_PASS` — GitHub App credential, authenticated scan |
 | GitHub status publishing | `TEST_PASS` — Jenkins log và public GitHub Status API |
+| Temporary credential cleanup | `TEST_PASS` — local private-key files, Jenkins credential cũ và PAT đã xóa; post-cleanup CI bằng GitHub App đã PASS |
 | Automatic GitHub trigger | `PLANNED` — authenticated manual scan đã PASS; chưa cấu hình periodic scan hoặc webhook |
 | CD/deployment | Ngoài phạm vi task |
 
