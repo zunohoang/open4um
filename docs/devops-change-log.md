@@ -241,6 +241,9 @@ Phạm vi của bước này chỉ là CI:
 - Commit tài liệu kế tiếp sẽ được dùng làm mẫu thử: không chạy scan thủ công, chờ Jenkins timer tự phát hiện commit và lên lịch CI.
 - Commit mẫu thử `dc9def2c9948f49f491c1665fafe427af9b90fa0` đã bị scan thủ công lúc 10:53 phát hiện và schedule trước khi timer 15 phút đến hạn. Build dùng credential `github-app-abslider-ci`, chạy trên `abslider-agent-01`, đạt 17/17 suite và 128/128 test, publish commit status lên GitHub và kết thúc `Finished: SUCCESS`.
 - Kết quả này xác minh Pipeline sau thay đổi vẫn ổn định, nhưng không được dùng làm bằng chứng periodic trigger. Cần chờ scan có timer cause; vì manual scan vừa chạy lúc 10:53 nên mốc chờ 15 phút được tính lại từ lần scan này.
+- Periodic scan tự khởi động lúc 11:08:08 với cause `Started by timer`, kết nối bằng GitHub App, phát hiện `developer` đổi từ `dc9def2` sang `127d25d` và tự lên lịch build. Scan xử lý 6 branch cùng 1 pull request trong 8.1 giây và kết thúc `Finished: SUCCESS`.
+- Build được timer scan schedule lấy `Jenkinsfile` và checkout đúng commit `127d25da0ff84f4f20aa15840fc5d9df095ee292`, dùng credential `github-app-abslider-ci`, chạy trên `abslider-agent-01`, đạt 17/17 suite và 128/128 test, thông báo kết quả commit lên GitHub và kết thúc `Finished: SUCCESS`.
+- Chuỗi timer → change detection → auto-schedule → unit test → GitHub commit status đã được xác minh end-to-end mà không cần người dùng bấm scan. Webhook vẫn chưa cấu hình vì Jenkins chỉ nghe trên loopback; periodic scan 15 phút là trigger CI hiện tại.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
@@ -259,6 +262,8 @@ Phạm vi của bước này chỉ là CI:
 | Periodic scan configuration | IMPLEMENTED | Bật `Periodically if not otherwise run`, interval `15 minutes` trên `ABSlider CI` |
 | Initial scan after configuration | PASS có giới hạn | GitHub App scan phát hiện `2efcb5d` và schedule build; cause là `Started by user`, chưa chứng minh timer |
 | Manual-scan build for periodic test commit | PASS có giới hạn | Build commit `dc9def2`: 17/17 suite, 128/128 test, GitHub status PASS; nguồn kích hoạt vẫn là scan thủ công |
+| Periodic timer scan | PASS | `Started by timer`; tự phát hiện `127d25d`, schedule build và kết thúc scan `SUCCESS` |
+| Timer-triggered Pipeline | PASS | Checkout `127d25d`, 17/17 suite và 128/128 test PASS, publish GitHub status, `Finished: SUCCESS` |
 | GitHub App indexing | PASS | Kết nối bằng App credential; scan 6 branch và 1 pull request trong 5.1 giây |
 | GitHub commit status qua App | PASS | Build #6 thông báo GitHub thành công; public Status API trả context `continuous-integration/jenkins/branch` ở state `success` |
 | GitHub status target URL | LIMITATION | Link build trỏ tới `http://127.0.0.1:8080/...`; chỉ truy cập được trên Jenkins host |
@@ -295,7 +300,7 @@ Phạm vi của bước này chỉ là CI:
 | GitHub API authentication | `TEST_PASS` — GitHub App credential, authenticated scan |
 | GitHub status publishing | `TEST_PASS` — Jenkins log và public GitHub Status API |
 | Temporary credential cleanup | `TEST_PASS` — local private-key files, Jenkins credential cũ và PAT đã xóa; post-cleanup CI bằng GitHub App đã PASS |
-| Automatic GitHub trigger | `TEST_PARTIAL` — periodic scan 15 phút đã cấu hình; chờ log có timer cause và tự phát hiện commit mới; webhook chưa cấu hình |
+| Automatic GitHub trigger | `TEST_PASS` — periodic scan 15 phút tự phát hiện `127d25d`, schedule và hoàn tất Pipeline/GitHub status; webhook chưa cấu hình |
 | CD/deployment | Ngoài phạm vi task |
 
 ---
