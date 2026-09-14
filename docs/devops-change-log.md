@@ -236,6 +236,9 @@ Phạm vi của bước này chỉ là CI:
 - Fine-grained PAT `jenkins-abslider-scan` đã được xóa; GitHub hiển thị banner `Deleted personal access token` và danh sách `No fine-grained tokens created`.
 - Sau khi bỏ PAT và credential Jenkins cũ, chạy lại repository scan. Jenkins kết nối GitHub API bằng App ID `4932639`, dùng duy nhất credential `github-app-abslider-ci` để checkout commit `3e2e7fece5d150c3f52104b15ef2d341ed669d86`, chạy 17/17 suite và 128/128 test PASS, thông báo kết quả commit lên GitHub và kết thúc `Finished: SUCCESS`.
 - Đây là bằng chứng CI không còn phụ thuộc PAT cũ. Lần chạy được khởi tạo từ scan thủ công nên chưa phải bằng chứng webhook hoặc periodic scan tự kích hoạt.
+- Ngày 2026-09-14, bật `Scan Repository Triggers > Periodically if not otherwise run` cho Multibranch Pipeline `ABSlider CI` với interval `15 minutes`. Đây là cơ chế polling fallback vì controller hiện chỉ nghe trên `127.0.0.1` và chưa thể nhận webhook từ GitHub qua Internet.
+- Lần scan ngay sau thao tác cấu hình bắt đầu bằng `Started by user`, kết nối qua GitHub App, phát hiện `developer` đổi từ `3e2e7fe` sang `2efcb5d` và lên lịch build. Scan hoàn tất `SUCCESS` trong 7.4 giây, nhưng chưa phải bằng chứng periodic timer vì cause vẫn là người dùng.
+- Commit tài liệu kế tiếp sẽ được dùng làm mẫu thử: không chạy scan thủ công, chờ Jenkins timer tự phát hiện commit và lên lịch CI.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
@@ -251,6 +254,8 @@ Phạm vi của bước này chỉ là CI:
 | Legacy Jenkins credential cleanup | PASS | Global Credentials chỉ còn `github-app-abslider-ci`; không còn `github-abslider-readonly` |
 | Legacy PAT cleanup | PASS | GitHub xác nhận đã xóa token và danh sách fine-grained PAT hiện trống |
 | Post-cleanup GitHub App CI | PASS | Scan/build dùng `github-app-abslider-ci`, checkout `3e2e7fe`, 17/17 suite và 128/128 test PASS, publish commit status thành công |
+| Periodic scan configuration | IMPLEMENTED | Bật `Periodically if not otherwise run`, interval `15 minutes` trên `ABSlider CI` |
+| Initial scan after configuration | PASS có giới hạn | GitHub App scan phát hiện `2efcb5d` và schedule build; cause là `Started by user`, chưa chứng minh timer |
 | GitHub App indexing | PASS | Kết nối bằng App credential; scan 6 branch và 1 pull request trong 5.1 giây |
 | GitHub commit status qua App | PASS | Build #6 thông báo GitHub thành công; public Status API trả context `continuous-integration/jenkins/branch` ở state `success` |
 | GitHub status target URL | LIMITATION | Link build trỏ tới `http://127.0.0.1:8080/...`; chỉ truy cập được trên Jenkins host |
@@ -287,7 +292,7 @@ Phạm vi của bước này chỉ là CI:
 | GitHub API authentication | `TEST_PASS` — GitHub App credential, authenticated scan |
 | GitHub status publishing | `TEST_PASS` — Jenkins log và public GitHub Status API |
 | Temporary credential cleanup | `TEST_PASS` — local private-key files, Jenkins credential cũ và PAT đã xóa; post-cleanup CI bằng GitHub App đã PASS |
-| Automatic GitHub trigger | `PLANNED` — authenticated manual scan đã PASS; chưa cấu hình periodic scan hoặc webhook |
+| Automatic GitHub trigger | `TEST_PARTIAL` — periodic scan 15 phút đã cấu hình; chờ log có timer cause và tự phát hiện commit mới; webhook chưa cấu hình |
 | CD/deployment | Ngoài phạm vi task |
 
 ---
