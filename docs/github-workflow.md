@@ -128,7 +128,7 @@ Trách nhiệm được tách rõ để Jenkins không cần quyền Docker, reg
 | GitHub Actions | Chờ Jenkins PASS đúng SHA, build và publish image GHCR |
 | VPS | Chạy hai Compose project tách biệt: Development và Production |
 
-Workflow `.github/workflows/publish-images.yml` chạy khi push vào `develop` hoặc `main` và có thể chạy thủ công trên đúng hai nhánh này. Workflow chỉ tiếp tục khi status Jenkins mới nhất của chính `github.sha` là `success`; trạng thái `failure`/`error` làm workflow dừng, còn `missing`/`pending` được chờ tối đa 25 phút.
+Workflow `.github/workflows/publish-images.yml` chạy khi push thay đổi `client/**`, `server/**` hoặc chính workflow vào `develop`/`main`, và có thể chạy thủ công trên đúng hai nhánh này. Commit chỉ sửa tài liệu hoặc deployment metadata không build lại image. Workflow chỉ tiếp tục khi status Jenkins mới nhất của chính `github.sha` là `success`; trạng thái `failure`/`error` làm workflow dừng, còn `missing`/`pending` được chờ tối đa 25 phút.
 
 ### 5.1. Artifact contract
 

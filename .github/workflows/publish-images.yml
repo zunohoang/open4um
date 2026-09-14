@@ -5,6 +5,10 @@ on:
     branches:
       - develop
       - main
+    paths:
+      - client/**
+      - server/**
+      - .github/workflows/publish-images.yml
   workflow_dispatch:
 
 permissions:

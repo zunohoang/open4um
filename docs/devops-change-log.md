@@ -71,6 +71,13 @@ main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai
 - Run vẫn kết thúc `failure` tại bước `Push images and capture digests`. Nguyên nhân là Docker in dòng `<tag>: digest: sha256:... size: ...`, trong khi parser cũ chỉ chấp nhận `digest:` ở field đầu nên trả chuỗi rỗng dù push đã thành công.
 - Sửa parser để tìm token `digest:` ở bất kỳ field nào và lấy field ngay sau nó; giữ nguyên regex xác minh digest `sha256:<64 hex>` trước khi tạo output/tag nhánh.
 - Regression dùng nguyên dòng client push trong run thất bại đã lấy đúng digest `sha256:2f3f087e...`; YAML parse, toàn bộ `run` block qua `bash -n`, Prettier và `actionlint v1.7.12` đều PASS sau sửa.
+- Commit sửa `1124006fdfe5f31e67d5cd80773d3dc692cd1af5` đã được push lên `origin/develop`. Jenkins `PR-13 #6` publish `continuous-integration/jenkins/pr-merge=success` cho đúng SHA này.
+- GitHub Actions run `34856425200` chờ Jenkins khoảng 5 phút 22 giây, sau đó checkout, build, login, push/capture digest, logout và post-checkout cleanup đều PASS; run hoàn tất `success` trong 6 phút 25 giây.
+- Artifact Development đã xác minh bằng manifest pull không cần login:
+  - Client: `ghcr.io/zunohoang/open4um-client@sha256:6bc0343fcdd8c086e8cb0a930bb0a7cebf7d4d4f9495de3a254ac922d271f88f`.
+  - Server: `ghcr.io/zunohoang/open4um-server@sha256:606608145b04ff97eddb3c304b4143792e0e532e13a43e7c1e2b3761d71ba377`.
+- Hai tag tiện lợi `open4um-client:develop` và `open4um-server:develop` cùng resolve chính xác về hai digest trên. Đây là registry proof; chưa phải VPS deployment proof.
+- Sau runtime PASS, giới hạn push trigger bằng path filter `client/**`, `server/**` và chính `publish-images.yml`. Commit chỉ sửa tài liệu hoặc deployment metadata sẽ không build/push image mới; `workflow_dispatch` vẫn cho phép publish thủ công khi cần.
 
 ### Gate và trạng thái
 
@@ -81,11 +88,13 @@ main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai
 | Workflow formatting | `TEST_PASS` | Prettier không báo lỗi cho `publish-images.yml` |
 | Jenkins exact-SHA filter | `TEST_PASS` — static/API | Mock `success`/`missing` PASS; Status API của `6bc11aa` trả `continuous-integration/jenkins/pr-merge=success` |
 | Whitespace/error markers | `TEST_PASS` | `git diff --check` không trả lỗi |
-| Repository commit/push | `IMPLEMENTED_LOCAL` | Hai file sửa lỗi/tài liệu chưa commit/push |
-| GitHub Actions runtime | `TEST_PARTIAL` | Run `34855287962`: Jenkins gate/build/login/push PASS; digest parser cũ làm bước cuối và run FAIL |
-| GHCR client/server package | `TEST_PASS` | Cả hai image của `fb8763c` tồn tại theo digest |
+| Workflow và parser commit/push | `PUSHED` | Workflow `fb8763c`; parser correction `1124006` trên `origin/develop` |
+| Runtime evidence documentation | `IMPLEMENTED_LOCAL` | Cập nhật kết quả run #2 chưa commit/push |
+| GitHub Actions runtime | `TEST_PASS` | Run `34856425200`, đúng SHA `1124006`, toàn bộ step PASS |
+| GHCR client/server package | `TEST_PASS` | Hai image `1124006` tồn tại; SHA tag và `develop` tag cùng digest |
 | Package visibility/anonymous pull | `TEST_PASS` | `docker manifest inspect` không cần login PASS cho cả client/server |
-| Digest parser correction | `TEST_PASS` — static | Regression log thật, YAML/bash/Prettier/actionlint PASS; chờ Actions run kế tiếp |
+| Digest parser correction | `TEST_PASS` — runtime | `Push images and capture digests` PASS trong run #2 |
+| Image publish path filter | `TEST_PASS` — static | Exact YAML paths, bash syntax, Prettier và actionlint PASS; chờ Actions runtime |
 | Development deploy | `NOT_STARTED` | Chưa có deploy wrapper/GitHub Environment/SSH credential |
 | Production deploy/approval/rollback | `NOT_STARTED` | Chỉ làm sau Development live gate |
 | VPS/DNS/Nginx/TLS | `UNCHANGED` | Ngoài phạm vi lượt này |
