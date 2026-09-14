@@ -62,15 +62,26 @@ Giữ `develop` làm nhánh tích hợp dài hạn cùng với `main`, thay cho 
 | Unmerged entries | PASS | `git diff --name-only --diff-filter=U` và `git ls-files -u` không trả kết quả |
 | Whitespace/error markers | PASS | `git diff --check` |
 
+### Bằng chứng GitHub/Jenkins trong giai đoạn chuyển nhánh
+
+- Tạo merge commit `86afff70924c77375b8d84b2f7f096da64cd5717` với hai parent `1132083` và `ea9a852`, sau đó push fast-forward lên `origin/developer`.
+- Mở pull request GitHub #14 với base `develop`, compare `developer`; GitHub xác nhận không còn conflict với base branch.
+- Jenkins direct-branch build `developer #12` checkout merge commit nhưng dừng đúng tại `Validate CI Context` với thông báo `CI is restricted to develop/main; received developer`. Install/test stages không chạy. Đây là failure chuyển tiếp do branch scan xảy ra trước khi Jenkins index PR, không phải test regression.
+- Cấu hình GitHub Branch Source filter thành `develop main PR-*`, giữ origin PR strategy `Merging the pull request with the current target branch revision` và bỏ fork discovery trong phạm vi repository nội bộ hiện tại.
+- Scan thủ công lúc 11:45:52 dùng GitHub App, tìm thấy PR #14 cùng `Jenkinsfile`, schedule job `PR-14` và kết thúc `SUCCESS` trong 7.2 giây.
+- Log `Will remove developer` chỉ xóa orphaned Jenkins child job do direct branch không còn thuộc allowlist; không xóa Git branch `developer` trên GitHub.
+- Jenkins `PR-14` lấy Pipeline definition từ tổ hợp source `86afff7` và target `ea9a852`, chạy trên `abslider-agent-01` với credential `github-app-abslider-ci`; `Validate CI Context` PASS cho target `develop`.
+- PR build checkout revision `86afff7`, chạy 17/17 unit-test suite và 137/137 test PASS, publish commit status lên GitHub rồi kết thúc `Finished: SUCCESS`.
+
 ### Trạng thái kiểm tra
 
 | Gate | Trạng thái | Ghi chú |
 |---|---|---|
-| Merge initiation | `IMPLEMENTED_LOCAL` | Merge đang mở trên local `developer`; chưa commit hoặc push |
+| Merge commit | `PUSHED` | `86afff7` đã có trên `origin/developer` |
 | Conflict resolution | `TEST_PASS` | Lockfile đã tái tạo; không còn unmerged entry |
-| Jenkins branch contract | `IMPLEMENTED_LOCAL` | Allowlist đã đổi thành `develop`, `main`; chưa chạy Jenkins runtime |
+| Jenkins branch contract | `TEST_PASS` | Filter `develop main PR-*` và PR target contract đã được xác minh bằng Jenkins `PR-14` |
 | Client/server quality gates | `TEST_PASS` | Client lint/build và server lint/build/full test đều PASS |
-| Pull request `developer → develop` | `PLANNED` | Chỉ mở sau khi toàn bộ local gate PASS |
+| Pull request `developer → develop` | `OPEN_CI_PASS` | GitHub PR #14; Jenkins PR build 17/17 suite, 137/137 test PASS; chưa merge |
 | Remote branch deletion | `NOT_STARTED` | Chỉ xóa `developer` sau khi merge PR, retarget PR và xác minh Jenkins trên `develop` |
 
 ---
