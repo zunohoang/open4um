@@ -5,7 +5,7 @@
 Áp dụng cho repository **ABSlider** trên GitHub (quản lý mã nguồn tập trung cho cả `client` và `server`), team 5 người: PM (Hoàng), Tester (Duy), 2 Developer (Nam, Thạch), DevOps (Đức). Mô hình nhánh: **Git Flow**. Commit theo **Conventional Commits**.
 
 > [!NOTE]
-> Toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**. Jenkins chịu trách nhiệm CI; GitHub Actions chỉ build/publish image sau khi Jenkins PASS đúng commit. Client và server đều chạy bằng Docker Compose trên VPS, phía sau Nginx.
+> Toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**. Kiến trúc đích dùng Jenkins cho toàn bộ CI/CD; GitHub chỉ giữ source code và GHCR package. Client và server chạy bằng Docker Compose trên VPS, phía sau Nginx.
 
 
 ---
@@ -45,7 +45,7 @@ Theo [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scop
 | `chore` | Việc vặt (cập nhật dependency, config) |
 | `test` | Thêm/sửa test |
 | `perf` | Cải thiện hiệu năng |
-| `ci` | Thay đổi GitHub Actions workflow |
+| `ci` | Thay đổi Jenkins pipeline hoặc hạ tầng CI/CD |
 
 ### Scopes (theo feature module)
 
@@ -62,7 +62,7 @@ Theo [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scop
 | `ui` | `components/ui` dùng chung |
 | `deps` | Cập nhật thư viện |
 | `config` | Cấu hình build/tsconfig/eslint |
-| `ci` | Workflow GitHub Actions |
+| `ci` | Jenkins pipeline và CI/CD configuration |
 
 ### Ví dụ commit tốt
 
@@ -122,17 +122,27 @@ Jenkins dùng user database nội bộ, tắt public signup và Global Matrix Au
 
 ---
 
-## 5. GitHub Actions — image publishing và CD
+## 5. Jenkins — build image, publish và deploy
 
-Trách nhiệm được tách rõ để Jenkins không cần quyền Docker, registry hoặc production secret:
+Kiến trúc đích không dùng GitHub Actions. GitHub chỉ còn hai vai trò: lưu source code và cung cấp GHCR làm container registry. Jenkins được tách thành hai vùng tin cậy để credential phát hành không xuất hiện trong job pull request:
 
-| Thành phần | Trách nhiệm |
-|---|---|
-| Jenkins | CI client/server và publish commit status |
-| GitHub Actions | Chờ Jenkins PASS đúng SHA, build và publish image GHCR |
-| VPS | Chạy hai Compose project tách biệt: Development và Production |
+| Thành phần | Agent/quyền | Trách nhiệm |
+|---|---|---|
+| `abslider-ci` | `jenkins-agent`, không Docker/registry/deploy secret | CI cho PR, `develop`, `main`; publish commit status |
+| `abslider-release` | `jenkins-builder`, rootless Docker, một executor | Chỉ discover trực tiếp `develop`/`main`; chạy lại quality gate, build và push image |
+| `abslider-deploy-01` | `abslider-deploy`, rootless Docker, một executor | Chỉ nhận release manifest; chạy root-owned wrapper, readiness và rollback |
 
-Workflow `.github/workflows/publish-images.yml` chạy khi push thay đổi `client/**`, `server/**` hoặc chính workflow vào `develop`/`main`, và có thể chạy thủ công trên đúng hai nhánh này. Commit chỉ sửa tài liệu hoặc deployment metadata không build lại image. Workflow chỉ tiếp tục khi status Jenkins mới nhất của chính `github.sha` là `success`; trạng thái `failure`/`error` làm workflow dừng, còn `missing`/`pending` được chờ tối đa 25 phút.
+Hai node đặc quyền theo chức năng phải cài Jenkins Job Restrictions Plugin và đặt node-level regex chỉ nhận `^abslider-release/(develop|main)$`. Label `docker-builder`/`abslider-deploy` một mình không phải ranh giới bảo mật vì Jenkinsfile của PR có thể tự yêu cầu label; node restriction mới ngăn job `abslider-ci/PR-*` chạy trên hai identity này.
+
+`Jenkinsfile.release` là Pipeline-as-Code của release job. Release pipeline từ chối PR, từ chối branch ngoài `develop/main`, xác minh checkout đúng remote head và yêu cầu builder đáp ứng các điều kiện sau:
+
+- Chạy bằng user riêng `jenkins-builder`.
+- Docker daemon ở rootless mode; user không ghi được `/var/run/docker.sock`.
+- Không đọc được Jenkins controller secrets.
+- Node.js `24.21.0`, npm `11.19.0`, Docker Buildx và Compose khả dụng.
+- Credential `ghcr-abslider-publisher` chỉ nằm trong scope của release folder/job, không nằm trong scope của `abslider-ci`.
+
+Release pipeline chạy lại clean install, lint, build và backend unit test trước khi build image. Việc chạy lại gate có chủ ý: chính job được cấp registry/deploy privilege phải tự chứng minh source đang phát hành đạt gate, không phụ thuộc race giữa hai job.
 
 ### 5.1. Artifact contract
 
@@ -140,30 +150,41 @@ Workflow `.github/workflows/publish-images.yml` chạy khi push thay đổi `cli
 - Server: `ghcr.io/zunohoang/open4um-server:<commit-sha>`.
 - Tag `develop`/`main` chỉ là con trỏ thuận tiện. Compose/deploy bắt buộc dùng reference theo digest `image@sha256:...` được registry trả về.
 - Client của `develop` compile API URL `https://dev-slides-api.sbltcup.dev/api/v1`; client của `main` compile `https://slides-api.sbltcup.dev/api/v1`.
-- Workflow dùng `GITHUB_TOKEN` với quyền tối thiểu `contents: read`, `statuses: read`, `packages: write`; không cần PAT hoặc SSH key trong giai đoạn publish image.
-- Workflow chỉ chạy trên push/dispatch của nhánh tin cậy, không publish package từ pull request.
+- Jenkins đăng nhập GHCR bằng credential `ghcr-abslider-publisher`. Credential chứa GitHub username và PAT classic chỉ có `write:packages`; không ghi token vào repository/log và không cấp credential này cho Multibranch Pipeline chạy PR.
+- Release job chỉ discover nhánh trực tiếp `develop`, `main`; tuyệt đối không discover pull request.
 
-GitHub Actions hiện **chưa deploy VPS**. Sau lần publish đầu tiên phải xác minh package liên kết đúng repository, visibility phù hợp và có thể pull manifest theo digest trước khi cấp deploy credential.
+`deploy/bin/deploy-abslider` là source của wrapper triển khai. Bản vận hành phải được admin cài thành `/opt/abslider/bin/deploy-abslider`, owner `root:root`, không cho agent sửa. Wrapper chạy không đặc quyền bằng `abslider-deploy`, chỉ nhận đúng environment, commit SHA và hai digest thuộc namespace ABSlider; dùng secret env file ngoài repository, chạy Compose rootless với `--wait`, kiểm tra backend readiness/frontend health và tự quay lại manifest trước nếu candidate lỗi. Jenkins không nhận `sudo` hoặc quyền vào host Docker socket.
 
 ### 5.2. Luồng CD mục tiêu
 
 ```text
-PR/push -> Jenkins CI -> GitHub commit status
+PR -> Jenkins CI -> GitHub commit status
 
-develop + Jenkins PASS
-  -> GitHub Actions build/push image theo SHA
+develop -> Jenkins release quality gate
+  -> rootless build/push image theo SHA
   -> deploy Development
   -> readiness/smoke check
 
-main + Jenkins PASS
-  -> build/push Production image
+main -> Jenkins release quality gate
+  -> rootless build/push Production image
   -> manual approval
   -> deploy Production
   -> readiness/smoke check
   -> rollback digest trước nếu lỗi
 ```
 
-Phần SSH/deploy chỉ được thêm sau khi deploy wrapper, secret file riêng cho từng môi trường, GitHub Environment và rollback manifest đã sẵn sàng. Runtime secret vẫn đặt ngoài repository tại VPS; không truyền toàn bộ `.env` qua workflow.
+### 5.3. Gate chuyển đổi khỏi GitHub Actions
+
+Không xóa workflow đang hoạt động trước khi Jenkins thay thế có runtime proof. Trình tự chuyển đổi bắt buộc:
+
+1. Commit/push `Jenkinsfile.release` và deploy wrapper source.
+2. Cài Job Restrictions Plugin; tạo `jenkins-builder` rootless và release Multibranch Pipeline chỉ discover `develop/main`; giới hạn cả builder/deploy node bằng regex job name.
+3. Thêm credential GHCR ở scope release; chạy với `DEPLOY_ENABLED=false` và xác minh cả hai manifest theo digest có thể pull.
+4. Tạo agent `abslider-deploy-01` cùng rootless Docker riêng; cài wrapper root-owned, tạo secret file riêng và Nginx/DNS/TLS cho Development; bật deploy và đạt readiness/smoke gate.
+5. Chạy `main`, xác minh manual approval và rollback Production.
+6. Chỉ sau các gate trên mới xóa `.github/workflows/publish-images.yml` và xác minh push mới không tạo GitHub Actions run.
+
+Trong trạng thái chuyển tiếp hiện tại, workflow GitHub Actions vẫn là rollback cho image publishing. Điều này không được ghi nhận là Jenkins-only hoàn tất cho tới khi bước 6 PASS. Runtime secret luôn nằm ngoài repository và không được truyền qua Pipeline.
 
 
 ---

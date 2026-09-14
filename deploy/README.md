@@ -33,3 +33,29 @@ docker compose \
 Only the frontend, backend and MinIO API bind to host loopback. Host Nginx owns
 public ports 80/443 and must proxy the corresponding domain to those loopback
 ports. MongoDB, Redis and the MinIO console are not published.
+
+## Jenkins deployment wrapper
+
+`bin/deploy-abslider` is the reviewed source for the deployment wrapper used by
+`Jenkinsfile.release`. Install it as
+`/opt/abslider/bin/deploy-abslider` with owner `root:root` and mode `0755`.
+Install this Compose file as `/opt/abslider/shared/compose.yml`, also owned by
+`root:root`. The `abslider-deploy` agent can write only release state under
+`/opt/abslider/releases`; it cannot modify the wrapper or Compose contract.
+
+The wrapper expects these root-owned, `abslider-deploy` group-readable files
+outside the repository (mode `0640`):
+
+- `/opt/abslider/shared/develop.env`
+- `/opt/abslider/shared/production.env`
+
+The secret files contain the runtime settings from `.env.example`, except the
+two `ABSLIDER_*_IMAGE` entries. Jenkins passes immutable digest references and
+the wrapper writes a non-secret release manifest under
+`/opt/abslider/releases/<environment>/`.
+
+Do not add `jenkins-builder` or `abslider-deploy` to the host `docker` group.
+Each uses a separate rootless Docker daemon: the builder daemon handles image
+build/publish, while the deploy daemon runs application Compose projects. The
+deploy agent executes the fixed root-owned wrapper directly as
+`abslider-deploy`; Jenkins receives no sudo rule and no rootful Docker access.

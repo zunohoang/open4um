@@ -1,0 +1,338 @@
+pipeline {
+  agent {
+    label 'linux && node24 && docker-builder'
+  }
+
+  tools {
+    nodejs 'nodejs-24'
+  }
+
+  parameters {
+    booleanParam(
+      name: 'DEPLOY_ENABLED',
+      defaultValue: false,
+      description: 'Deploy the published digest through the root-owned VPS wrapper'
+    )
+  }
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
+    disableConcurrentBuilds(abortPrevious: true)
+    skipDefaultCheckout(true)
+    timeout(time: 45, unit: 'MINUTES')
+    timestamps()
+  }
+
+  environment {
+    CI = 'true'
+    NPM_CONFIG_AUDIT = 'false'
+    NPM_CONFIG_FUND = 'false'
+    REGISTRY = 'ghcr.io'
+    CLIENT_IMAGE = 'ghcr.io/zunohoang/open4um-client'
+    SERVER_IMAGE = 'ghcr.io/zunohoang/open4um-server'
+  }
+
+  stages {
+    stage('Checkout Trusted Branch') {
+      steps {
+        deleteDir()
+        checkout scm
+
+        script {
+          if (env.CHANGE_ID || !['develop', 'main'].contains(env.BRANCH_NAME)) {
+            error("Release is restricted to direct develop/main builds; received ${env.BRANCH_NAME}")
+          }
+
+          env.RELEASE_ENVIRONMENT = env.BRANCH_NAME == 'main' ? 'production' : 'develop'
+          env.CLIENT_API_BASE_URL = env.BRANCH_NAME == 'main'
+            ? 'https://slides-api.sbltcup.dev/api/v1'
+            : 'https://dev-slides-api.sbltcup.dev/api/v1'
+          env.RELEASE_SHA = sh(
+            returnStdout: true,
+            script: 'git rev-parse HEAD'
+          ).trim()
+        }
+
+        sh '''
+          set -eu
+
+          case "$BRANCH_NAME" in
+            develop|main) ;;
+            *) echo "Unsupported release branch: $BRANCH_NAME" >&2; exit 1 ;;
+          esac
+
+          case "$RELEASE_SHA" in
+            *[!0-9a-f]*|'') echo 'Invalid release SHA' >&2; exit 1 ;;
+          esac
+          test "${#RELEASE_SHA}" -eq 40
+
+          remote_sha="$(git ls-remote origin "refs/heads/$BRANCH_NAME" | awk 'NR == 1 { print $1 }')"
+          test "$remote_sha" = "$RELEASE_SHA"
+        '''
+      }
+    }
+
+    stage('Validate Isolated Builder') {
+      steps {
+        sh '''
+          set -eu
+          test "$(id -un)" = 'jenkins-builder'
+          test ! -r /var/lib/jenkins/secrets/master.key
+          test ! -w /var/run/docker.sock
+          test "$(node --version)" = 'v24.21.0'
+          test "$(npm --version)" = '11.19.0'
+          test -n "${DOCKER_HOST:-}"
+          docker info --format '{{json .SecurityOptions}}' | grep -q 'name=rootless'
+          docker buildx version
+          docker compose version
+          printf 'sha=%s branch=%s environment=%s agent=%s user=%s\n' \
+            "$RELEASE_SHA" \
+            "$BRANCH_NAME" \
+            "$RELEASE_ENVIRONMENT" \
+            "$NODE_NAME" \
+            "$(id -un)"
+        '''
+      }
+    }
+
+    stage('Install Dependencies') {
+      parallel {
+        stage('Install Client Dependencies') {
+          steps {
+            dir('client') {
+              sh 'npm ci --no-audit --no-fund'
+            }
+          }
+        }
+
+        stage('Install Backend Dependencies') {
+          steps {
+            dir('server') {
+              sh 'npm ci --no-audit --no-fund'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Quality Gates') {
+      parallel {
+        stage('Client Lint and Build') {
+          steps {
+            dir('client') {
+              sh '''
+                set -eu
+                npm run lint
+                npm run build
+              '''
+            }
+          }
+        }
+
+        stage('Backend Lint and Build') {
+          steps {
+            dir('server') {
+              sh '''
+                set -eu
+                npm run lint
+                npm run build
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Backend Unit Tests') {
+      steps {
+        dir('server') {
+          sh 'npm run test:unit:ci'
+        }
+      }
+    }
+
+    stage('Build Images') {
+      steps {
+        sh '''
+          set -eu
+          source_url="https://github.com/zunohoang/open4um"
+
+          docker build \
+            --platform linux/amd64 \
+            --label "org.opencontainers.image.source=$source_url" \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --label "org.opencontainers.image.ref.name=$BRANCH_NAME" \
+            --build-arg "VITE_API_BASE_URL=$CLIENT_API_BASE_URL" \
+            --build-arg 'VITE_ENABLE_EMAIL_VERIFICATION=true' \
+            --tag "$CLIENT_IMAGE:$RELEASE_SHA" \
+            client
+
+          docker build \
+            --platform linux/amd64 \
+            --label "org.opencontainers.image.source=$source_url" \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --label "org.opencontainers.image.ref.name=$BRANCH_NAME" \
+            --tag "$SERVER_IMAGE:$RELEASE_SHA" \
+            server
+        '''
+      }
+    }
+
+    stage('Publish Images') {
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'ghcr-abslider-publisher',
+            usernameVariable: 'GHCR_USERNAME',
+            passwordVariable: 'GHCR_TOKEN'
+          )
+        ]) {
+          sh '''
+            set -eu
+            set +x
+
+            client_log="$(mktemp)"
+            server_log="$(mktemp)"
+
+            cleanup_publish() {
+              rm -f -- "$client_log" "$server_log"
+              docker logout "$REGISTRY" >/dev/null 2>&1 || true
+            }
+            trap cleanup_publish EXIT
+
+            extract_digest() {
+              awk '
+                {
+                  for (field = 1; field <= NF; field++) {
+                    if ($field == "digest:") print $(field + 1)
+                  }
+                }
+              ' "$1" | tail -n 1
+            }
+
+            printf '%s' "$GHCR_TOKEN" |
+              docker login "$REGISTRY" --username "$GHCR_USERNAME" --password-stdin
+
+            docker push "$CLIENT_IMAGE:$RELEASE_SHA" | tee "$client_log"
+            client_digest="$(extract_digest "$client_log")"
+
+            docker push "$SERVER_IMAGE:$RELEASE_SHA" | tee "$server_log"
+            server_digest="$(extract_digest "$server_log")"
+
+            for digest in "$client_digest" "$server_digest"; do
+              if ! printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+                echo 'Registry did not return a valid immutable digest' >&2
+                exit 1
+              fi
+            done
+
+            docker tag "$CLIENT_IMAGE:$RELEASE_SHA" "$CLIENT_IMAGE:$BRANCH_NAME"
+            docker tag "$SERVER_IMAGE:$RELEASE_SHA" "$SERVER_IMAGE:$BRANCH_NAME"
+            docker push "$CLIENT_IMAGE:$BRANCH_NAME"
+            docker push "$SERVER_IMAGE:$BRANCH_NAME"
+
+            {
+              printf 'RELEASE_ENVIRONMENT=%s\n' "$RELEASE_ENVIRONMENT"
+              printf 'RELEASE_SHA=%s\n' "$RELEASE_SHA"
+              printf 'ABSLIDER_CLIENT_IMAGE=%s@%s\n' "$CLIENT_IMAGE" "$client_digest"
+              printf 'ABSLIDER_SERVER_IMAGE=%s@%s\n' "$SERVER_IMAGE" "$server_digest"
+            } > release-manifest.env
+          '''
+        }
+
+        script {
+          env.CLIENT_DIGEST_REF = sh(
+            returnStdout: true,
+            script: "sed -n 's/^ABSLIDER_CLIENT_IMAGE=//p' release-manifest.env"
+          ).trim()
+          env.SERVER_DIGEST_REF = sh(
+            returnStdout: true,
+            script: "sed -n 's/^ABSLIDER_SERVER_IMAGE=//p' release-manifest.env"
+          ).trim()
+        }
+
+        archiveArtifacts artifacts: 'release-manifest.env', fingerprint: true
+        stash name: 'release-manifest',
+          includes: 'release-manifest.env',
+          useDefaultExcludes: false
+      }
+    }
+
+    stage('Approve Production') {
+      when {
+        allOf {
+          branch 'main'
+          expression { return params.DEPLOY_ENABLED }
+        }
+      }
+      steps {
+        input message: "Deploy ${env.RELEASE_SHA} to Production?",
+          ok: 'Deploy immutable digests'
+      }
+    }
+
+    stage('Deploy') {
+      agent {
+        label 'linux && abslider-deploy'
+      }
+      when {
+        beforeAgent true
+        expression { return params.DEPLOY_ENABLED }
+      }
+      steps {
+        deleteDir()
+        unstash 'release-manifest'
+
+        script {
+          env.CLIENT_DIGEST_REF = sh(
+            returnStdout: true,
+            script: "sed -n 's/^ABSLIDER_CLIENT_IMAGE=//p' release-manifest.env"
+          ).trim()
+          env.SERVER_DIGEST_REF = sh(
+            returnStdout: true,
+            script: "sed -n 's/^ABSLIDER_SERVER_IMAGE=//p' release-manifest.env"
+          ).trim()
+        }
+
+        sh '''
+          set -eu
+          test "$(id -un)" = 'abslider-deploy'
+          test ! -r /var/lib/jenkins/secrets/master.key
+          test ! -w /var/run/docker.sock
+          test -n "${DOCKER_HOST:-}"
+          docker info --format '{{json .SecurityOptions}}' | grep -q 'name=rootless'
+
+          /opt/abslider/bin/deploy-abslider \
+            "$RELEASE_ENVIRONMENT" \
+            "$RELEASE_SHA" \
+            "$CLIENT_DIGEST_REF" \
+            "$SERVER_DIGEST_REF"
+        '''
+      }
+      post {
+        always {
+          deleteDir()
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      junit allowEmptyResults: true,
+        testResults: 'server/reports/junit/server-unit.xml'
+      archiveArtifacts allowEmptyArchive: true,
+        artifacts: 'server/coverage/**'
+      sh '''
+        docker logout "$REGISTRY" >/dev/null 2>&1 || true
+        if test -n "${RELEASE_SHA:-}"; then
+          docker image rm \
+            "$CLIENT_IMAGE:$RELEASE_SHA" \
+            "$SERVER_IMAGE:$RELEASE_SHA" \
+            >/dev/null 2>&1 || true
+        fi
+      '''
+      deleteDir()
+    }
+  }
+}

@@ -31,6 +31,51 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-15 — Chuẩn bị chuyển toàn bộ CI/CD sang Jenkins
+
+### Mục tiêu và quyết định
+
+Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vượt qua runtime gate. GitHub tiếp tục làm source host và GHCR registry; "Jenkins-only" ở đây nghĩa là mọi orchestration CI/CD do Jenkins thực hiện.
+
+- Ngày thực hiện: `2026-09-15`.
+- Nhánh làm việc: `develop` tại baseline `f8774e6df4ddcb71d704275e39c455d0f815afad`.
+
+### Thay đổi local
+
+- Thêm `Jenkinsfile.release` cho release Multibranch Pipeline riêng, chỉ chấp nhận direct branch `develop`/`main` và từ chối pull request.
+- Release job chạy lại clean install, lint, build và backend unit test trước khi build/push client/server image theo commit SHA.
+- Yêu cầu agent riêng `jenkins-builder` dùng rootless Docker, không ghi được host Docker socket và không đọc controller secrets.
+- Node builder/deploy bắt buộc dùng Job Restrictions Plugin với regex chỉ cho phép `abslider-release/develop` hoặc `abslider-release/main`; label riêng không được coi là security boundary.
+- GHCR credential có ID `ghcr-abslider-publisher` chỉ được cấp trong scope release; không dùng credential này trong `abslider-ci` chạy PR.
+- Thêm `deploy/bin/deploy-abslider`: wrapper root-owned nhưng chạy không đặc quyền bằng `abslider-deploy`, kiểm tra chặt environment/SHA/digest, dùng Compose rootless/project tách biệt, readiness/frontend health và rollback release trước khi candidate lỗi.
+- Tách deploy sang node `abslider-deploy-01`; node chỉ nhận manifest không chứa secret, không checkout source, không có sudo và không ghi được host Docker socket. Runtime secret nằm ngoài repository và chỉ user deploy đọc được.
+- Production vẫn yêu cầu Jenkins `input` approval trước deploy. Tham số `DEPLOY_ENABLED` mặc định `false` để lần runtime gate đầu chỉ build/publish, chưa tác động application trên VPS.
+- Chưa xóa `.github/workflows/publish-images.yml`; workflow cũ chỉ được gỡ sau khi Jenkins publish và deploy runtime PASS, tránh tạo khoảng trống artifact pipeline.
+
+### Bằng chứng và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Repository implementation | `IMPLEMENTED_LOCAL` | `Jenkinsfile.release`, deploy wrapper và tài liệu |
+| Shell syntax/static checks | `TEST_PASS` | Wrapper và toàn bộ multiline shell block qua `bash -n`; invalid-input refusal, Compose render và `git diff --check` PASS |
+| Isolated rootless builder | `NOT_CONFIGURED` | VPS còn thiếu `uidmap`, `slirp4netns`, `fuse-overlayfs` và subuid/subgid |
+| Privileged-node job restriction | `NOT_CONFIGURED` | Cần cài/configure Job Restrictions Plugin trước khi online builder/deploy agent |
+| GHCR Jenkins credential | `NOT_CONFIGURED` | Cần PAT classic chỉ có `write:packages`, lưu ngoài repository |
+| Jenkins image publishing | `NOT_RUN` | Chưa có runtime build/push từ Jenkins |
+| Development deploy | `NOT_STARTED` | Chưa có secret env/Nginx runtime gate |
+| Production deploy | `NOT_STARTED` | Yêu cầu Development PASS và manual approval |
+| GitHub Actions removal | `PLANNED` | Chỉ xóa sau Jenkins replacement proof |
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile.release`
+- `deploy/bin/deploy-abslider`
+- `deploy/README.md`
+- `docs/github-workflow.md`
+- `docs/devops-change-log.md`
+
+---
+
 ## 2026-09-15 — Chuyển Jenkins CI lên VPS và xác minh hoạt động 24/7
 
 ### Mục tiêu và phạm vi
