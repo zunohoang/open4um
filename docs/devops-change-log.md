@@ -239,6 +239,8 @@ Phạm vi của bước này chỉ là CI:
 - Ngày 2026-09-14, bật `Scan Repository Triggers > Periodically if not otherwise run` cho Multibranch Pipeline `ABSlider CI` với interval `15 minutes`. Đây là cơ chế polling fallback vì controller hiện chỉ nghe trên `127.0.0.1` và chưa thể nhận webhook từ GitHub qua Internet.
 - Lần scan ngay sau thao tác cấu hình bắt đầu bằng `Started by user`, kết nối qua GitHub App, phát hiện `developer` đổi từ `3e2e7fe` sang `2efcb5d` và lên lịch build. Scan hoàn tất `SUCCESS` trong 7.4 giây, nhưng chưa phải bằng chứng periodic timer vì cause vẫn là người dùng.
 - Commit tài liệu kế tiếp sẽ được dùng làm mẫu thử: không chạy scan thủ công, chờ Jenkins timer tự phát hiện commit và lên lịch CI.
+- Commit mẫu thử `dc9def2c9948f49f491c1665fafe427af9b90fa0` đã bị scan thủ công lúc 10:53 phát hiện và schedule trước khi timer 15 phút đến hạn. Build dùng credential `github-app-abslider-ci`, chạy trên `abslider-agent-01`, đạt 17/17 suite và 128/128 test, publish commit status lên GitHub và kết thúc `Finished: SUCCESS`.
+- Kết quả này xác minh Pipeline sau thay đổi vẫn ổn định, nhưng không được dùng làm bằng chứng periodic trigger. Cần chờ scan có timer cause; vì manual scan vừa chạy lúc 10:53 nên mốc chờ 15 phút được tính lại từ lần scan này.
 
 | Kiểm tra runtime | Kết quả | Ghi chú |
 |---|---|---|
@@ -256,6 +258,7 @@ Phạm vi của bước này chỉ là CI:
 | Post-cleanup GitHub App CI | PASS | Scan/build dùng `github-app-abslider-ci`, checkout `3e2e7fe`, 17/17 suite và 128/128 test PASS, publish commit status thành công |
 | Periodic scan configuration | IMPLEMENTED | Bật `Periodically if not otherwise run`, interval `15 minutes` trên `ABSlider CI` |
 | Initial scan after configuration | PASS có giới hạn | GitHub App scan phát hiện `2efcb5d` và schedule build; cause là `Started by user`, chưa chứng minh timer |
+| Manual-scan build for periodic test commit | PASS có giới hạn | Build commit `dc9def2`: 17/17 suite, 128/128 test, GitHub status PASS; nguồn kích hoạt vẫn là scan thủ công |
 | GitHub App indexing | PASS | Kết nối bằng App credential; scan 6 branch và 1 pull request trong 5.1 giây |
 | GitHub commit status qua App | PASS | Build #6 thông báo GitHub thành công; public Status API trả context `continuous-integration/jenkins/branch` ở state `success` |
 | GitHub status target URL | LIMITATION | Link build trỏ tới `http://127.0.0.1:8080/...`; chỉ truy cập được trên Jenkins host |
