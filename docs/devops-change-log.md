@@ -86,6 +86,17 @@ Chuẩn bị một artifact/runtime contract có thể dùng chung cho hai môi 
 | Temporary smoke cleanup | PASS | Xóa đúng hai project smoke, network và các volume tạm; xác minh không còn resource `abslider-gate1-20260914*` hoặc `abslider-gate1-final*` |
 | Whitespace/error markers | PASS | `git diff --check` |
 
+### Bằng chứng Jenkins runtime sau push
+
+- Commit Gate 1 `b5fd3f16d79c3b59e5caeb2fda25e3caf3d7cb3c` được push lên `origin/develop` và trở thành head của PR #13 hướng vào `main` tại `74ccef913168259aad9f920c0016f7b96a5730c6`.
+- Branch indexing lúc 19:33:24 kết nối GitHub bằng App ID `4932639`, lấy Jenkinsfile từ tổ hợp PR head/target và schedule build `abslider-ci/PR-13 #3`.
+- Merge strategy đưa `main` vào PR head thành công; vì `main` là ancestor, revision checkout vẫn đúng `b5fd3f1`. Jenkins log ghi đúng commit message `feat(devops): add isolated deployment runtime`.
+- Pipeline chạy trên `abslider-agent-01` tại workspace `/var/lib/jenkins-agent/workspace/abslider-ci_PR-13`, bằng user `jenkins-agent`; không đọc được controller master key và dùng đúng Node `24.21.0`, npm `11.19.0`.
+- Client/server clean-install chạy song song, lần lượt cài 254 và 852 package. Install-script/deprecation warning còn được ghi nhận nhưng hai lệnh đều exit `0`.
+- Client lint/build và backend lint/build chạy song song đều PASS. Client build 427 module trong 1.98 giây; bundle 883.40 kB tiếp tục là warning, không phải failure.
+- Backend unit test đạt 18/18 suite, 142/142 test, 0 snapshot trong 1.619 giây. Coverage tổng: statements 78.65%, branches 62.42%, functions 80.70%, lines 80.52%.
+- Post Actions ghi JUnit, archive coverage và dọn workspace. Checks API chưa có publisher phù hợp nhưng Jenkins vẫn thông báo kết quả commit qua GitHub status; Pipeline kết thúc `Finished: SUCCESS` sau khoảng 31 giây.
+
 ### File bị ảnh hưởng
 
 - `Jenkinsfile`
@@ -114,11 +125,11 @@ Chuẩn bị một artifact/runtime contract có thể dùng chung cho hai môi 
 | Production env/CORS/MinIO contract | `TEST_PASS` | Đã test tĩnh và runtime local |
 | Frontend/backend images | `TEST_PASS` | Chỉ là local images; chưa publish registry |
 | Dual-environment Compose | `TEST_PASS` | Render và isolated runtime smoke local PASS; chưa chạy trên VPS |
-| Jenkins quality gate mở rộng | `IMPLEMENTED_LOCAL` | Chưa có Jenkins runtime evidence cho Jenkinsfile mới |
+| Jenkins quality gate mở rộng | `TEST_PASS` | Jenkins `PR-13 #3`; parallel client/server install + lint/build và 142 unit tests PASS |
 | DNS/Nginx/TLS | `NOT_STARTED` | Các domain `slides*`/`ci` chưa trỏ VPS |
 | Registry/deploy/rollback | `NOT_STARTED` | Chưa có GHCR package, digest release manifest hoặc VPS deploy credential |
 | Production release từ `main` | `BLOCKED` | `main` còn cũ; chỉ merge `develop → main` sau CI/development live gate |
-| Repository commit/push | `IMPLEMENTED_LOCAL` | Chưa commit/push thay đổi Gate 1 |
+| Repository commit/push | `PUSHED` | `b5fd3f16d79c3b59e5caeb2fda25e3caf3d7cb3c` đã xác minh trên `origin/develop` và Jenkins checkout |
 | VPS deployment | `NOT_STARTED` | Không ghi nhận `DEPLOYED` trước khi có live-check qua HTTPS |
 
 ---
