@@ -16,7 +16,7 @@ export const initTrashCleanupCron = () => {
   })
 
   // Đặt lịch chạy định kỳ mỗi ngày lúc 00:00:00 ('0 0 * * *')
-  cron.schedule('0 0 * * *', async () => {
+  const task = cron.schedule('0 0 * * *', async () => {
     logger.info(
       '⏳ [CronJob] Bắt đầu quét và xóa vĩnh viễn bài giảng quá hạn 30 ngày trong thùng rác...'
     )
@@ -33,4 +33,6 @@ export const initTrashCleanupCron = () => {
   logger.info(
     '⏰ [CronJob] Đã kích hoạt lịch trình dọn dẹp thùng rác 30 ngày (00:00 hàng ngày)'
   )
+
+  return task
 }

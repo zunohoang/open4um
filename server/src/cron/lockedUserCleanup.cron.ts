@@ -16,7 +16,7 @@ export const initLockedUserCleanupCron = () => {
   })
 
   // Đặt lịch chạy định kỳ mỗi ngày lúc 00:00:00 ('0 0 * * *')
-  cron.schedule('0 0 * * *', async () => {
+  const task = cron.schedule('0 0 * * *', async () => {
     logger.info(
       '⏳ [CronJob] Bắt đầu quét và xóa vĩnh viễn tài khoản bị khóa quá 30 ngày...'
     )
@@ -38,4 +38,6 @@ export const initLockedUserCleanupCron = () => {
   logger.info(
     '⏰ [CronJob] Đã kích hoạt lịch trình tự động xóa tài khoản bị khóa 30 ngày (00:00 hàng ngày)'
   )
+
+  return task
 }

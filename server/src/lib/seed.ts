@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { UserModel } from '@/models/user.model'
 import { CreditConfigModel } from '@/models/creditConfig.model'
 import { logger } from '@/lib/logger'
+import { DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD, env } from '@/config/env'
 
 export const seedCreditConfig = async () => {
   let config = await CreditConfigModel.findOne()
@@ -17,12 +18,10 @@ export const seedCreditConfig = async () => {
 }
 
 export const seedAdmin = async () => {
-  const email = (process.env.ADMIN_EMAIL ?? 'admin@abslider.com')
-    .toLowerCase()
-    .trim()
-  const password = process.env.ADMIN_PASSWORD ?? 'admin123456'
-  const name = process.env.ADMIN_NAME ?? 'Admin ABSlider'
-  const creditBalance = Number(process.env.ADMIN_CREDIT_BALANCE) || 1000
+  const email = env.ADMIN_EMAIL ?? DEFAULT_ADMIN_EMAIL
+  const password = env.ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD
+  const name = env.ADMIN_NAME
+  const creditBalance = env.ADMIN_CREDIT_BALANCE
 
   // Kiểm tra tài khoản admin với email chỉ định đã tồn tại chưa
   let admin = await UserModel.findOne({ email })
@@ -48,7 +47,7 @@ export const seedAdmin = async () => {
       creditBalance
     })
 
-    if (process.env.NODE_ENV === 'production') {
+    if (env.NODE_ENV === 'production') {
       logger.warn(
         { email: admin.email },
         '⚠️ [CẢNH BÁO BẢO MẬT] Tài khoản admin khởi tạo đã được tạo trên môi trường production! Vui lòng đăng nhập và ĐỔI MẬT KHẨU ngay lập tức.'
