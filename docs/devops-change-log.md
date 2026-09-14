@@ -61,6 +61,17 @@ main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai
 - Không chạy workflow từ `pull_request`, không thêm PAT, registry password hoặc SSH key.
 - Cập nhật `docs/github-workflow.md`, loại mô tả cũ về GitHub Actions làm CI, deploy server bằng tag `latest` và host client trên Vercel.
 
+### Runtime đầu tiên và sửa digest parser
+
+- Commit `fb8763cec2fd13f91edc68cf2ec52a30599c5eb6` đã được push lên `origin/develop`; GitHub Actions tạo run `34855287962` từ push event.
+- Workflow chờ đúng Jenkins SHA: 16 lần đầu chưa có context, lần 17-18 nhận `continuous-integration/jenkins/pr-merge=pending`, lần 19 nhận `success` rồi mới checkout/build.
+- Checkout, client/server Docker build và GHCR login đều PASS. Hai image theo SHA đã thực sự được publish và pull manifest ẩn danh thành công:
+  - Client: `ghcr.io/zunohoang/open4um-client@sha256:2f3f087ed23fa557ed62d8169c8988180829d2b9c49cfea47ad072f8fd404645`.
+  - Server: `ghcr.io/zunohoang/open4um-server@sha256:ed99158d0d09eed2d8fd8c71fa503d29e6f2efcf6a80e5b347c8dddb4cc6d8ca`.
+- Run vẫn kết thúc `failure` tại bước `Push images and capture digests`. Nguyên nhân là Docker in dòng `<tag>: digest: sha256:... size: ...`, trong khi parser cũ chỉ chấp nhận `digest:` ở field đầu nên trả chuỗi rỗng dù push đã thành công.
+- Sửa parser để tìm token `digest:` ở bất kỳ field nào và lấy field ngay sau nó; giữ nguyên regex xác minh digest `sha256:<64 hex>` trước khi tạo output/tag nhánh.
+- Regression dùng nguyên dòng client push trong run thất bại đã lấy đúng digest `sha256:2f3f087e...`; YAML parse, toàn bộ `run` block qua `bash -n`, Prettier và `actionlint v1.7.12` đều PASS sau sửa.
+
 ### Gate và trạng thái
 
 | Gate | Trạng thái | Ghi chú |
@@ -70,10 +81,11 @@ main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai
 | Workflow formatting | `TEST_PASS` | Prettier không báo lỗi cho `publish-images.yml` |
 | Jenkins exact-SHA filter | `TEST_PASS` — static/API | Mock `success`/`missing` PASS; Status API của `6bc11aa` trả `continuous-integration/jenkins/pr-merge=success` |
 | Whitespace/error markers | `TEST_PASS` | `git diff --check` không trả lỗi |
-| Repository commit/push | `IMPLEMENTED_LOCAL` | Ba file thay đổi chưa commit/push |
-| GitHub Actions runtime | `NOT_STARTED` | Chỉ chạy sau khi workflow được commit/push; chưa được ghi nhận là publish thành công |
-| GHCR client/server package | `NOT_STARTED` | Chỉ tạo sau khi commit được push và Jenkins PASS |
-| Package visibility/anonymous pull | `NOT_STARTED` | Phải xác minh sau lần publish đầu tiên |
+| Repository commit/push | `IMPLEMENTED_LOCAL` | Hai file sửa lỗi/tài liệu chưa commit/push |
+| GitHub Actions runtime | `TEST_PARTIAL` | Run `34855287962`: Jenkins gate/build/login/push PASS; digest parser cũ làm bước cuối và run FAIL |
+| GHCR client/server package | `TEST_PASS` | Cả hai image của `fb8763c` tồn tại theo digest |
+| Package visibility/anonymous pull | `TEST_PASS` | `docker manifest inspect` không cần login PASS cho cả client/server |
+| Digest parser correction | `TEST_PASS` — static | Regression log thật, YAML/bash/Prettier/actionlint PASS; chờ Actions run kế tiếp |
 | Development deploy | `NOT_STARTED` | Chưa có deploy wrapper/GitHub Environment/SSH credential |
 | Production deploy/approval/rollback | `NOT_STARTED` | Chỉ làm sau Development live gate |
 | VPS/DNS/Nginx/TLS | `UNCHANGED` | Ngoài phạm vi lượt này |

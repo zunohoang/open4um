@@ -167,11 +167,21 @@ jobs:
           client_log="$RUNNER_TEMP/client-push.log"
           server_log="$RUNNER_TEMP/server-push.log"
 
+          extract_digest() {
+            awk '
+              {
+                for (field = 1; field <= NF; field++) {
+                  if ($field == "digest:") print $(field + 1)
+                }
+              }
+            ' "$1" | tail -n 1
+          }
+
           docker push "$CLIENT_IMAGE:$GITHUB_SHA" | tee "$client_log"
-          client_digest="$(awk '$1 == "digest:" { print $2 }' "$client_log" | tail -n 1)"
+          client_digest="$(extract_digest "$client_log")"
 
           docker push "$SERVER_IMAGE:$GITHUB_SHA" | tee "$server_log"
-          server_digest="$(awk '$1 == "digest:" { print $2 }' "$server_log" | tail -n 1)"
+          server_digest="$(extract_digest "$server_log")"
 
           for digest in "$client_digest" "$server_digest"; do
             if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
