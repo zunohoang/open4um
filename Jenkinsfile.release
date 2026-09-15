@@ -27,9 +27,9 @@ pipeline {
     CI = 'true'
     NPM_CONFIG_AUDIT = 'false'
     NPM_CONFIG_FUND = 'false'
-    REGISTRY = 'ghcr.io'
-    CLIENT_IMAGE = 'ghcr.io/zunohoang/open4um-client'
-    SERVER_IMAGE = 'ghcr.io/zunohoang/open4um-server'
+    REGISTRY = 'docker.io'
+    CLIENT_IMAGE = 'docker.io/ducchert87/open4um-client'
+    SERVER_IMAGE = 'docker.io/ducchert87/open4um-server'
   }
 
   stages {
@@ -182,9 +182,9 @@ pipeline {
       steps {
         withCredentials([
           usernamePassword(
-            credentialsId: 'ghcr-abslider-publisher',
-            usernameVariable: 'GHCR_USERNAME',
-            passwordVariable: 'GHCR_TOKEN'
+            credentialsId: 'dockerhub-abslider-publisher',
+            usernameVariable: 'DOCKERHUB_USERNAME',
+            passwordVariable: 'DOCKERHUB_TOKEN'
           )
         ]) {
           sh '''
@@ -193,10 +193,13 @@ pipeline {
 
             client_log="$(mktemp)"
             server_log="$(mktemp)"
+            docker_config="$(mktemp -d)"
+            export DOCKER_CONFIG="$docker_config"
 
             cleanup_publish() {
-              rm -f -- "$client_log" "$server_log"
               docker logout "$REGISTRY" >/dev/null 2>&1 || true
+              rm -f -- "$client_log" "$server_log" "$docker_config/config.json"
+              rmdir -- "$docker_config" 2>/dev/null || true
             }
             trap cleanup_publish EXIT
 
@@ -210,13 +213,23 @@ pipeline {
               ' "$1" | tail -n 1
             }
 
-            printf '%s' "$GHCR_TOKEN" |
-              docker login "$REGISTRY" --username "$GHCR_USERNAME" --password-stdin
+            printf '%s' "$DOCKERHUB_TOKEN" |
+              docker login "$REGISTRY" --username "$DOCKERHUB_USERNAME" --password-stdin
 
-            docker push "$CLIENT_IMAGE:$RELEASE_SHA" | tee "$client_log"
+            if ! docker push "$CLIENT_IMAGE:$RELEASE_SHA" >"$client_log" 2>&1; then
+              cat "$client_log" >&2
+              echo 'Client image push failed' >&2
+              exit 1
+            fi
+            cat "$client_log"
             client_digest="$(extract_digest "$client_log")"
 
-            docker push "$SERVER_IMAGE:$RELEASE_SHA" | tee "$server_log"
+            if ! docker push "$SERVER_IMAGE:$RELEASE_SHA" >"$server_log" 2>&1; then
+              cat "$server_log" >&2
+              echo 'Server image push failed' >&2
+              exit 1
+            fi
+            cat "$server_log"
             server_digest="$(extract_digest "$server_log")"
 
             for digest in "$client_digest" "$server_digest"; do

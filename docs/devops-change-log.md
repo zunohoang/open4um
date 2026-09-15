@@ -35,7 +35,7 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ### Mục tiêu và quyết định
 
-Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vượt qua runtime gate. GitHub tiếp tục làm source host và GHCR registry; "Jenkins-only" ở đây nghĩa là mọi orchestration CI/CD do Jenkins thực hiện.
+Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vượt qua runtime gate. GitHub tiếp tục làm source host, Docker Hub giữ container image public; "Jenkins-only" ở đây nghĩa là mọi orchestration CI/CD do Jenkins thực hiện.
 
 - Ngày thực hiện: `2026-09-15`.
 - Nhánh làm việc: `develop` tại baseline `f8774e6df4ddcb71d704275e39c455d0f815afad`.
@@ -46,9 +46,30 @@ Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vư�
 - Release job chạy lại clean install, lint, build và backend unit test trước khi build/push client/server image theo commit SHA.
 - Yêu cầu agent riêng `jenkins-builder` dùng rootless Docker, không ghi được host Docker socket và không đọc controller secrets.
 - Node builder/deploy bắt buộc dùng Job Restrictions Plugin với regex chỉ cho phép `abslider-release/develop` hoặc `abslider-release/main`; label riêng không được coi là security boundary.
-- GHCR credential có ID `ghcr-abslider-publisher` chỉ được cấp trong scope release; không dùng credential này trong `abslider-ci` chạy PR.
+- Cài động Job Restrictions Plugin `242.v6edda_c9e4ca_f` trên controller; plugin yêu cầu Jenkins tối thiểu `2.479.3`, thấp hơn controller hiện tại `2.568.3`. Sau khi load, controller tiếp tục `active` và login endpoint loopback healthy; chưa cần restart.
+- Registry credential chỉ được cấp trong scope release; không dùng credential này trong `abslider-ci` chạy PR.
 - Thêm `deploy/bin/deploy-abslider`: wrapper root-owned nhưng chạy không đặc quyền bằng `abslider-deploy`, kiểm tra chặt environment/SHA/digest, dùng Compose rootless/project tách biệt, readiness/frontend health và rollback release trước khi candidate lỗi.
 - Tách deploy sang node `abslider-deploy-01`; node chỉ nhận manifest không chứa secret, không checkout source, không có sudo và không ghi được host Docker socket. Runtime secret nằm ngoài repository và chỉ user deploy đọc được.
+- Trên VPS, cài đúng các prerequisite rootless `uidmap`, `slirp4netns`, `fuse-overlayfs` mà không upgrade 28 package ngoài phạm vi; tạo system user/group `jenkins-builder` UID `995`, GID `985`, home `/var/lib/jenkins-builder`, shell `nologin` và password locked.
+- Cấp riêng subordinate UID/GID range `165536:65536`, không trùng range `deploy:100000:65536`; bật linger để user service tự chạy khi không có login session.
+- `dockerd-rootless-setuptool.sh install --force` tạo Docker daemon rootless riêng vì host rootful Docker vẫn cần cho workload hiện hữu. Daemon dùng Docker `29.7.2`, `overlayfs`, `slirp4netns`, có security option `rootless` và user builder không ghi được `/var/run/docker.sock`.
+- Đăng ký Jenkins permanent node `abslider-builder-01` với một executor, remote root `/var/lib/jenkins-builder`, labels `linux node24 docker-builder`, usage exclusive và inbound launch.
+- Cài `jenkins-builder-agent.service`: Remoting JAR `1406408` byte được tải từ controller và kiểm tra ZIP không lỗi; inbound secret nằm ngoài repository tại `/etc/jenkins-builder/secret`, owner `root:jenkins-builder`, mode `0640`, size `65` byte và được truyền qua cú pháp `@file`.
+- Kiểm tra ban đầu cho thấy service chạy bằng `jenkins-builder:jenkins-builder`, `NoNewPrivileges=yes`, đồng thời agent không đọc controller master key và không ghi host Docker socket. Kiểm tra tiếp theo phát hiện service rơi vào restart loop (`NRestarts=39`, `ActiveState=activating`, `SubState=auto-restart`) vì `-workDir` trỏ tới `/var/lib/jenkins-builder/remoting`, khiến Remoting yêu cầu thư mục lồng `/var/lib/jenkins-builder/remoting/remoting` chưa tồn tại.
+- Sửa có backup systemd unit để `-workDir` trỏ về remote root `/var/lib/jenkins-builder`, giữ `-failIfWorkDirIsMissing`, daemon-reload/reset-failed và khởi động lại. Service sau sửa đạt `active/running`, `MainPID=9793`, `NRestarts=0`, `ExecMainStatus=0`; backup unit là `/etc/systemd/system/jenkins-builder-agent.service.before-workdir-fix-20260914T183027Z`.
+- Log phía agent xác nhận Remoting dùng `/var/lib/jenkins-builder/remoting`, mở WebSocket và `Connected`. Log phía controller xác nhận kết nối inbound từ loopback, protocol WebSocket, Remoting `3355.3357.v931d3c992987` và `Agent successfully connected and online`.
+- Preflight dưới đúng identity `jenkins-builder` xác nhận không ghi được host Docker socket; rootless daemon dùng security options `seccomp`, `rootless`, `cgroupns` và storage driver `overlayfs`. Docker Buildx `v0.36.1` cùng Docker Compose `v5.4.0` hoạt động, đáp ứng contract trước khi chạy `Jenkinsfile.release`.
+- Tạo Multibranch Pipeline `abslider-release` ở trạng thái khóa bằng Script Path không tồn tại `Jenkinsfile.release.disabled`. Scan dùng GitHub App, xử lý 6 remote branch trong 3.9 giây nhưng chỉ kiểm tra `main` và `develop`; cả hai bị loại đúng contract vì thiếu file khóa. Không discover PR, không tạo branch job/build và queue trống; kết quả indexing `SUCCESS`.
+- Tạo credential username/password ID `ghcr-abslider-publisher` trong credential store scoped riêng cho `abslider-release`; giao diện xác nhận entry thuộc `abslider-release - Global`, trong khi GitHub App scan credential vẫn nằm ở parent `System - Global`. Token được che và không ghi vào repository hoặc nhật ký.
+- Kích hoạt Script Path `Jenkinsfile.release` với filter tạm thời chỉ gồm `develop`. Scan dùng GitHub App kết thúc `SUCCESS` trong 3.6 giây, chỉ `develop` tìm thấy release pipeline và schedule `abslider-release/develop`; `main`, các feature branch và PR không tạo build. Tại thời điểm ghi nhận, build còn trong queue nên chưa có runtime result.
+- Jenkins node config đã xác minh: remote root `/var/lib/jenkins-builder`, một executor, mode `EXCLUSIVE`, labels `linux node24 docker-builder`; Job Restrictions ban đầu dùng regex `^abslider-release/(develop|main)$` và `checkShortName=false`.
+- Build `abslider-release/develop #1` lấy đúng `Jenkinsfile.release` tại commit `d410544b5460e7025c68c8c04f8a19946e75ad5e` nhưng dừng ở `Still waiting to schedule task`. Builder vẫn connected, có đủ labels và một executor rảnh; console chỉ báo agent CI thường không có expression `linux&&node24&&docker-builder`. Đối chiếu source tag plugin `242.v6edda_c9e4ca_f` cho thấy Pipeline queue task được ghép dưới full job name, nên regex kết thúc ngay sau tên branch không nhận task con. Contract được thu hẹp đúng subtree thành `^abslider-release/(develop|main)(/.*)?$`; cần lưu trên node và xác minh build đang chờ được nhận trước khi đánh dấu PASS.
+- Sau khi lưu regex subtree, chính build `#1` đang chờ được scheduler nhận và chạy trên `abslider-builder-01`; không hủy/chạy lại. Checkout dùng GitHub App, lấy đúng remote `develop` SHA `d410544b5460e7025c68c8c04f8a19946e75ad5e`; isolated-builder gate xác nhận user, Node `24.21.0`, npm `11.19.0`, rootless Docker, Buildx và Compose đúng contract.
+- Client/server clean install PASS có cảnh báo deprecated/allowScripts; client/server lint và build PASS. Client vẫn có bundle chính `883.40 kB` vượt warning threshold `500 kB`. Backend unit tests đạt 18/18 suite, 142/142 test, 0 snapshot trong 5.651 giây.
+- Hai Docker image client/server theo đúng SHA `d410544b5460e7025c68c8c04f8a19946e75ad5e` build PASS trên rootless builder. GHCR login PASS nhưng cả hai push đều bị registry từ chối với `permission_denied: The token provided does not match expected scopes`; vì vậy không có immutable digest hoặc release manifest. Approval/deploy bị skip và build kết thúc `FAILURE`; post action vẫn ghi test/artifact, logout GHCR, xóa local SHA images, dọn workspace và gửi trạng thái về GitHub.
+- Phát hiện `docker push ... | tee` trong POSIX shell làm mất exit code của `docker push`, khiến pipeline tiếp tục push server sau khi client push đã lỗi. Sửa publish script để lưu log bằng redirect, in lại log và thoát ngay tại image push đầu tiên thất bại; không dùng `pipefail` vì Jenkins shell trên Ubuntu có thể là `dash`. Docker client config chứa login tạm thời cũng được chuyển sang thư mục `mktemp` riêng và xóa khi stage kết thúc, thay vì dùng config lâu dài trong home của builder.
+- Chốt chuyển release registry từ GHCR sang Docker Hub vì repository owner không chia sẻ PAT classic. Tạo hai public repository `ducchert87/open4um-client` và `ducchert87/open4um-server`; tạo Docker Hub access token `Read & Write` có thời hạn dưới chính tài khoản `ducchert87` và lưu thành credential `dockerhub-abslider-publisher` trong store scoped riêng cho `abslider-release`. Secret được che; credential GitHub App vẫn tách biệt tại `System - Global`.
+- Đổi image contract trong `Jenkinsfile.release` và deploy wrapper sang `docker.io/ducchert87`; đổi biến credential sang `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`. Deploy wrapper so khớp registry/repository prefix bằng literal string rồi xác minh riêng digest 64 ký tự hex, tránh dấu chấm trong hostname bị hiểu như wildcard regex. GHCR workflow và credential cũ được giữ tạm làm rollback cho tới khi Docker Hub publish theo digest PASS.
 - Production vẫn yêu cầu Jenkins `input` approval trước deploy. Tham số `DEPLOY_ENABLED` mặc định `false` để lần runtime gate đầu chỉ build/publish, chưa tác động application trên VPS.
 - Chưa xóa `.github/workflows/publish-images.yml`; workflow cũ chỉ được gỡ sau khi Jenkins publish và deploy runtime PASS, tránh tạo khoảng trống artifact pipeline.
 
@@ -56,15 +77,25 @@ Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vư�
 
 | Gate | Trạng thái | Ghi chú |
 |---|---|---|
-| Repository implementation | `IMPLEMENTED_LOCAL` | `Jenkinsfile.release`, deploy wrapper và tài liệu |
-| Shell syntax/static checks | `TEST_PASS` | Wrapper và toàn bộ multiline shell block qua `bash -n`; invalid-input refusal, Compose render và `git diff --check` PASS |
-| Isolated rootless builder | `NOT_CONFIGURED` | VPS còn thiếu `uidmap`, `slirp4netns`, `fuse-overlayfs` và subuid/subgid |
-| Privileged-node job restriction | `NOT_CONFIGURED` | Cần cài/configure Job Restrictions Plugin trước khi online builder/deploy agent |
-| GHCR Jenkins credential | `NOT_CONFIGURED` | Cần PAT classic chỉ có `write:packages`, lưu ngoài repository |
-| Jenkins image publishing | `NOT_RUN` | Chưa có runtime build/push từ Jenkins |
+| Repository implementation | `PUSHED` | Commit `d410544b5460e7025c68c8c04f8a19946e75ad5e` đã xác minh trên `origin/develop` |
+| Shell syntax/static checks | `TEST_PASS` | Wrapper qua `bash -n`, Jenkins shell blocks qua `dash -n`, `git diff --check` PASS; Docker Hub digest contract được nhận tới identity gate và legacy GHCR reference bị từ chối |
+| Isolated rootless builder daemon | `TEST_PASS` — VPS | `jenkins-builder` UID 995; rootless Docker active, linger enabled, host socket không writable |
+| Jenkins builder service | `TEST_PASS` — VPS | Workdir đã sửa về `/var/lib/jenkins-builder`; service `active/running`, `NRestarts=0`, `ExecMainStatus=0` |
+| Jenkins builder connection | `TEST_PASS` — VPS | Agent-side `WebSocket connection open`/`Connected`; controller-side xác nhận node online |
+| Jenkins builder toolchain | `TEST_PASS` — VPS | Rootless Docker/overlayfs, Buildx `v0.36.1`, Compose `v5.4.0`; host socket không writable |
+| Release Multibranch bootstrap | `TEST_PASS` — Jenkins | `abslider-release` scan chỉ `develop/main`; disabled Script Path ngăn mọi build trước credential gate |
+| First Jenkins release run | `TEST_PARTIAL` | Builder/checkout/install/lint/build/unit test và hai image build PASS; GHCR push FAIL do token thiếu scope/quyền, deploy bị skip |
+| Job Restrictions plugin | `TEST_PASS` — VPS | Version `242.v6edda_c9e4ca_f` đã load; Jenkins vẫn healthy |
+| Privileged-node job restriction | `TEST_PASS` — builder | Regex subtree `^abslider-release/(develop|main)(/.*)?$` cho phép release Pipeline task; build `#1` chạy đúng builder |
+| Prior GHCR Jenkins credential | `TEST_PARTIAL` | ID `ghcr-abslider-publisher` đúng release scope và secret được mask; registry từ chối push vì token không có expected scopes/quyền package |
+| Prior GHCR image publishing | `TEST_FAIL` | Login PASS nhưng client/server push đều bị `permission_denied`; chưa có digest/manifest mới |
+| Docker Hub public repositories | `TEST_PASS` — external | `ducchert87/open4um-client` và `ducchert87/open4um-server` tồn tại, visibility Public |
+| Docker Hub Jenkins credential | `TEST_PASS` — scope | ID `dockerhub-abslider-publisher`, username `ducchert87`, nằm trong `abslider-release - Global`; token được mask |
+| Docker Hub image publishing | `NOT_RUN` | Chờ commit/push contract registry mới và chạy release với `DEPLOY_ENABLED=false` |
 | Development deploy | `NOT_STARTED` | Chưa có secret env/Nginx runtime gate |
 | Production deploy | `NOT_STARTED` | Yêu cầu Development PASS và manual approval |
 | GitHub Actions removal | `PLANNED` | Chỉ xóa sau Jenkins replacement proof |
+| Existing Jenkins CI after push | `TEST_PASS` | Commit `d410544` có context `continuous-integration/jenkins/pr-merge=success`, build `PR-13 #14` |
 
 ### File bị ảnh hưởng
 

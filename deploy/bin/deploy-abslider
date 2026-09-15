@@ -8,7 +8,7 @@ unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 readonly install_root='/opt/abslider'
 readonly compose_file="${install_root}/shared/compose.yml"
 readonly lock_file="${install_root}/shared/deploy.lock"
-readonly registry_prefix='ghcr.io/zunohoang'
+readonly registry_prefix='docker.io/ducchert87'
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -37,8 +37,10 @@ case "$release_environment" in
 esac
 
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'commit SHA must contain exactly 40 lowercase hex characters'
-[[ "$client_image" =~ ^${registry_prefix}/open4um-client@sha256:[0-9a-f]{64}$ ]] || fail 'invalid client digest reference'
-[[ "$server_image" =~ ^${registry_prefix}/open4um-server@sha256:[0-9a-f]{64}$ ]] || fail 'invalid server digest reference'
+[[ "$client_image" == "${registry_prefix}/open4um-client@sha256:"* ]] || fail 'invalid client digest reference'
+[[ "${client_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid client digest reference'
+[[ "$server_image" == "${registry_prefix}/open4um-server@sha256:"* ]] || fail 'invalid server digest reference'
+[[ "${server_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid server digest reference'
 
 readonly secret_file="${install_root}/shared/${release_environment}.env"
 readonly environment_root="${install_root}/releases/${release_environment}"
