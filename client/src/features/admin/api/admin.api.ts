@@ -61,6 +61,13 @@ export const adminApi = {
     (await apiClient.patch<{ data: AdminUser }>(`/admin/users/${id}/restore`))
       .data.data,
 
+  deleteUser: async (id: string) =>
+    (
+      await apiClient.delete<{ data: { id: string; message: string } }>(
+        `/admin/users/${id}`
+      )
+    ).data.data,
+
   getAiUsage: async (params?: ListAiUsageParams) =>
     (
       await apiClient.get<{ data: Paginated<AiUsageLog> }>('/admin/ai-usage', {

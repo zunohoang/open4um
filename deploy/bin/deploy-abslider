@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+unset DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
+
+readonly install_root='/opt/abslider'
+readonly compose_file="${install_root}/shared/compose.yml"
+readonly lock_file="${install_root}/shared/deploy.lock"
+readonly registry_prefix='docker.io/ducchert87'
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+if [[ "$#" -ne 4 ]]; then
+  fail 'usage: deploy-abslider <develop|production> <commit-sha> <client-digest-ref> <server-digest-ref>'
+fi
+
+readonly release_environment="$1"
+readonly release_sha="$2"
+readonly client_image="$3"
+readonly server_image="$4"
+
+case "$release_environment" in
+  develop)
+    readonly compose_project='abslider-develop'
+    ;;
+  production)
+    readonly compose_project='abslider-production'
+    ;;
+  *)
+    fail "unsupported environment: ${release_environment}"
+    ;;
+esac
+
+[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'commit SHA must contain exactly 40 lowercase hex characters'
+[[ "$client_image" == "${registry_prefix}/open4um-client@sha256:"* ]] || fail 'invalid client digest reference'
+[[ "${client_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid client digest reference'
+[[ "$server_image" == "${registry_prefix}/open4um-server@sha256:"* ]] || fail 'invalid server digest reference'
+[[ "${server_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid server digest reference'
+
+readonly secret_file="${install_root}/shared/${release_environment}.env"
+readonly environment_root="${install_root}/releases/${release_environment}"
+readonly client_digest="${client_image##*@sha256:}"
+readonly server_digest="${server_image##*@sha256:}"
+readonly release_id="${release_sha}-${client_digest:0:12}-${server_digest:0:12}"
+readonly candidate_dir="${environment_root}/${release_id}"
+readonly candidate_images="${candidate_dir}/images.env"
+readonly current_link="${environment_root}/current"
+
+[[ "$(id -un)" == 'abslider-deploy' ]] || fail 'wrapper must run as abslider-deploy'
+[[ -n "${DOCKER_HOST:-}" ]] || fail 'DOCKER_HOST is unset'
+readonly rootless_socket="${DOCKER_HOST#unix://}"
+[[ "$rootless_socket" == "/run/user/${EUID}/docker.sock" ]] || fail 'unexpected rootless Docker socket path'
+[[ -S "$rootless_socket" ]] || fail 'rootless Docker socket is unavailable'
+docker info --format '{{json .SecurityOptions}}' | grep -q 'name=rootless' || fail 'Docker daemon is not rootless'
+[[ -f "$0" && ! -L "$0" ]] || fail 'deployment wrapper must be a regular file, not a symlink'
+[[ "$(stat --format='%U:%G' "$0")" == 'root:root' ]] || fail 'deployment wrapper must be owned by root:root'
+[[ ! -w "$0" ]] || fail 'deployment wrapper must not be writable by abslider-deploy'
+[[ -f "$compose_file" && ! -L "$compose_file" ]] || fail "missing trusted Compose file: ${compose_file}"
+[[ -f "$secret_file" && ! -L "$secret_file" ]] || fail "missing secret environment file: ${secret_file}"
+[[ ! -w "$compose_file" ]] || fail 'trusted Compose file must not be writable by abslider-deploy'
+[[ ! -w "$secret_file" ]] || fail 'secret environment file must not be writable by abslider-deploy'
+
+install -d -m 0750 "$environment_root"
+install -d -m 0750 "$candidate_dir"
+
+exec 9>"$lock_file"
+flock --exclusive --wait 30 9 || fail 'another ABSlider deployment is running'
+
+previous_dir=''
+if [[ -L "$current_link" ]]; then
+  previous_dir="$(readlink --canonicalize "$current_link")"
+  case "$previous_dir" in
+    "${environment_root}"/*) ;;
+    *) fail "current release points outside ${environment_root}" ;;
+  esac
+  [[ -f "${previous_dir}/images.env" ]] || fail 'current release manifest is missing'
+fi
+
+candidate_tmp="$(mktemp "${candidate_dir}/images.env.XXXXXX")"
+cleanup_candidate_tmp() {
+  rm -f -- "$candidate_tmp"
+}
+trap cleanup_candidate_tmp EXIT
+
+{
+  printf 'ABSLIDER_CLIENT_IMAGE=%s\n' "$client_image"
+  printf 'ABSLIDER_SERVER_IMAGE=%s\n' "$server_image"
+} >"$candidate_tmp"
+chmod 0600 "$candidate_tmp"
+mv -- "$candidate_tmp" "$candidate_images"
+
+compose() {
+  docker compose \
+    --project-name "$compose_project" \
+    --env-file "$secret_file" \
+    --env-file "$candidate_images" \
+    --file "$compose_file" \
+    "$@"
+}
+
+rollback() {
+  local failed_status="$?"
+  trap - ERR
+
+  printf 'Deployment failed for %s at %s; starting rollback\n' \
+    "$release_environment" \
+    "$release_sha" >&2
+
+  if [[ -n "$previous_dir" ]]; then
+    docker compose \
+      --project-name "$compose_project" \
+      --env-file "$secret_file" \
+      --env-file "${previous_dir}/images.env" \
+      --file "$compose_file" \
+      up --detach --wait --wait-timeout 180 || true
+  else
+    compose down || true
+  fi
+
+  exit "$failed_status"
+}
+trap rollback ERR
+
+compose config --quiet
+compose pull
+compose up --detach --wait --wait-timeout 180
+
+backend_address="$(compose port server 4000)"
+frontend_address="$(compose port client 8080)"
+if [[ ! "$backend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
+  printf 'ERROR: backend is not bound to IPv4 loopback\n' >&2
+  false
+fi
+if [[ ! "$frontend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
+  printf 'ERROR: frontend is not bound to IPv4 loopback\n' >&2
+  false
+fi
+
+curl --fail --silent --show-error \
+  "http://${backend_address}/api/v1/health/ready" >/dev/null
+curl --fail --silent --show-error \
+  "http://${frontend_address}/health" >/dev/null
+
+ln --symbolic --force --no-dereference "$candidate_dir" "${current_link}.new"
+mv --no-target-directory "${current_link}.new" "$current_link"
+
+trap - ERR
+printf 'DEPLOYED environment=%s sha=%s client=%s server=%s\n' \
+  "$release_environment" \
+  "$release_sha" \
+  "$client_image" \
+  "$server_image"

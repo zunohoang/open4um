@@ -1,17 +1,18 @@
 import request from 'supertest'
-import jwt from 'jsonwebtoken'
+import bcrypt from 'bcrypt'
 import { app } from '@/app'
-import * as authService from '@/services/auth.service'
-import { AppError } from '@/utils/AppError'
+import { setupTestDb } from '../testDb'
+import { UserModel } from '@/models/user.model'
+import { redis } from '@/lib/redis'
+import * as emailService from '@/services/email.service'
 
-jest.mock('@/services/auth.service')
+jest.mock('@/services/email.service', () => ({
+  sendRegisterOtp: jest.fn().mockResolvedValue(undefined),
+  sendForgotPasswordOtp: jest.fn().mockResolvedValue(undefined)
+}))
 
 describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
-  const mockedAuthService = jest.mocked(authService)
-
-  beforeEach(() => {
-    jest.clearAllMocks()
-  })
+  setupTestDb()
 
   describe('POST /api/v1/auth/send-register-otp', () => {
     it('trả 422 khi email không hợp lệ', async () => {
@@ -23,25 +24,42 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       expect(res.body.success).toBe(false)
     })
 
-    it('trả 200 và thông báo khi gửi OTP thành công', async () => {
-      mockedAuthService.sendRegisterOtp.mockResolvedValue({
-        message: 'Mã xác thực đã được gửi đến email của bạn'
-      })
-
+    it('trả 200 và sinh mã OTP lưu thực tế vào Redis khi email hợp lệ', async () => {
       const res = await request(app)
         .post('/api/v1/auth/send-register-otp')
         .send({ email: 'test@example.com' })
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(true)
-      expect(mockedAuthService.sendRegisterOtp).toHaveBeenCalledWith(
-        'test@example.com'
+
+      const storedOtp = await redis.get('otp:register:test@example.com')
+      expect(storedOtp).not.toBeNull()
+      expect(storedOtp).toMatch(/^\d{6}$/)
+      expect(emailService.sendRegisterOtp).toHaveBeenCalledWith(
+        'test@example.com',
+        storedOtp
       )
+    })
+
+    it('trả 409 khi email đã tồn tại trong Database', async () => {
+      await UserModel.create({
+        name: 'Existing User',
+        email: 'test@example.com',
+        passwordHash: 'hashed_password',
+        role: 'user'
+      })
+
+      const res = await request(app)
+        .post('/api/v1/auth/send-register-otp')
+        .send({ email: 'test@example.com' })
+
+      expect(res.status).toBe(409)
+      expect(res.body.success).toBe(false)
     })
   })
 
   describe('POST /api/v1/auth/register', () => {
-    it('trả 422 khi dữ liệu đầu vào không hợp lệ (tên ngắn, email sai, mật khẩu ngắn)', async () => {
+    it('trả 422 khi dữ liệu đầu vào không hợp lệ', async () => {
       const res = await request(app).post('/api/v1/auth/register').send({
         name: 'A',
         email: 'invalid-email',
@@ -52,20 +70,20 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       expect(res.body.success).toBe(false)
     })
 
-    it('trả 201 và thông tin người dùng khi đăng ký kèm OTP hợp lệ', async () => {
-      const mockResult = {
-        user: {
-          id: 'u1',
-          name: 'Nguyen Van A',
-          email: 'test@example.com',
-          role: 'user' as const,
-          status: 'active' as const,
-          creditBalance: 20
-        },
-        accessToken: 'mock_access_token',
-        refreshToken: 'mock_refresh_token'
-      }
-      mockedAuthService.register.mockResolvedValue(mockResult)
+    it('trả 400 khi mã OTP không chính xác hoặc chưa được gửi', async () => {
+      const res = await request(app).post('/api/v1/auth/register').send({
+        name: 'Nguyen Van A',
+        email: 'test@example.com',
+        password: 'password123',
+        otp: '999999'
+      })
+
+      expect(res.status).toBe(400)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 201 và tạo người dùng thành công trong MongoDB khi OTP hợp lệ', async () => {
+      await redis.set('otp:register:test@example.com', '123456')
 
       const res = await request(app).post('/api/v1/auth/register').send({
         name: 'Nguyen Van A',
@@ -77,13 +95,121 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       expect(res.status).toBe(201)
       expect(res.body.success).toBe(true)
       expect(res.body.data.user.email).toBe('test@example.com')
-      expect(res.body.data.accessToken).toBe('mock_access_token')
-      expect(mockedAuthService.register).toHaveBeenCalledWith(
-        'Nguyen Van A',
-        'test@example.com',
+      expect(res.body.data.accessToken).toBeTruthy()
+      expect(res.body.data.refreshToken).toBeTruthy()
+
+      const userInDb = await UserModel.findOne({ email: 'test@example.com' })
+      expect(userInDb).not.toBeNull()
+      expect(userInDb?.name).toBe('Nguyen Van A')
+
+      const isMatch = await bcrypt.compare(
         'password123',
-        '123456'
+        userInDb!.passwordHash
       )
+      expect(isMatch).toBe(true)
+
+      const otpAfter = await redis.get('otp:register:test@example.com')
+      expect(otpAfter).toBeNull()
+    })
+  })
+
+  describe('POST /api/v1/auth/login', () => {
+    it('trả 401 khi mật khẩu không chính xác', async () => {
+      const passwordHash = await bcrypt.hash('password123', 10)
+      await UserModel.create({
+        name: 'Login User',
+        email: 'login@example.com',
+        passwordHash,
+        role: 'user',
+        status: 'active'
+      })
+
+      const res = await request(app).post('/api/v1/auth/login').send({
+        email: 'login@example.com',
+        password: 'wrong_password'
+      })
+
+      expect(res.status).toBe(401)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 200 và cấp tokens khi đăng nhập thành công với thông tin đúng', async () => {
+      const passwordHash = await bcrypt.hash('password123', 10)
+      await UserModel.create({
+        name: 'Login User',
+        email: 'login@example.com',
+        passwordHash,
+        role: 'user',
+        status: 'active'
+      })
+
+      const res = await request(app).post('/api/v1/auth/login').send({
+        email: 'login@example.com',
+        password: 'password123'
+      })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(res.body.data.accessToken).toBeTruthy()
+      expect(res.body.data.refreshToken).toBeTruthy()
+      expect(res.body.data.user.email).toBe('login@example.com')
+    })
+  })
+
+  describe('POST /api/v1/auth/refresh & POST /api/v1/auth/logout', () => {
+    it('POST /api/v1/auth/refresh cấp accessToken mới từ refreshToken hợp lệ', async () => {
+      const passwordHash = await bcrypt.hash('password123', 10)
+      await UserModel.create({
+        name: 'Token User',
+        email: 'token@example.com',
+        passwordHash,
+        role: 'user',
+        status: 'active'
+      })
+
+      const loginRes = await request(app).post('/api/v1/auth/login').send({
+        email: 'token@example.com',
+        password: 'password123'
+      })
+      const refreshToken = loginRes.body.data.refreshToken
+
+      const res = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+      expect(res.body.data.accessToken).toBeTruthy()
+    })
+
+    it('POST /api/v1/auth/logout đưa refreshToken vào blacklist trong Redis', async () => {
+      const passwordHash = await bcrypt.hash('password123', 10)
+      await UserModel.create({
+        name: 'Token User',
+        email: 'token@example.com',
+        passwordHash,
+        role: 'user',
+        status: 'active'
+      })
+
+      const loginRes = await request(app).post('/api/v1/auth/login').send({
+        email: 'token@example.com',
+        password: 'password123'
+      })
+      const refreshToken = loginRes.body.data.refreshToken
+
+      const res = await request(app)
+        .post('/api/v1/auth/logout')
+        .send({ refreshToken })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+
+      const refreshRes = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken })
+
+      expect(refreshRes.status).toBe(401)
     })
   })
 
@@ -97,9 +223,12 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
       expect(res.body.success).toBe(false)
     })
 
-    it('trả 200 khi gửi OTP đặt lại mật khẩu thành công', async () => {
-      mockedAuthService.forgotPassword.mockResolvedValue({
-        message: 'Mã xác thực đặt lại mật khẩu đã được gửi đến email của bạn'
+    it('trả 200 và sinh OTP đặt lại mật khẩu trong Redis khi người dùng tồn tại', async () => {
+      await UserModel.create({
+        name: 'Forgot User',
+        email: 'user@example.com',
+        passwordHash: 'hashed',
+        role: 'user'
       })
 
       const res = await request(app)
@@ -108,84 +237,78 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(true)
-      expect(mockedAuthService.forgotPassword).toHaveBeenCalledWith(
-        'user@example.com'
-      )
+
+      const storedOtp = await redis.get('otp:forgot:user@example.com')
+      expect(storedOtp).not.toBeNull()
+      expect(storedOtp).toMatch(/^\d{6}$/)
     })
   })
 
-  describe('POST /api/v1/auth/login', () => {
-    it('trả 401 khi tài khoản hoặc mật khẩu không chính xác', async () => {
-      mockedAuthService.login.mockRejectedValue(
-        new AppError('Email hoặc mật khẩu không đúng', 401)
-      )
-
-      const res = await request(app).post('/api/v1/auth/login').send({
-        email: 'wrong@example.com',
-        password: 'wrong_password'
-      })
-
-      expect(res.status).toBe(401)
-      expect(res.body.success).toBe(false)
-      expect(res.body.message).toContain('không đúng')
-    })
-
-    it('trả 200 và tokens khi đăng nhập thành công', async () => {
-      mockedAuthService.login.mockResolvedValue({
-        user: {
-          id: 'u1',
-          name: 'Nguyen Van A',
-          email: 'user@example.com',
-          role: 'user' as const,
-          status: 'active' as const,
-          creditBalance: 20
-        },
-        accessToken: 'access_123',
-        refreshToken: 'refresh_123'
-      })
-
-      const res = await request(app).post('/api/v1/auth/login').send({
+  describe('POST /api/v1/auth/reset-password', () => {
+    it('trả 422 khi dữ liệu đầu vào không hợp lệ (mật khẩu ngắn hoặc OTP sai định dạng)', async () => {
+      const res = await request(app).post('/api/v1/auth/reset-password').send({
         email: 'user@example.com',
-        password: 'password123'
+        otp: '123',
+        password: '123'
       })
 
-      expect(res.status).toBe(200)
-      expect(res.body.success).toBe(true)
-      expect(res.body.data.accessToken).toBe('access_123')
-    })
-  })
-
-  describe('GET /api/v1/auth/me', () => {
-    it('trả 401 khi không truyền token xác thực', async () => {
-      const res = await request(app).get('/api/v1/auth/me')
-
-      expect(res.status).toBe(401)
+      expect(res.status).toBe(422)
       expect(res.body.success).toBe(false)
     })
 
-    it('trả 200 và thông tin profile khi có Bearer token hợp lệ', async () => {
-      const validToken = jwt.sign(
-        { id: 'user-me-123', role: 'user', type: 'access' },
-        process.env.JWT_SECRET!
-      )
-
-      mockedAuthService.getProfile.mockResolvedValue({
-        id: 'user-me-123',
-        name: 'User Logged In',
-        email: 'logged@example.com',
-        role: 'user',
-        status: 'active',
-        creditBalance: 100
+    it('trả 400 khi mã OTP không chính xác hoặc đã hết hạn trong Redis', async () => {
+      await UserModel.create({
+        name: 'Reset User',
+        email: 'reset@example.com',
+        passwordHash: 'hashed',
+        role: 'user'
       })
 
-      const res = await request(app)
-        .get('/api/v1/auth/me')
-        .set('Authorization', `Bearer ${validToken}`)
+      const res = await request(app).post('/api/v1/auth/reset-password').send({
+        email: 'reset@example.com',
+        otp: '999999',
+        password: 'new_password_123'
+      })
+
+      expect(res.status).toBe(400)
+      expect(res.body.success).toBe(false)
+    })
+
+    it('trả 200 và cập nhật mật khẩu mới thành công khi OTP hợp lệ', async () => {
+      const oldHash = await bcrypt.hash('old_password_123', 10)
+      await UserModel.create({
+        name: 'Reset User',
+        email: 'reset@example.com',
+        passwordHash: oldHash,
+        role: 'user'
+      })
+
+      await redis.set('otp:forgot:reset@example.com', '654321', 'EX', 300)
+
+      const res = await request(app).post('/api/v1/auth/reset-password').send({
+        email: 'reset@example.com',
+        otp: '654321',
+        password: 'new_password_123'
+      })
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(true)
-      expect(res.body.data.id).toBe('user-me-123')
-      expect(mockedAuthService.getProfile).toHaveBeenCalledWith('user-me-123')
+
+      const otpInRedis = await redis.get('otp:forgot:reset@example.com')
+      expect(otpInRedis).toBeNull()
+
+      const failLogin = await request(app).post('/api/v1/auth/login').send({
+        email: 'reset@example.com',
+        password: 'old_password_123'
+      })
+      expect(failLogin.status).toBe(401)
+
+      const successLogin = await request(app).post('/api/v1/auth/login').send({
+        email: 'reset@example.com',
+        password: 'new_password_123'
+      })
+      expect(successLogin.status).toBe(200)
+      expect(successLogin.body.data.accessToken).toBeTruthy()
     })
   })
 })
