@@ -70,6 +70,10 @@ Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vư�
 - Phát hiện `docker push ... | tee` trong POSIX shell làm mất exit code của `docker push`, khiến pipeline tiếp tục push server sau khi client push đã lỗi. Sửa publish script để lưu log bằng redirect, in lại log và thoát ngay tại image push đầu tiên thất bại; không dùng `pipefail` vì Jenkins shell trên Ubuntu có thể là `dash`. Docker client config chứa login tạm thời cũng được chuyển sang thư mục `mktemp` riêng và xóa khi stage kết thúc, thay vì dùng config lâu dài trong home của builder.
 - Chốt chuyển release registry từ GHCR sang Docker Hub vì repository owner không chia sẻ PAT classic. Tạo hai public repository `ducchert87/open4um-client` và `ducchert87/open4um-server`; tạo Docker Hub access token `Read & Write` có thời hạn dưới chính tài khoản `ducchert87` và lưu thành credential `dockerhub-abslider-publisher` trong store scoped riêng cho `abslider-release`. Secret được che; credential GitHub App vẫn tách biệt tại `System - Global`.
 - Đổi image contract trong `Jenkinsfile.release` và deploy wrapper sang `docker.io/ducchert87`; đổi biến credential sang `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`. Deploy wrapper so khớp registry/repository prefix bằng literal string rồi xác minh riêng digest 64 ký tự hex, tránh dấu chấm trong hostname bị hiểu như wildcard regex. GHCR workflow và credential cũ được giữ tạm làm rollback cho tới khi Docker Hub publish theo digest PASS.
+- Commit `18cc4a984063ab77599980971e3f9040bc954abc` đã được push lên `origin/develop`. Do repository scan báo `No changes detected` và không tự schedule build mới, lượt xác minh Docker Hub được khởi chạy thủ công bằng `Build with Parameters`, giữ `DEPLOY_ENABLED=false`; automatic trigger của release pipeline vì vậy vẫn chưa PASS.
+- Build `abslider-release/develop #2` chạy đúng trên `abslider-builder-01`, checkout đúng SHA `18cc4a984063ab77599980971e3f9040bc954abc`; isolated-builder gate, client/server clean install, lint/build và backend unit test đều PASS. Backend đạt 18/18 suite, 142/142 test; client còn cảnh báo bundle `883.40 kB` vượt ngưỡng `500 kB` nhưng không làm fail build.
+- Jenkins đăng nhập Docker Hub bằng credential scoped `dockerhub-abslider-publisher`, secret được mask, rồi push thành công SHA tag và `develop` tag của cả hai image. Release manifest được archive/fingerprint; approval và deploy được skip đúng contract vì `DEPLOY_ENABLED=false`. Post action logout registry, xóa local SHA tag, dọn workspace, publish test/coverage và thông báo GitHub; Pipeline kết thúc `SUCCESS`.
+- Image immutable đã được kiểm tra pull-manifest ẩn danh trực tiếp qua Docker Registry API; digest quan sát được khớp chính xác với Jenkins: client `docker.io/ducchert87/open4um-client@sha256:f4f1d404bd902fd1f095a13c71cb874c600db116e44f814ce35216df4318881c`, server `docker.io/ducchert87/open4um-server@sha256:7a5bba898f7f2b77c3cd15921b225801dead63637406f979b833a593aa37bfcc`.
 - Production vẫn yêu cầu Jenkins `input` approval trước deploy. Tham số `DEPLOY_ENABLED` mặc định `false` để lần runtime gate đầu chỉ build/publish, chưa tác động application trên VPS.
 - Chưa xóa `.github/workflows/publish-images.yml`; workflow cũ chỉ được gỡ sau khi Jenkins publish và deploy runtime PASS, tránh tạo khoảng trống artifact pipeline.
 
@@ -77,7 +81,7 @@ Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vư�
 
 | Gate | Trạng thái | Ghi chú |
 |---|---|---|
-| Repository implementation | `PUSHED` | Commit `d410544b5460e7025c68c8c04f8a19946e75ad5e` đã xác minh trên `origin/develop` |
+| Repository implementation | `PUSHED` | Commit `18cc4a984063ab77599980971e3f9040bc954abc` đã xác minh trên `origin/develop` |
 | Shell syntax/static checks | `TEST_PASS` | Wrapper qua `bash -n`, Jenkins shell blocks qua `dash -n`, `git diff --check` PASS; Docker Hub digest contract được nhận tới identity gate và legacy GHCR reference bị từ chối |
 | Isolated rootless builder daemon | `TEST_PASS` — VPS | `jenkins-builder` UID 995; rootless Docker active, linger enabled, host socket không writable |
 | Jenkins builder service | `TEST_PASS` — VPS | Workdir đã sửa về `/var/lib/jenkins-builder`; service `active/running`, `NRestarts=0`, `ExecMainStatus=0` |
@@ -91,7 +95,8 @@ Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vư�
 | Prior GHCR image publishing | `TEST_FAIL` | Login PASS nhưng client/server push đều bị `permission_denied`; chưa có digest/manifest mới |
 | Docker Hub public repositories | `TEST_PASS` — external | `ducchert87/open4um-client` và `ducchert87/open4um-server` tồn tại, visibility Public |
 | Docker Hub Jenkins credential | `TEST_PASS` — scope | ID `dockerhub-abslider-publisher`, username `ducchert87`, nằm trong `abslider-release - Global`; token được mask |
-| Docker Hub image publishing | `NOT_RUN` | Chờ commit/push contract registry mới và chạy release với `DEPLOY_ENABLED=false` |
+| Docker Hub image publishing | `TEST_PASS` | Build `abslider-release/develop #2` push SHA/`develop` tags thành công; hai immutable digest được kiểm tra ẩn danh và khớp registry |
+| Automatic release trigger | `TEST_PARTIAL` | Scan nhận đúng SHA `18cc4a9` nhưng báo `No changes detected`; build `#2` phải khởi chạy thủ công |
 | Development deploy | `NOT_STARTED` | Chưa có secret env/Nginx runtime gate |
 | Production deploy | `NOT_STARTED` | Yêu cầu Development PASS và manual approval |
 | GitHub Actions removal | `PLANNED` | Chỉ xóa sau Jenkins replacement proof |
