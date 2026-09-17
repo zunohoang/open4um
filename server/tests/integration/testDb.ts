@@ -23,7 +23,7 @@ export const setupTestDb = () => {
   let setupComplete = false
 
   beforeAll(async () => {
-    mongoContainer = await new MongoDBContainer('mongo:8.0.30')
+    mongoContainer = await new MongoDBContainer('mongo:8')
       .withEnvironment({ GLIBC_TUNABLES: 'glibc.pthread.rseq=1' })
       .start()
     const mongoUri = `${mongoContainer.getConnectionString()}?directConnection=true`
