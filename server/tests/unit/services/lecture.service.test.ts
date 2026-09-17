@@ -239,10 +239,10 @@ describe('lecture.service unit tests', () => {
       ]
     }
 
-    it('ném lỗi 402 khi không đủ credit ước tính trước khi gọi AI (pre-check)', async () => {
+    it('ném lỗi 402 khi không đủ credit ước tính trước khi gọi AI (pre-check: cần tối thiểu 12 slides)', async () => {
       mockUserFindById.mockResolvedValue({
         _id: 'user-poor',
-        creditBalance: 1, // Cần tối thiểu pricePerSlide = 2 credits
+        creditBalance: 20, // Cần tối thiểu 12 slides * 2 = 24 credits
         save: jest.fn()
       })
 
@@ -259,14 +259,11 @@ describe('lecture.service unit tests', () => {
       expect(mockAiGenerateSlidesFromOutline).not.toHaveBeenCalled()
     })
 
-    it('thành công: gọi AI sinh slides chi tiết, trừ credit và lưu DB', async () => {
-      const mockSlides = [
-        { id: 's1', title: 'Slide 1' },
-        { id: 's2', title: 'Slide 2' },
-        { id: 's3', title: 'Slide 3' },
-        { id: 's4', title: 'Slide 4' },
-        { id: 's5', title: 'Slide 5' }
-      ]
+    it('thành công: gọi AI sinh 15 slides nhưng chỉ tính phí 12 slides (AI gen nhiều hơn thì tặng luôn)', async () => {
+      const mockSlides = Array.from({ length: 15 }, (_, i) => ({
+        id: `s-${i + 1}`,
+        title: `Slide ${i + 1}`
+      }))
       mockAiGenerateSlidesFromOutline.mockResolvedValue(mockSlides)
 
       const mockUser = {
@@ -294,18 +291,18 @@ describe('lecture.service unit tests', () => {
         outline: fakeOutline
       })
 
-      // 5 slides * 2 = 10 credits -> 50 - 10 = 40
-      expect(mockUser.creditBalance).toBe(40)
+      // 12 slides * 2 = 24 credits -> 50 - 24 = 26
+      expect(mockUser.creditBalance).toBe(26)
       expect(mockUser.save).toHaveBeenCalled()
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
-          slideCount: 5,
-          creditSpent: 10
+          slideCount: 15,
+          creditSpent: 24
         })
       )
-      expect(result).toHaveProperty('creditSpent', 10)
-      expect(result).toHaveProperty('creditBalance', 40)
+      expect(result).toHaveProperty('creditSpent', 24)
+      expect(result).toHaveProperty('creditBalance', 26)
     })
 
     it('thành công cập nhật bài giảng đã có bằng lectureId', async () => {

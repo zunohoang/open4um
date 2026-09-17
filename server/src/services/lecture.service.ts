@@ -115,8 +115,14 @@ export const createLecture = async (
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
 
   const config = await getCreditConfig()
-  if (user.creditBalance < config.pricePerSlide) {
-    throw new AppError('Không đủ credit để tạo bài giảng', 402)
+  const MIN_LECTURE_SLIDES = 12
+  const requiredCredit = MIN_LECTURE_SLIDES * config.pricePerSlide
+
+  if (user.creditBalance < requiredCredit) {
+    throw new AppError(
+      `Không đủ credit để tạo bài giảng. Cần tối thiểu ${requiredCredit} credit (tương ứng ${MIN_LECTURE_SLIDES} slides).`,
+      402
+    )
   }
 
   const slides = await generateSlidesFromOutline(
@@ -124,7 +130,8 @@ export const createLecture = async (
     data.prompt ?? ''
   )
 
-  const creditSpent = slides.length * config.pricePerSlide
+  // Tạo bài giảng từ đầu tính theo gói tối thiểu 12 slides, AI sinh nhiều hơn thì tặng
+  const creditSpent = requiredCredit
   user.creditBalance = Math.max(0, user.creditBalance - creditSpent)
 
   const payload = {
