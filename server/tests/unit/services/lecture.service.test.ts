@@ -5,8 +5,13 @@ const mockFolderFindOne = jest.fn()
 const mockLectureCreate = jest.fn()
 const mockLectureFindOne = jest.fn()
 const mockLectureFind = jest.fn()
+const mockLectureDeleteOne = jest.fn()
+const mockLectureFindOneAndUpdate = jest.fn()
 const mockAiUsageLogCreate = jest.fn()
 const mockAiGenerateOutlineFromPrompt = jest.fn()
+const mockAiRefineOutlineWithFeedback = jest.fn()
+const mockAiGenerateSlidesFromOutline = jest.fn()
+const mockAiBuildSlidesFromOutline = jest.fn()
 
 jest.mock('@/models/user.model', () => ({
   UserModel: {
@@ -25,7 +30,9 @@ jest.mock('@/models/lecture.model', () => ({
   LectureModel: {
     create: (...args: any[]) => mockLectureCreate(...args),
     findOne: (...args: any[]) => mockLectureFindOne(...args),
-    find: (...args: any[]) => mockLectureFind(...args)
+    find: (...args: any[]) => mockLectureFind(...args),
+    deleteOne: (...args: any[]) => mockLectureDeleteOne(...args),
+    findOneAndUpdate: (...args: any[]) => mockLectureFindOneAndUpdate(...args)
   }
 }))
 
@@ -37,21 +44,30 @@ jest.mock('@/models/aiUsageLog.model', () => ({
 
 jest.mock('@/services/ai.service', () => ({
   generateOutlineFromPrompt: (...args: any[]) =>
-    mockAiGenerateOutlineFromPrompt(...args)
+    mockAiGenerateOutlineFromPrompt(...args),
+  refineOutlineWithFeedback: (...args: any[]) =>
+    mockAiRefineOutlineWithFeedback(...args),
+  generateSlidesFromOutline: (...args: any[]) =>
+    mockAiGenerateSlidesFromOutline(...args),
+  buildSlidesFromOutline: (...args: any[]) =>
+    mockAiBuildSlidesFromOutline(...args)
 }))
 
 jest.mock('@/services/admin.service', () => ({
   getCreditConfig: jest.fn().mockResolvedValue({
     pricePerSlide: 2,
     pricePerAiEdit: 1,
+    pricePerOutline: 4,
     signupBonus: 20
   })
 }))
 
 import {
   generateOutline,
+  createLecture,
   createBlankLecture,
-  getLecture
+  getLecture,
+  hardDeleteLecture
 } from '@/services/lecture.service'
 
 describe('lecture.service unit tests', () => {
@@ -60,7 +76,40 @@ describe('lecture.service unit tests', () => {
   })
 
   describe('generateOutline', () => {
+    it('ném lỗi 404 khi không tìm thấy tài khoản người dùng (pre-check)', async () => {
+      mockUserFindById.mockResolvedValue(null)
+
+      await expect(
+        generateOutline('non-existent-user', 'Học lập trình Go')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Tài khoản không tồn tại'
+      })
+      expect(mockAiGenerateOutlineFromPrompt).not.toHaveBeenCalled()
+    })
+
+    it('ném lỗi 402 khi người dùng không đủ credit trước khi gọi AI (pre-check)', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'user-poor',
+        creditBalance: 2, // cần pricePerOutline = 4
+        save: jest.fn()
+      })
+
+      await expect(
+        generateOutline('user-poor', 'Học lập trình Go')
+      ).rejects.toMatchObject({
+        statusCode: 402,
+        message: expect.stringContaining('Không đủ credit để sinh dàn ý')
+      })
+      expect(mockAiGenerateOutlineFromPrompt).not.toHaveBeenCalled()
+    })
+
     it('ném lỗi 422 khi AI trả về outline không có section nào', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'user-1',
+        creditBalance: 20,
+        save: jest.fn()
+      })
       mockAiGenerateOutlineFromPrompt.mockResolvedValue({
         title: 'Empty',
         sections: []
@@ -73,49 +122,12 @@ describe('lecture.service unit tests', () => {
       })
     })
 
-    it('ném lỗi 404 khi không tìm thấy tài khoản người dùng', async () => {
-      mockAiGenerateOutlineFromPrompt.mockResolvedValue({
-        title: 'Outline',
-        sections: [{ title: 'Phần 1', bullets: [] }]
-      })
-      mockUserFindById.mockResolvedValue(null)
-
-      await expect(
-        generateOutline('non-existent-user', 'Học lập trình Go')
-      ).rejects.toMatchObject({
-        statusCode: 404,
-        message: 'Tài khoản không tồn tại'
-      })
-    })
-
-    it('ném lỗi 402 khi người dùng không đủ số dư credit', async () => {
-      mockAiGenerateOutlineFromPrompt.mockResolvedValue({
-        title: 'Outline',
-        sections: [
-          { title: 'Phần 1', bullets: [] },
-          { title: 'Phần 2', bullets: [] }
-        ]
-      })
-      mockUserFindById.mockResolvedValue({
-        _id: 'user-poor',
-        creditBalance: 1, // cần 2 * 2 = 4 credits
-        save: jest.fn()
-      })
-
-      await expect(
-        generateOutline('user-poor', 'Học lập trình Go')
-      ).rejects.toMatchObject({
-        statusCode: 402,
-        message: expect.stringContaining('Không đủ credit')
-      })
-    })
-
     it('thành công: trừ credit, ghi log AI và trả về outline', async () => {
       mockAiGenerateOutlineFromPrompt.mockResolvedValue({
         title: 'Học Go',
         sections: [
-          { title: 'Phần 1', bullets: ['A', 'B'] },
-          { title: 'Phần 2', bullets: ['C', 'D'] }
+          { heading: 'Phần 1', bullets: ['A', 'B'] },
+          { heading: 'Phần 2', bullets: ['C', 'D'] }
         ]
       })
       const mockUser = {
@@ -125,11 +137,27 @@ describe('lecture.service unit tests', () => {
       }
       mockUserFindById.mockResolvedValue(mockUser)
       mockAiUsageLogCreate.mockResolvedValue({})
+      const mockCreatedDraft = {
+        _id: 'draft-lec-1',
+        userId: 'user-rich',
+        title: 'Học Go',
+        outline: expect.any(Object),
+        slides: []
+      }
+      mockLectureCreate.mockResolvedValue(mockCreatedDraft)
 
       const result = await generateOutline('user-rich', 'Học lập trình Go')
 
-      expect(mockUser.creditBalance).toBe(46) // 50 - (2 sections * 2)
+      expect(mockUser.creditBalance).toBe(46) // 50 - 4 (pricePerOutline)
       expect(mockUser.save).toHaveBeenCalled()
+      expect(mockLectureCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-rich',
+          title: 'Học Go',
+          outline: expect.objectContaining({ title: 'Học Go' }),
+          slides: []
+        })
+      )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
@@ -137,9 +165,188 @@ describe('lecture.service unit tests', () => {
           creditSpent: 4
         })
       )
+      expect(result).toHaveProperty('lecture')
       expect(result).toHaveProperty('outline')
       expect(result).toHaveProperty('creditSpent', 4)
       expect(result).toHaveProperty('creditBalance', 46)
+    })
+
+    it('thành công khi có feedback & currentOutline: gọi refineOutlineWithFeedback và cập nhật lectureId', async () => {
+      const currentOutline = {
+        title: 'Bản cũ',
+        sections: [{ heading: 'Mục 1', bullets: ['A'] }]
+      }
+      const refinedOutline = {
+        title: 'Bản mới điều chỉnh',
+        sections: [
+          { heading: 'Mục 1', bullets: ['A'] },
+          { heading: 'Thực hành', bullets: ['B'] }
+        ]
+      }
+      mockAiRefineOutlineWithFeedback.mockResolvedValue(refinedOutline)
+
+      const mockUser = {
+        _id: 'user-refine',
+        creditBalance: 30,
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockUserFindById.mockResolvedValue(mockUser)
+
+      const mockUpdatedLecture = {
+        _id: 'existing-lec-1',
+        title: 'Bản mới điều chỉnh',
+        prompt: 'Prompt gốc',
+        outline: refinedOutline
+      }
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockUpdatedLecture)
+
+      const result = await generateOutline('user-refine', 'Prompt gốc', {
+        feedback: 'Thêm phần thực hành',
+        currentOutline,
+        lectureId: 'existing-lec-1'
+      })
+
+      expect(mockAiRefineOutlineWithFeedback).toHaveBeenCalledWith(
+        currentOutline,
+        'Prompt gốc',
+        'Thêm phần thực hành'
+      )
+      expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'existing-lec-1', userId: 'user-refine' },
+        expect.objectContaining({
+          title: 'Bản mới điều chỉnh',
+          outline: refinedOutline
+        }),
+        { new: true }
+      )
+      expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'Prompt gốc | Góp ý: Thêm phần thực hành'
+        })
+      )
+      expect(result.outline.title).toBe('Bản mới điều chỉnh')
+      expect(result.creditSpent).toBe(4)
+      expect(result.creditBalance).toBe(26)
+    })
+  })
+
+  describe('createLecture (sinh slide chi tiết 2 bước)', () => {
+    const fakeOutline = {
+      title: 'Lập trình TypeScript',
+      sections: [
+        { heading: 'Giới thiệu', bullets: ['TS là gì', 'Ưu điểm'] },
+        { heading: 'Kiểu dữ liệu', bullets: ['Primitive', 'Interface'] }
+      ]
+    }
+
+    it('ném lỗi 402 khi không đủ credit ước tính trước khi gọi AI (pre-check)', async () => {
+      mockUserFindById.mockResolvedValue({
+        _id: 'user-poor',
+        creditBalance: 1, // Cần tối thiểu pricePerSlide = 2 credits
+        save: jest.fn()
+      })
+
+      await expect(
+        createLecture('user-poor', {
+          title: 'TypeScript cơ bản',
+          prompt: 'Dạy TS',
+          outline: fakeOutline
+        })
+      ).rejects.toMatchObject({
+        statusCode: 402,
+        message: expect.stringContaining('Không đủ credit để tạo bài giảng')
+      })
+      expect(mockAiGenerateSlidesFromOutline).not.toHaveBeenCalled()
+    })
+
+    it('thành công: gọi AI sinh slides chi tiết, trừ credit và lưu DB', async () => {
+      const mockSlides = [
+        { id: 's1', title: 'Slide 1' },
+        { id: 's2', title: 'Slide 2' },
+        { id: 's3', title: 'Slide 3' },
+        { id: 's4', title: 'Slide 4' },
+        { id: 's5', title: 'Slide 5' }
+      ]
+      mockAiGenerateSlidesFromOutline.mockResolvedValue(mockSlides)
+
+      const mockUser = {
+        _id: 'user-rich',
+        creditBalance: 50,
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockUserFindById.mockResolvedValue(mockUser)
+
+      const mockCreatedLecture = {
+        _id: 'lec-1',
+        title: 'TypeScript cơ bản',
+        slides: mockSlides,
+        toObject: () => ({
+          _id: 'lec-1',
+          title: 'TypeScript cơ bản',
+          slides: mockSlides
+        })
+      }
+      mockLectureCreate.mockResolvedValue(mockCreatedLecture)
+
+      const result = await createLecture('user-rich', {
+        title: 'TypeScript cơ bản',
+        prompt: 'Dạy TS',
+        outline: fakeOutline
+      })
+
+      // 5 slides * 2 = 10 credits -> 50 - 10 = 40
+      expect(mockUser.creditBalance).toBe(40)
+      expect(mockUser.save).toHaveBeenCalled()
+      expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-rich',
+          slideCount: 5,
+          creditSpent: 10
+        })
+      )
+      expect(result).toHaveProperty('creditSpent', 10)
+      expect(result).toHaveProperty('creditBalance', 40)
+    })
+
+    it('thành công cập nhật bài giảng đã có bằng lectureId', async () => {
+      const mockSlides = [{ id: 's1', title: 'Slide 1' }]
+      mockAiGenerateSlidesFromOutline.mockResolvedValue(mockSlides)
+
+      const mockUser = {
+        _id: 'user-rich',
+        creditBalance: 50,
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockUserFindById.mockResolvedValue(mockUser)
+
+      const mockUpdated = {
+        _id: 'existing-lec-123',
+        title: 'TypeScript cơ bản',
+        slides: mockSlides,
+        toObject: () => ({
+          _id: 'existing-lec-123',
+          title: 'TypeScript cơ bản',
+          slides: mockSlides
+        })
+      }
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockUpdated)
+
+      const result = await createLecture('user-rich', {
+        lectureId: 'existing-lec-123',
+        title: 'TypeScript cơ bản',
+        prompt: 'Dạy TS',
+        outline: fakeOutline
+      })
+
+      expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'existing-lec-123', userId: 'user-rich' },
+        expect.objectContaining({
+          title: 'TypeScript cơ bản',
+          slides: mockSlides
+        }),
+        { new: true, upsert: true }
+      )
+      expect(result._id).toBe('existing-lec-123')
     })
   })
 
@@ -163,7 +370,6 @@ describe('lecture.service unit tests', () => {
         slides: [
           {
             id: 'slide-1',
-            pattern: 'default',
             title: '',
             bullets: []
           }
@@ -219,6 +425,36 @@ describe('lecture.service unit tests', () => {
 
       const result = await getLecture('user-1', 'lecture-123')
       expect(result).toEqual(mockLecture)
+    })
+  })
+
+  describe('hardDeleteLecture', () => {
+    it('ném lỗi 404 nếu không tìm thấy bài giảng thuộc về user', async () => {
+      mockLectureFindOne.mockResolvedValue(null)
+
+      await expect(
+        hardDeleteLecture('user-1', 'lecture-999')
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Không tìm thấy bài giảng'
+      })
+    })
+
+    it('xóa vĩnh viễn bài giảng thành công', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1'
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockLectureDeleteOne.mockResolvedValue({ deletedCount: 1 })
+
+      const result = await hardDeleteLecture('user-1', 'lecture-123')
+
+      expect(mockLectureDeleteOne).toHaveBeenCalledWith({
+        _id: 'lecture-123',
+        userId: 'user-1'
+      })
+      expect(result).toEqual({ message: 'Đã xóa vĩnh viễn bài giảng' })
     })
   })
 })

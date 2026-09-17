@@ -8,7 +8,8 @@ import { FolderModel } from '@/models/folder.model'
 import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
 import {
   generateOutlineFromPrompt,
-  buildSlidesFromOutline,
+  refineOutlineWithFeedback,
+  generateSlidesFromOutline,
   editSlideWithInstruction,
   type GeneratedOutline
 } from '@/services/ai.service'
@@ -23,53 +24,140 @@ interface ListParams {
   limit: number
 }
 
-export const generateOutline = async (userId: string, prompt: string) => {
-  // Bước 1: Gọi AI để sinh outline TRƯỜC — nếu AI lỗi, không trừ credit
-  const outline = await generateOutlineFromPrompt(prompt)
-  if (!outline.sections.length)
-    throw new AppError('AI không sinh được nội dung cho prompt này', 422)
-
-  // Bước 2: Kiểm tra credit SAU khi biết số slide thực tế
-  const config = await getCreditConfig()
-  const creditSpent = outline.sections.length * config.pricePerSlide
-
+export const generateOutline = async (
+  userId: string,
+  prompt: string,
+  options?: {
+    feedback?: string
+    currentOutline?: GeneratedOutline
+    lectureId?: string
+  }
+) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  if (user.creditBalance < creditSpent)
-    throw new AppError('Không đủ credit để tạo bài giảng', 402)
 
-  // Bước 3: Trừ credit và ghi log SAU KHI AI thành công
-  user.creditBalance -= creditSpent
-  await user.save()
-  await AiUsageLogModel.create({
-    userId,
-    prompt,
-    slideCount: outline.sections.length,
-    creditSpent
-  })
+  const config = await getCreditConfig()
+  if (user.creditBalance < config.pricePerOutline) {
+    throw new AppError('Không đủ credit để sinh dàn ý bài giảng', 402)
+  }
 
-  return { outline, creditSpent, creditBalance: user.creditBalance }
+  let outline: GeneratedOutline
+  if (options?.feedback && options?.currentOutline) {
+    outline = await refineOutlineWithFeedback(
+      options.currentOutline,
+      prompt,
+      options.feedback
+    )
+  } else {
+    outline = await generateOutlineFromPrompt(prompt)
+  }
+
+  if (!outline.sections?.length) {
+    throw new AppError('AI không sinh được nội dung cho prompt này', 422)
+  }
+
+  user.creditBalance -= config.pricePerOutline
+
+  let lecture
+  if (options?.lectureId) {
+    lecture = await LectureModel.findOneAndUpdate(
+      { _id: options.lectureId, userId },
+      {
+        title: outline.title || 'Bài giảng mới',
+        prompt,
+        outline
+      },
+      { new: true }
+    )
+  }
+
+  if (!lecture) {
+    lecture = await LectureModel.create({
+      userId,
+      title: outline.title || 'Bài giảng mới',
+      prompt,
+      outline,
+      slides: []
+    })
+  }
+
+  await Promise.all([
+    user.save(),
+    AiUsageLogModel.create({
+      userId,
+      prompt: options?.feedback
+        ? `${prompt} | Góp ý: ${options.feedback}`
+        : prompt,
+      slideCount: outline.sections.length,
+      creditSpent: config.pricePerOutline
+    })
+  ])
+
+  return {
+    lecture,
+    outline,
+    creditSpent: config.pricePerOutline,
+    creditBalance: user.creditBalance
+  }
 }
 
 export const createLecture = async (
   userId: string,
   data: {
+    lectureId?: string
     title: string
     prompt?: string
-    pattern: string
     folderId?: string | null
     outline: GeneratedOutline
   }
 ) => {
-  const slides = buildSlidesFromOutline(data.outline, data.pattern)
-  return LectureModel.create({
+  const user = await UserModel.findById(userId)
+  if (!user) throw new AppError('Tài khoản không tồn tại', 404)
+
+  const config = await getCreditConfig()
+  if (user.creditBalance < config.pricePerSlide) {
+    throw new AppError('Không đủ credit để tạo bài giảng', 402)
+  }
+
+  const slides = await generateSlidesFromOutline(
+    data.outline,
+    data.prompt ?? ''
+  )
+
+  const creditSpent = slides.length * config.pricePerSlide
+  user.creditBalance = Math.max(0, user.creditBalance - creditSpent)
+
+  const payload = {
     userId,
     title: data.title,
     prompt: data.prompt ?? '',
-    pattern: data.pattern,
+    outline: data.outline,
     slides,
     folderId: data.folderId ?? null
-  })
+  }
+
+  const [lecture] = await Promise.all([
+    data.lectureId
+      ? LectureModel.findOneAndUpdate(
+          { _id: data.lectureId, userId },
+          payload,
+          { new: true, upsert: true }
+        )
+      : LectureModel.create(payload),
+    user.save(),
+    AiUsageLogModel.create({
+      userId,
+      prompt: data.prompt || data.title,
+      slideCount: slides.length,
+      creditSpent
+    })
+  ])
+
+  return {
+    ...lecture.toObject(),
+    creditSpent,
+    creditBalance: user.creditBalance
+  }
 }
 
 export const createBlankLecture = async (
@@ -88,7 +176,6 @@ export const createBlankLecture = async (
     slides: [
       {
         id: `slide-${crypto.randomUUID()}`,
-        pattern: 'default',
         title: '',
         bullets: []
       }
@@ -171,7 +258,6 @@ export const updateLecture = async (
   id: string,
   data: {
     title?: string
-    pattern?: string
     slides?: unknown[]
     folderId?: string | null
   }
@@ -184,7 +270,6 @@ export const updateLecture = async (
   }
 
   if (data.title !== undefined) lecture.set('title', data.title)
-  if (data.pattern !== undefined) lecture.set('pattern', data.pattern)
   if (data.slides !== undefined) lecture.set('slides', data.slides)
   if (data.folderId !== undefined) lecture.set('folderId', data.folderId)
 
@@ -206,7 +291,6 @@ export const duplicateLecture = async (userId: string, id: string) => {
     folderId: source.folderId,
     title: `${source.title} - Copy`,
     prompt: source.prompt,
-    pattern: source.pattern,
     slides: clonedSlides
   })
 }
@@ -239,7 +323,6 @@ export const applySlideOperation = async (
     const index = Math.min(operation.index ?? slides.length, slides.length)
     slides.splice(index, 0, {
       id: `slide-${crypto.randomUUID()}`,
-      pattern: lecture.pattern,
       title: '',
       bullets: []
     })
@@ -286,6 +369,14 @@ export const restoreLecture = async (userId: string, id: string) => {
   lecture.set('deletedAt', null)
   await lecture.save()
   return lecture
+}
+
+export const hardDeleteLecture = async (userId: string, id: string) => {
+  const lecture = await findOwnedLecture(userId, id)
+  await LectureModel.deleteOne({ _id: lecture._id, userId })
+  return {
+    message: 'Đã xóa vĩnh viễn bài giảng'
+  }
 }
 
 export const editSlideWithAi = async (
@@ -346,7 +437,6 @@ export const exportLecture = async (userId: string, id: string) => {
   const exportBundle = {
     id: lecture._id,
     title: lecture.title,
-    pattern: lecture.pattern,
     prompt: lecture.prompt,
     slideCount: lecture.slides.length,
     slides: lecture.slides,

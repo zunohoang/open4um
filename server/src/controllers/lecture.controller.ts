@@ -5,7 +5,12 @@ import * as lectureService from '@/services/lecture.service'
 export const generateOutline = asyncHandler(async (req, res) => {
   const result = await lectureService.generateOutline(
     req.user.id,
-    req.body.prompt
+    req.body.prompt,
+    {
+      feedback: req.body.feedback,
+      currentOutline: req.body.currentOutline,
+      lectureId: req.body.lectureId
+    }
   )
   ok(res, result)
 })
@@ -114,6 +119,14 @@ export const restoreLecture = asyncHandler(async (req, res) => {
   ok(res, lecture)
 })
 
+export const hardDeleteLecture = asyncHandler(async (req, res) => {
+  const result = await lectureService.hardDeleteLecture(
+    req.user.id,
+    String(req.params.id)
+  )
+  ok(res, result)
+})
+
 export const editSlideWithAi = asyncHandler(async (req, res) => {
   const result = await lectureService.editSlideWithAi(
     req.user.id,
@@ -132,7 +145,6 @@ export const getPresentation = asyncHandler(async (req, res) => {
   ok(res, {
     id: lecture._id,
     title: lecture.title,
-    pattern: lecture.pattern,
     slides: lecture.slides,
     updatedAt: lecture.updatedAt
   })

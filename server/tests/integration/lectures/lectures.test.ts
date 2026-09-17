@@ -64,12 +64,12 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
         {
           userId,
           title: 'Bài giảng 1',
-          slides: [{ id: 's1', pattern: 'default' }]
+          slides: [{ id: 's1' }]
         },
         {
           userId,
           title: 'Bài giảng 2',
-          slides: [{ id: 's2', pattern: 'default' }]
+          slides: [{ id: 's2' }]
         }
       ])
 
@@ -89,7 +89,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lecture = await LectureModel.create({
         userId,
         title: 'Bài giảng Chi Tiết',
-        slides: [{ id: 's1', pattern: 'default' }]
+        slides: [{ id: 's1' }]
       })
 
       const res = await request(app)
@@ -108,7 +108,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lecture = await LectureModel.create({
         userId,
         title: 'Bài giảng Cần Xóa',
-        slides: [{ id: 's1', pattern: 'default' }]
+        slides: [{ id: 's1' }]
       })
 
       const res = await request(app)
@@ -133,6 +133,27 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       )
       expect(itemIds).not.toContain(lecture._id.toString())
     })
+
+    it('DELETE /api/v1/lectures/:id/permanent xóa vĩnh viễn bài giảng khỏi DB', async () => {
+      const { userToken, userId } = await createTestUser()
+
+      const lecture = await LectureModel.create({
+        userId,
+        title: 'Bài giảng Cần Xóa Vĩnh Viễn',
+        slides: [{ id: 's-perm-1' }],
+        deletedAt: new Date()
+      })
+
+      const res = await request(app)
+        .delete(`/api/v1/lectures/${lecture._id}/permanent`)
+        .set('Authorization', `Bearer ${userToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(true)
+
+      const lectureInDb = await LectureModel.findById(lecture._id)
+      expect(lectureInDb).toBeNull()
+    })
   })
 
   describe('Data Isolation & IDOR Protection', () => {
@@ -143,7 +164,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lectureB = await LectureModel.create({
         userId: userBId,
         title: 'Bài giảng riêng tư của User B',
-        slides: [{ id: 's-b-1', pattern: 'default' }]
+        slides: [{ id: 's-b-1' }]
       })
 
       const res = await request(app)
@@ -161,7 +182,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lectureB = await LectureModel.create({
         userId: userBId,
         title: 'Bài giảng riêng tư của User B',
-        slides: [{ id: 's-b-1', pattern: 'default' }]
+        slides: [{ id: 's-b-1' }]
       })
 
       const res = await request(app)
@@ -183,7 +204,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lectureB = await LectureModel.create({
         userId: userBId,
         title: 'Bài giảng riêng tư của User B',
-        slides: [{ id: 's-b-1', pattern: 'default' }]
+        slides: [{ id: 's-b-1' }]
       })
 
       const res = await request(app)
@@ -196,6 +217,27 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
       const lectureInDb = await LectureModel.findById(lectureB._id)
       expect(lectureInDb).not.toBeNull()
       expect(lectureInDb?.deletedAt).toBeNull()
+    })
+
+    it('User A không thể xóa vĩnh viễn bài giảng của User B (DELETE /api/v1/lectures/:id/permanent) và DB không bị xóa', async () => {
+      const { userToken: userAToken } = await createTestUser()
+      const { userId: userBId } = await createTestUser()
+
+      const lectureB = await LectureModel.create({
+        userId: userBId,
+        title: 'Bài giảng riêng tư của User B',
+        slides: [{ id: 's-b-1' }]
+      })
+
+      const res = await request(app)
+        .delete(`/api/v1/lectures/${lectureB._id}/permanent`)
+        .set('Authorization', `Bearer ${userAToken}`)
+
+      expect(res.status).toBe(404)
+      expect(res.body.success).toBe(false)
+
+      const lectureInDb = await LectureModel.findById(lectureB._id)
+      expect(lectureInDb).not.toBeNull()
     })
   })
 })

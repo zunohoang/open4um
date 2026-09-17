@@ -115,8 +115,11 @@ export const EditorPage = ({
   const [instruction, setInstruction] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
 
-  // Tab bảng điều khiển bên phải: Chat AI hay Chỉnh sửa Canvas
-  const [rightPanelTab, setRightPanelTab] = useState<'chat' | 'edit'>('edit')
+  // Tab bảng điều khiển bên phải: Xem Dàn ý, Chat AI hay Chỉnh sửa Canvas
+  const [rightPanelTab, setRightPanelTab] = useState<
+    'outline' | 'chat' | 'edit'
+  >('edit')
+  const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
 
   // Component đang được chọn trên Canvas
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null)
@@ -534,8 +537,6 @@ export const EditorPage = ({
     )
   }
 
-  const slidePattern = slide?.pattern || lecture.pattern || 'default'
-
   return (
     <main className='min-h-screen bg-stone-200'>
       {/* Header trang soạn thảo màu xanh rừng kinh điển */}
@@ -656,6 +657,66 @@ export const EditorPage = ({
         onError={(msg) => showToast(msg, 'error')}
       />
 
+      {/* Modal Phóng to xem lại Dàn ý */}
+      {isOutlineModalOpen && lecture.outline && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-xs font-sans'
+          onClick={() => setIsOutlineModalOpen(false)}
+        >
+          <div
+            className='relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden border border-stone-300 bg-white shadow-2xl'
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className='flex items-center justify-between border-b border-stone-300 bg-white px-6 py-4'>
+              <div>
+                <span className='font-sans text-xs font-bold tracking-widest text-orange-700 uppercase'>
+                  Dàn ý của bài giảng
+                </span>
+                <h3 className='text-xl font-medium text-emerald-950 font-display'>
+                  Dàn ý bài giảng ({lecture.outline.sections.length} phần)
+                </h3>
+              </div>
+              <button
+                type='button'
+                onClick={() => setIsOutlineModalOpen(false)}
+                className='p-1.5 text-stone-400 hover:text-emerald-950 transition text-lg'
+                aria-label='Đóng'
+              >
+                ✕
+              </button>
+            </div>
+            <div className='flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar'>
+              {lecture.outline.sections.map((sec, idx) => {
+                return (
+                  <div
+                    key={idx}
+                    className='border border-stone-200 bg-stone-50/50 p-4'
+                  >
+                    <div className='flex items-baseline gap-2'>
+                      <span className='font-mono text-xs font-bold text-orange-700'>
+                        {String(idx + 1).padStart(2, '0')}.
+                      </span>
+                      <strong className='text-sm font-semibold text-emerald-950 font-display'>
+                        {sec.heading}
+                      </strong>
+                    </div>
+                    {sec.bullets && sec.bullets.length > 0 && (
+                      <ul className='mt-2 list-disc pl-5 text-xs text-stone-600 space-y-1'>
+                        {sec.bullets.map((b, bIdx) => (
+                          <li key={bIdx} className='leading-relaxed'>
+                            {b}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cấu trúc 3 cột chuẩn */}
       <div className='flex h-[calc(100vh-4rem)] overflow-hidden bg-brand-paper'>
         {/* Cột 1 (Trái - 240px): Danh sách slide thumbnail dọc sắc nét */}
@@ -702,13 +763,7 @@ export const EditorPage = ({
           {/* Canvas 16:9 với khả năng kéo thả và viền bao khi chọn */}
           <div
             ref={canvasRef}
-            className={`relative aspect-video w-full max-w-4xl overflow-hidden border border-stone-300 shadow-2xl transition-all select-none ${
-              slidePattern === 'warm'
-                ? 'border-t-8 border-orange-900 bg-orange-50 text-orange-950'
-                : slidePattern === 'mono'
-                  ? 'border-t-8 border-stone-200 bg-stone-900 text-stone-100'
-                  : 'border-t-8 border-orange-700 bg-white text-emerald-950'
-            }`}
+            className='relative aspect-video w-full max-w-4xl overflow-hidden border border-stone-300 shadow-2xl transition-all select-none border-t-8 bg-white text-emerald-950'
           >
             {/* Chỉ số slide góc trên bên phải canvas */}
             <span className='absolute right-4 top-4 font-mono text-xs opacity-50 z-10 pointer-events-none'>
@@ -772,9 +827,7 @@ export const EditorPage = ({
                       fontStyle: comp.fontStyle ?? 'normal',
                       textDecoration: comp.textDecoration ?? 'none',
                       textAlign: comp.textAlign ?? 'left',
-                      color:
-                        comp.color ||
-                        (slidePattern === 'mono' ? '#f5f5f4' : '#064e3b'),
+                      color: comp.color || '#064e3b',
                       lineHeight: 1.3
                     }}
                     className={`w-full ${
@@ -860,14 +913,26 @@ export const EditorPage = ({
 
         {/* Cột 3 (Phải - 320px): CHAT PANEL & BẢNG ĐỊNH DẠNG */}
         <aside className='flex w-80 shrink-0 flex-col overflow-hidden border-l border-stone-300 bg-stone-50 font-sans'>
-          {/* Header thanh công cụ phải: Căn giữa 2 nút chọn panel */}
-          <div className='flex items-center justify-center border-b border-stone-300 bg-white px-4 py-3'>
-            {/* Nút chuyển đổi giữa Chat Panel và Edit Panel */}
+          {/* Header thanh công cụ phải: Căn giữa 3 nút chọn panel */}
+          <div className='flex items-center justify-center border-b border-stone-300 bg-white px-2 py-2.5'>
+            {/* Nút chuyển đổi giữa Dàn ý, Chat Panel và Edit Panel */}
             <div className='flex border border-stone-300 bg-stone-100 p-0.5'>
               <button
                 type='button'
+                onClick={() => setRightPanelTab('outline')}
+                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
+                  rightPanelTab === 'outline'
+                    ? 'bg-orange-700 text-white shadow-xs'
+                    : 'text-stone-600 hover:text-emerald-950'
+                }`}
+                title='Xem lại dàn ý bài giảng'
+              >
+                <span>📑 Dàn ý</span>
+              </button>
+              <button
+                type='button'
                 onClick={() => setRightPanelTab('chat')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold transition ${
+                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
                   rightPanelTab === 'chat'
                     ? 'bg-orange-700 text-white shadow-xs'
                     : 'text-stone-600 hover:text-emerald-950'
@@ -879,7 +944,7 @@ export const EditorPage = ({
               <button
                 type='button'
                 onClick={() => setRightPanelTab('edit')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold transition ${
+                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
                   rightPanelTab === 'edit'
                     ? 'bg-orange-700 text-white shadow-xs'
                     : 'text-stone-600 hover:text-emerald-950'
@@ -890,6 +955,77 @@ export const EditorPage = ({
               </button>
             </div>
           </div>
+
+          {/* TAB 0: OUTLINE PANEL */}
+          {rightPanelTab === 'outline' && (
+            <div className='flex flex-1 flex-col overflow-hidden'>
+              <div className='flex items-center justify-between border-b border-stone-200 bg-white px-4 py-2.5'>
+                <div className='flex items-center gap-2'>
+                  <span className='text-xs font-bold uppercase tracking-wider text-emerald-950'>
+                    Dàn ý bài giảng
+                  </span>
+                  {lecture.outline?.sections && (
+                    <span className='rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-800'>
+                      {lecture.outline.sections.length} phần
+                    </span>
+                  )}
+                </div>
+                {lecture.outline?.sections && (
+                  <button
+                    type='button'
+                    onClick={() => setIsOutlineModalOpen(true)}
+                    className='text-stone-400 hover:text-emerald-950 p-1 text-xs transition'
+                    title='Phóng to dàn ý bài giảng'
+                  >
+                    ⤢ Phóng to
+                  </button>
+                )}
+              </div>
+
+              <div className='flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar'>
+                {lecture.outline?.sections &&
+                lecture.outline.sections.length > 0 ? (
+                  lecture.outline.sections.map((sec, idx) => {
+                    return (
+                      <div
+                        key={idx}
+                        className='border border-stone-200 bg-white p-3 shadow-2xs transition hover:border-stone-300'
+                      >
+                        <div className='flex items-baseline gap-1.5'>
+                          <span className='font-mono text-xs font-bold text-orange-700'>
+                            {String(idx + 1).padStart(2, '0')}.
+                          </span>
+                          <strong className='text-xs font-semibold text-emerald-950 font-display'>
+                            {sec.heading}
+                          </strong>
+                        </div>
+                        {sec.bullets && sec.bullets.length > 0 && (
+                          <ul className='mt-2 list-disc pl-4 text-[11px] text-stone-600 space-y-1'>
+                            {sec.bullets.map((b, bIdx) => (
+                              <li key={bIdx} className='leading-relaxed'>
+                                {b}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className='flex h-full min-h-55 flex-col items-center justify-center p-6 text-center text-stone-400'>
+                    <div className='text-3xl mb-2 opacity-60'>📑</div>
+                    <p className='text-xs font-bold text-stone-700'>
+                      Chưa có dàn ý lưu trữ
+                    </p>
+                    <p className='mt-1 text-[11px] text-stone-400 max-w-50 leading-relaxed'>
+                      Bài giảng này được tạo từ canvas trống hoặc không có thông
+                      tin dàn ý AI.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: CHAT PANEL */}
           {rightPanelTab === 'chat' && (
@@ -1283,43 +1419,6 @@ export const EditorPage = ({
                         Quote
                       </span>
                     </button>
-                  </div>
-
-                  {/* CÀI ĐẶT TÔNG MÀU NỀN CỦA SLIDE */}
-                  <div className='border border-stone-300 bg-white p-3.5 space-y-2'>
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600'>
-                      Tông màu nền slide
-                    </span>
-                    <div className='grid grid-cols-3 gap-2'>
-                      {[
-                        { id: 'default', name: 'Mặc định', bg: 'bg-white' },
-                        { id: 'warm', name: 'Tông ấm', bg: 'bg-orange-50' },
-                        {
-                          id: 'mono',
-                          name: 'Đen tối giản',
-                          bg: 'bg-stone-900 text-white'
-                        }
-                      ].map((p) => (
-                        <button
-                          key={p.id}
-                          type='button'
-                          onClick={() => {
-                            if (!slide) return
-                            const nextSlides = lecture.slides.map((s, idx) =>
-                              idx === active ? { ...s, pattern: p.id } : s
-                            )
-                            onLectureMutated({ ...lecture, slides: nextSlides })
-                          }}
-                          className={`p-2 border text-center text-xs font-semibold transition ${p.bg} ${
-                            slidePattern === p.id
-                              ? 'border-orange-700 ring-2 ring-orange-600 font-bold'
-                              : 'border-stone-300 hover:border-stone-400'
-                          }`}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </div>
               )}

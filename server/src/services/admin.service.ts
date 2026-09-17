@@ -190,6 +190,7 @@ export const getCreditConfig = async () => {
 export const updateCreditConfig = async (data: {
   pricePerSlide?: number
   pricePerAiEdit?: number
+  pricePerOutline?: number
   signupBonus?: number
 }) => {
   const config = await getCreditConfig()
