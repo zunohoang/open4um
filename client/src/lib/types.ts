@@ -51,7 +51,6 @@ export interface SlideComponent {
 
 export interface Slide {
   id: string
-  pattern: string
   title: string
   bullets: string[]
   subtitle?: string
@@ -70,7 +69,7 @@ export interface Lecture {
   folderId: string | null
   title: string
   prompt: string
-  pattern: string
+  outline?: Outline | null
   slides: Slide[]
   deletedAt: string | null
   createdAt: string

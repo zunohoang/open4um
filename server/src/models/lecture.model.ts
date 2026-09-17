@@ -21,7 +21,7 @@ const lectureSchema = new Schema(
     },
     title: { type: String, required: true, trim: true },
     prompt: { type: String, default: '' },
-    pattern: { type: String, default: 'default' },
+    outline: { type: Schema.Types.Mixed, default: null },
     slides: { type: [Schema.Types.Mixed], default: [] },
     deletedAt: {
       type: Date,

@@ -10,7 +10,6 @@ export const editorApi = {
         `/lectures/${lecture._id}/autosave`,
         {
           title: lecture.title,
-          pattern: lecture.pattern,
           slides: lecture.slides
         }
       )

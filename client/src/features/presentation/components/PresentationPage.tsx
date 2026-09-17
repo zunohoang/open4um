@@ -159,7 +159,6 @@ export const PresentationPage = ({
   }
 
   const slide = lecture.slides[index]
-  const slidePattern = slide?.pattern || lecture.pattern || 'default'
 
   return (
     <main
@@ -171,13 +170,7 @@ export const PresentationPage = ({
       {/* Khung Slide chuẩn tỷ lệ 16:9 tối đa kích thước màn hình */}
       <div
         ref={slideRef}
-        className={`relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150 ${
-          slidePattern === 'warm'
-            ? 'bg-orange-50 text-orange-950'
-            : slidePattern === 'mono'
-              ? 'bg-stone-900 text-stone-100'
-              : 'bg-stone-50 text-emerald-950'
-        }`}
+        className='relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150 bg-stone-50 text-emerald-950'
         style={{
           aspectRatio: '16 / 9',
           width: 'min(96vw, calc(96vh * 16 / 9))',
@@ -205,9 +198,7 @@ export const PresentationPage = ({
                   fontStyle: comp.fontStyle ?? 'normal',
                   textDecoration: comp.textDecoration ?? 'none',
                   textAlign: comp.textAlign ?? 'left',
-                  color:
-                    comp.color ||
-                    (slidePattern === 'mono' ? '#f5f5f4' : '#064e3b'),
+                  color: comp.color || '#064e3b',
                   lineHeight: 1.3
                 }}
                 className={
