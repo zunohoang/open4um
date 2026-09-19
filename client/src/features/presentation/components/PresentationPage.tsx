@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type { Lecture } from '@/lib/types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 interface PresentationPageProps {
   lecture?: Lecture
@@ -199,7 +199,9 @@ export const PresentationPage = ({
                   textDecoration: comp.textDecoration ?? 'none',
                   textAlign: comp.textAlign ?? 'left',
                   color: comp.color || '#064e3b',
-                  lineHeight: 1.3
+                  lineHeight: 1.3,
+                  textTransform:
+                    comp.textCase === 'uppercase' ? 'uppercase' : 'none'
                 }}
                 className={
                   comp.fontFamily === 'display'
@@ -209,7 +211,13 @@ export const PresentationPage = ({
                       : 'font-sans'
                 }
               >
-                {comp.type === 'bullets' ? (
+                {comp.type === 'image' ? (
+                  <img
+                    src={comp.imageUrl || comp.content}
+                    alt='Slide visual'
+                    className='h-auto w-full object-contain'
+                  />
+                ) : comp.type === 'bullets' ? (
                   <ul className='space-y-2.5 list-disc pl-6'>
                     {comp.content
                       .split('\n')
