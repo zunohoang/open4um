@@ -1,658 +1,732 @@
-import { ExportModal } from "@/components/ui/ExportModal";
-import { useToast } from "@/components/ui/Toast";
-import { useAuthStore } from "@/features/auth/store/auth.store";
-import { editorApi } from "@/features/slide-editor/api/editor.api";
-import type { Lecture, Slide, SlideComponent } from "@/lib/types";
-import { isAxiosError } from "axios";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useEditorStore } from "../store/editor.store";
-import { AiCopilotPanel } from "./AiCopilotPanel";
-import { EditorHeader } from "./EditorHeader";
-import { FloatingContextualToolbar } from "./FloatingContextualToolbar";
-import { LeftSidebarRail } from "./LeftSidebarRail";
-import { SlideCanvas } from "./SlideCanvas";
-import { SlideFilmstrip } from "./SlideFilmstrip";
+import { ExportModal } from '@/components/ui/ExportModal'
+import { useToast } from '@/components/ui/Toast'
+import { useAuthStore } from '@/features/auth/store/auth.store'
+import { editorApi } from '@/features/slide-editor/api/editor.api'
+import type { Lecture, Slide, SlideComponent } from '@/lib/types'
+import { isAxiosError } from 'axios'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useEditorStore } from '../store/editor.store'
+import { AiCopilotPanel } from './AiCopilotPanel'
+import { EditorHeader } from './EditorHeader'
+import { FloatingContextualToolbar } from './FloatingContextualToolbar'
+import { LeftSidebarRail } from './LeftSidebarRail'
+import { SlideCanvas } from './SlideCanvas'
+import { SlideFilmstrip } from './SlideFilmstrip'
 
 interface EditorPageProps {
-    initialLecture?: Lecture;
-    onBack?: () => void;
-    onPresent?: (lecture: Lecture) => void;
+  initialLecture?: Lecture
+  onBack?: () => void
+  onPresent?: (lecture: Lecture) => void
 }
 
 // Khởi tạo các components cho slide nếu chưa có
 const getSlideComponents = (slide: Slide): SlideComponent[] => {
-    if (slide.components && slide.components.length > 0) {
-        return slide.components;
-    }
+  if (slide.components && slide.components.length > 0) {
+    return slide.components
+  }
 
-    const comps: SlideComponent[] = [];
+  const comps: SlideComponent[] = []
 
+  comps.push({
+    id: `title-${slide.id}`,
+    type: 'title',
+    content: slide.title || 'Tiêu đề slide',
+    x: 8,
+    y: 12,
+    width: 84,
+    fontSize:
+      slide.titleSize === 'xl' ? 48 : slide.titleSize === 'sm' ? 26 : 36,
+    fontWeight: 'bold',
+    fontStyle: 'normal',
+    textDecoration: 'none',
+    textAlign: slide.titleAlign || 'left',
+    fontFamily: 'display',
+    color: '#1c1917'
+  })
+
+  if (slide.subtitle) {
     comps.push({
-        id: `title-${slide.id}`,
-        type: "title",
-        content: slide.title || "Tiêu đề slide",
-        x: 8,
-        y: 12,
-        width: 84,
-        fontSize: slide.titleSize === "xl" ? 48 : slide.titleSize === "sm" ? 26 : 36,
-        fontWeight: "bold",
-        fontStyle: "normal",
-        textDecoration: "none",
-        textAlign: slide.titleAlign || "left",
-        fontFamily: "display",
-        color: "#1c1917",
-    });
+      id: `sub-${slide.id}`,
+      type: 'subtitle',
+      content: slide.subtitle,
+      x: 8,
+      y: 26,
+      width: 84,
+      fontSize: 18,
+      fontWeight: 'normal',
+      fontStyle: 'italic',
+      textDecoration: 'none',
+      textAlign: slide.titleAlign || 'left',
+      fontFamily: 'sans',
+      color: '#64748b'
+    })
+  }
 
-    if (slide.subtitle) {
-        comps.push({
-            id: `sub-${slide.id}`,
-            type: "subtitle",
-            content: slide.subtitle,
-            x: 8,
-            y: 26,
-            width: 84,
-            fontSize: 18,
-            fontWeight: "normal",
-            fontStyle: "italic",
-            textDecoration: "none",
-            textAlign: slide.titleAlign || "left",
-            fontFamily: "sans",
-            color: "#64748b",
-        });
+  if (slide.bullets && slide.bullets.length > 0) {
+    comps.push({
+      id: `bullets-${slide.id}`,
+      type: 'bullets',
+      content: slide.bullets.join('\n'),
+      x: 8,
+      y: slide.subtitle ? 38 : 28,
+      width: 84,
+      fontSize: 20,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+      textAlign: 'left',
+      fontFamily: 'sans',
+      color: '#1c1917'
+    })
+  }
+
+  return comps
+}
+
+export const EditorPage = ({
+  initialLecture,
+  onBack,
+  onPresent
+}: EditorPageProps) => {
+  const { showToast } = useToast()
+  const navigate = useNavigate()
+  const params = useParams<{ id: string }>()
+  const location = useLocation()
+  const { user } = useAuthStore()
+
+  const {
+    activeSlideIndex,
+    setActiveSlideIndex,
+    selectedCompId,
+    setSelectedCompId,
+    recordHistory,
+    undo,
+    redo,
+    addAiMessage
+  } = useEditorStore()
+
+  const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
+  const [lecture, setLecture] = useState<Lecture | null>(
+    initialLecture || lectureFromState || null
+  )
+  const [isLoading, setIsLoading] = useState(!lecture)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [isUnauthorized, setIsUnauthorized] = useState(false)
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+
+  // Trạng thái Autosave đếm ngược
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>(
+    'saved'
+  )
+  const [countdown, setCountdown] = useState<number | null>(null)
+
+  const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  )
+  const lectureRef = useRef(lecture)
+  useEffect(() => {
+    lectureRef.current = lecture
+  }, [lecture])
+
+  // Lưu bài giảng lên server
+  const triggerSaveToServer = useCallback(
+    async (toSave: Lecture) => {
+      setSaveStatus('saving')
+      setCountdown(null)
+      try {
+        await editorApi.autosave(toSave)
+        setSaveStatus('saved')
+      } catch {
+        setSaveStatus('unsaved')
+        showToast('Không thể lưu thay đổi vào máy chủ', 'error')
+      }
+    },
+    [showToast]
+  )
+
+  const clearCountdownTimers = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearTimeout(countdownTimerRef.current)
+      countdownTimerRef.current = null
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+    setCountdown(null)
+  }, [])
+
+  // Tải dữ liệu bài giảng từ server
+  const loadLecture = useCallback(async () => {
+    if (!params.id) return
+    setIsLoading(true)
+    setLoadError(null)
+    setIsUnauthorized(false)
+
+    try {
+      const loaded = await editorApi.get(params.id)
+
+      // Kiểm tra quyền truy cập theo Use-case
+      if (
+        user &&
+        loaded.userId &&
+        loaded.userId !== user.id &&
+        user.role !== 'admin'
+      ) {
+        setIsUnauthorized(true)
+        setIsLoading(false)
+        return
+      }
+
+      setLecture(loaded)
+
+      // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
+      const savedIndexStr = sessionStorage.getItem(
+        `open4um_last_slide_${loaded._id}`
+      )
+      if (savedIndexStr !== null) {
+        const savedIndex = Number(savedIndexStr)
+        if (
+          !isNaN(savedIndex) &&
+          savedIndex >= 0 &&
+          savedIndex < loaded.slides.length
+        ) {
+          setActiveSlideIndex(savedIndex)
+        }
+      }
+    } catch (err) {
+      const msg = isAxiosError(err)
+        ? (err.response?.data as { message?: string })?.message ||
+          'Không thể tải bài giảng'
+        : 'Không thể kết nối đến máy chủ'
+      setLoadError(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [params.id, user, setActiveSlideIndex])
+
+  useEffect(() => {
+    if (!lecture && params.id) {
+      void loadLecture()
+    }
+  }, [lecture, params.id, loadLecture])
+
+  // Khi có thay đổi dữ liệu slide/lecture -> Ghi nhận Undo history và kích hoạt Autosave 2s
+  const mutateLecture = useCallback(
+    (next: Lecture, shouldRecordHistory = true) => {
+      if (shouldRecordHistory && lectureRef.current) {
+        recordHistory(lectureRef.current.slides)
+      }
+
+      setLecture(next)
+      setSaveStatus('unsaved')
+
+      // Lưu vị trí slide hiện tại vào sessionStorage
+      if (next._id) {
+        sessionStorage.setItem(
+          `open4um_last_slide_${next._id}`,
+          String(activeSlideIndex)
+        )
+      }
+
+      // Đếm ngược 2s Autosave tự động
+      clearCountdownTimers()
+      setCountdown(2)
+
+      countdownIntervalRef.current = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev === null || prev <= 1) return 1
+          return prev - 1
+        })
+      }, 1000)
+
+      countdownTimerRef.current = setTimeout(() => {
+        clearCountdownTimers()
+        if (lectureRef.current) {
+          void triggerSaveToServer(lectureRef.current)
+        }
+      }, 2000)
+    },
+    [activeSlideIndex, clearCountdownTimers, recordHistory, triggerSaveToServer]
+  )
+
+  // Lưu thủ công (Ctrl+S / Cmd+S)
+  const handleManualSave = useCallback(() => {
+    if (!lecture) return
+    clearCountdownTimers()
+    void triggerSaveToServer(lecture)
+  }, [clearCountdownTimers, lecture, triggerSaveToServer])
+
+  // Xử lý Undo
+  const handleUndo = useCallback(() => {
+    if (!lecture) return
+    const prevSlides = undo(lecture.slides)
+    if (prevSlides) {
+      setLecture((prev) => (prev ? { ...prev, slides: prevSlides } : prev))
+      setSaveStatus('unsaved')
+      clearCountdownTimers()
+      void triggerSaveToServer({ ...lecture, slides: prevSlides })
+    }
+  }, [clearCountdownTimers, lecture, triggerSaveToServer, undo])
+
+  // Xử lý Redo
+  const handleRedo = useCallback(() => {
+    if (!lecture) return
+    const nextSlides = redo(lecture.slides)
+    if (nextSlides) {
+      setLecture((prev) => (prev ? { ...prev, slides: nextSlides } : prev))
+      setSaveStatus('unsaved')
+      clearCountdownTimers()
+      void triggerSaveToServer({ ...lecture, slides: nextSlides })
+    }
+  }, [clearCountdownTimers, lecture, redo, triggerSaveToServer])
+
+  // Lắng nghe phím tắt toàn cục (Ctrl+Z, Ctrl+Y, Ctrl+S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Phím tắt Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        handleManualSave()
+        return
+      }
+      // Phím tắt Undo (Ctrl+Z)
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'z'
+      ) {
+        e.preventDefault()
+        handleUndo()
+        return
+      }
+      // Phím tắt Redo (Ctrl+Y hoặc Ctrl+Shift+Z)
+      if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        e.preventDefault()
+        handleRedo()
+        return
+      }
     }
 
-    if (slide.bullets && slide.bullets.length > 0) {
-        comps.push({
-            id: `bullets-${slide.id}`,
-            type: "bullets",
-            content: slide.bullets.join("\n"),
-            x: 8,
-            y: slide.subtitle ? 38 : 28,
-            width: 84,
-            fontSize: 20,
-            fontWeight: "normal",
-            fontStyle: "normal",
-            textDecoration: "none",
-            textAlign: "left",
-            fontFamily: "sans",
-            color: "#1c1917",
-        });
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleManualSave, handleUndo, handleRedo])
+
+  // Dọn dẹp timer khi unmount
+  useEffect(() => {
+    return () => clearCountdownTimers()
+  }, [clearCountdownTimers])
+
+  // THAO TÁC TRÊN SLIDE VÀ COMPONENT
+  const currentSlide = lecture?.slides[activeSlideIndex]
+  const currentComponents = currentSlide ? getSlideComponents(currentSlide) : []
+  const selectedComponent =
+    currentComponents.find((c) => c.id === selectedCompId) || null
+
+  // Cập nhật thuộc tính của một component
+  const handleUpdateComponent = useCallback(
+    (compId: string, patch: Partial<SlideComponent>) => {
+      const currentLecture = lectureRef.current
+      if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
+
+      const sourceSlide = currentLecture.slides[activeSlideIndex]
+      const comps = getSlideComponents(sourceSlide)
+      const updatedComps = comps.map((c) =>
+        c.id === compId ? { ...c, ...patch } : c
+      )
+
+      // Đồng bộ ngược title và bullets để AI và Presentation luôn hoạt động tốt
+      const titleComp = updatedComps.find((c) => c.type === 'title')
+      const subComp = updatedComps.find((c) => c.type === 'subtitle')
+      const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
+
+      const updatedSlide: Slide = {
+        ...sourceSlide,
+        title: titleComp ? titleComp.content : sourceSlide.title,
+        subtitle: subComp ? subComp.content : sourceSlide.subtitle,
+        bullets: bulletsComp
+          ? bulletsComp.content.split('\n').filter((s) => s.trim())
+          : sourceSlide.bullets,
+        components: updatedComps
+      }
+
+      const nextSlides = currentLecture.slides.map((s, idx) =>
+        idx === activeSlideIndex ? updatedSlide : s
+      )
+      mutateLecture({ ...currentLecture, slides: nextSlides })
+    },
+    [activeSlideIndex, mutateLecture]
+  )
+
+  // Thêm khối văn bản mới
+  const handleAddTextComponent = (
+    type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote'
+  ) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const newId = `comp-${Date.now()}`
+
+    const newComp: SlideComponent = {
+      id: newId,
+      type,
+      content:
+        type === 'title'
+          ? 'Tiêu đề mới'
+          : type === 'subtitle'
+            ? 'Dòng phụ đề mới'
+            : type === 'quote'
+              ? 'Nhập trích dẫn ý nghĩa tại đây...'
+              : 'Nội dung văn bản mới...',
+      x: 12,
+      y: 20 + comps.length * 6,
+      width: 76,
+      fontSize: type === 'title' ? 36 : type === 'subtitle' ? 18 : 20,
+      fontWeight: type === 'title' ? 'bold' : 'normal',
+      fontStyle: type === 'quote' || type === 'subtitle' ? 'italic' : 'normal',
+      textDecoration: 'none',
+      textCase: 'normal',
+      textAlign: type === 'quote' ? 'center' : 'left',
+      fontFamily: type === 'title' || type === 'quote' ? 'display' : 'sans',
+      color: '#173c39'
     }
 
-    return comps;
-};
+    const updatedComps = [...comps, newComp]
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
 
-export const EditorPage = ({ initialLecture, onBack, onPresent }: EditorPageProps) => {
-    const { showToast } = useToast();
-    const navigate = useNavigate();
-    const params = useParams<{ id: string }>();
-    const location = useLocation();
-    const { user } = useAuthStore();
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(newId)
+  }
 
-    const {
-        activeSlideIndex,
-        setActiveSlideIndex,
-        selectedCompId,
-        setSelectedCompId,
-        recordHistory,
-        undo,
-        redo,
-        addAiMessage,
-    } = useEditorStore();
+  // Thêm khối hình ảnh mới từ ảnh tải lên
+  const handleAddImageComponent = (imageUrl: string) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const newId = `img-comp-${Date.now()}`
 
-    const lectureFromState = (location.state as { lecture?: Lecture })?.lecture;
-    const [lecture, setLecture] = useState<Lecture | null>(initialLecture || lectureFromState || null);
-    const [isLoading, setIsLoading] = useState(!lecture);
-    const [loadError, setLoadError] = useState<string | null>(null);
-    const [isUnauthorized, setIsUnauthorized] = useState(false);
-    const [isAiLoading, setIsAiLoading] = useState(false);
-    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-
-    // Trạng thái Autosave đếm ngược
-    const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
-    const [countdown, setCountdown] = useState<number | null>(null);
-
-    const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const lectureRef = useRef(lecture);
-    useEffect(() => {
-        lectureRef.current = lecture;
-    }, [lecture]);
-
-    // Lưu bài giảng lên server
-    const triggerSaveToServer = useCallback(
-        async (toSave: Lecture) => {
-            setSaveStatus("saving");
-            setCountdown(null);
-            try {
-                await editorApi.autosave(toSave);
-                setSaveStatus("saved");
-            } catch {
-                setSaveStatus("unsaved");
-                showToast("Không thể lưu thay đổi vào máy chủ", "error");
-            }
-        },
-        [showToast],
-    );
-
-    const clearCountdownTimers = useCallback(() => {
-        if (countdownTimerRef.current) {
-            clearTimeout(countdownTimerRef.current);
-            countdownTimerRef.current = null;
-        }
-        if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-            countdownIntervalRef.current = null;
-        }
-        setCountdown(null);
-    }, []);
-
-    // Tải dữ liệu bài giảng từ server
-    const loadLecture = useCallback(async () => {
-        if (!params.id) return;
-        setIsLoading(true);
-        setLoadError(null);
-        setIsUnauthorized(false);
-
-        try {
-            const loaded = await editorApi.get(params.id);
-
-            // Kiểm tra quyền truy cập theo Use-case
-            if (user && loaded.userId && loaded.userId !== user.id && user.role !== "admin") {
-                setIsUnauthorized(true);
-                setIsLoading(false);
-                return;
-            }
-
-            setLecture(loaded);
-
-            // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
-            const savedIndexStr = sessionStorage.getItem(`open4um_last_slide_${loaded._id}`);
-            if (savedIndexStr !== null) {
-                const savedIndex = Number(savedIndexStr);
-                if (!isNaN(savedIndex) && savedIndex >= 0 && savedIndex < loaded.slides.length) {
-                    setActiveSlideIndex(savedIndex);
-                }
-            }
-        } catch (err) {
-            const msg = isAxiosError(err)
-                ? (err.response?.data as { message?: string })?.message || "Không thể tải bài giảng"
-                : "Không thể kết nối đến máy chủ";
-            setLoadError(msg);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [params.id, user, setActiveSlideIndex]);
-
-    useEffect(() => {
-        if (!lecture && params.id) {
-            void loadLecture();
-        }
-    }, [lecture, params.id, loadLecture]);
-
-    // Khi có thay đổi dữ liệu slide/lecture -> Ghi nhận Undo history và kích hoạt Autosave 2s
-    const mutateLecture = useCallback(
-        (next: Lecture, shouldRecordHistory = true) => {
-            if (shouldRecordHistory && lectureRef.current) {
-                recordHistory(lectureRef.current.slides);
-            }
-
-            setLecture(next);
-            setSaveStatus("unsaved");
-
-            // Lưu vị trí slide hiện tại vào sessionStorage
-            if (next._id) {
-                sessionStorage.setItem(`open4um_last_slide_${next._id}`, String(activeSlideIndex));
-            }
-
-            // Đếm ngược 2s Autosave tự động
-            clearCountdownTimers();
-            setCountdown(2);
-
-            countdownIntervalRef.current = setInterval(() => {
-                setCountdown(prev => {
-                    if (prev === null || prev <= 1) return 1;
-                    return prev - 1;
-                });
-            }, 1000);
-
-            countdownTimerRef.current = setTimeout(() => {
-                clearCountdownTimers();
-                if (lectureRef.current) {
-                    void triggerSaveToServer(lectureRef.current);
-                }
-            }, 2000);
-        },
-        [activeSlideIndex, clearCountdownTimers, recordHistory, triggerSaveToServer],
-    );
-
-    // Lưu thủ công (Ctrl+S / Cmd+S)
-    const handleManualSave = useCallback(() => {
-        if (!lecture) return;
-        clearCountdownTimers();
-        void triggerSaveToServer(lecture);
-    }, [clearCountdownTimers, lecture, triggerSaveToServer]);
-
-    // Xử lý Undo
-    const handleUndo = useCallback(() => {
-        if (!lecture) return;
-        const prevSlides = undo(lecture.slides);
-        if (prevSlides) {
-            setLecture(prev => (prev ? { ...prev, slides: prevSlides } : prev));
-            setSaveStatus("unsaved");
-            clearCountdownTimers();
-            void triggerSaveToServer({ ...lecture, slides: prevSlides });
-        }
-    }, [clearCountdownTimers, lecture, triggerSaveToServer, undo]);
-
-    // Xử lý Redo
-    const handleRedo = useCallback(() => {
-        if (!lecture) return;
-        const nextSlides = redo(lecture.slides);
-        if (nextSlides) {
-            setLecture(prev => (prev ? { ...prev, slides: nextSlides } : prev));
-            setSaveStatus("unsaved");
-            clearCountdownTimers();
-            void triggerSaveToServer({ ...lecture, slides: nextSlides });
-        }
-    }, [clearCountdownTimers, lecture, redo, triggerSaveToServer]);
-
-    // Lắng nghe phím tắt toàn cục (Ctrl+Z, Ctrl+Y, Ctrl+S)
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Phím tắt Ctrl+S / Cmd+S
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-                e.preventDefault();
-                handleManualSave();
-                return;
-            }
-            // Phím tắt Undo (Ctrl+Z)
-            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
-                e.preventDefault();
-                handleUndo();
-                return;
-            }
-            // Phím tắt Redo (Ctrl+Y hoặc Ctrl+Shift+Z)
-            if (
-                ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") ||
-                ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "z")
-            ) {
-                e.preventDefault();
-                handleRedo();
-                return;
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [handleManualSave, handleUndo, handleRedo]);
-
-    // Dọn dẹp timer khi unmount
-    useEffect(() => {
-        return () => clearCountdownTimers();
-    }, [clearCountdownTimers]);
-
-    // THAO TÁC TRÊN SLIDE VÀ COMPONENT
-    const currentSlide = lecture?.slides[activeSlideIndex];
-    const currentComponents = currentSlide ? getSlideComponents(currentSlide) : [];
-    const selectedComponent = currentComponents.find(c => c.id === selectedCompId) || null;
-
-    // Cập nhật thuộc tính của một component
-    const handleUpdateComponent = useCallback(
-        (compId: string, patch: Partial<SlideComponent>) => {
-            const currentLecture = lectureRef.current;
-            if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return;
-
-            const sourceSlide = currentLecture.slides[activeSlideIndex];
-            const comps = getSlideComponents(sourceSlide);
-            const updatedComps = comps.map(c => (c.id === compId ? { ...c, ...patch } : c));
-
-            // Đồng bộ ngược title và bullets để AI và Presentation luôn hoạt động tốt
-            const titleComp = updatedComps.find(c => c.type === "title");
-            const subComp = updatedComps.find(c => c.type === "subtitle");
-            const bulletsComp = updatedComps.find(c => c.type === "bullets");
-
-            const updatedSlide: Slide = {
-                ...sourceSlide,
-                title: titleComp ? titleComp.content : sourceSlide.title,
-                subtitle: subComp ? subComp.content : sourceSlide.subtitle,
-                bullets: bulletsComp ? bulletsComp.content.split("\n").filter(s => s.trim()) : sourceSlide.bullets,
-                components: updatedComps,
-            };
-
-            const nextSlides = currentLecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-            mutateLecture({ ...currentLecture, slides: nextSlides });
-        },
-        [activeSlideIndex, mutateLecture],
-    );
-
-    // Thêm khối văn bản mới
-    const handleAddTextComponent = (type: "title" | "subtitle" | "text" | "bullets" | "quote") => {
-        if (!lecture || !currentSlide) return;
-        const comps = getSlideComponents(currentSlide);
-        const newId = `comp-${Date.now()}`;
-
-        const newComp: SlideComponent = {
-            id: newId,
-            type,
-            content:
-                type === "title"
-                    ? "Tiêu đề mới"
-                    : type === "subtitle"
-                      ? "Dòng phụ đề mới"
-                      : type === "quote"
-                        ? "Nhập trích dẫn ý nghĩa tại đây..."
-                        : "Nội dung văn bản mới...",
-            x: 12,
-            y: 20 + comps.length * 6,
-            width: 76,
-            fontSize: type === "title" ? 36 : type === "subtitle" ? 18 : 20,
-            fontWeight: type === "title" ? "bold" : "normal",
-            fontStyle: type === "quote" || type === "subtitle" ? "italic" : "normal",
-            textDecoration: "none",
-            textCase: "normal",
-            textAlign: type === "quote" ? "center" : "left",
-            fontFamily: type === "title" || type === "quote" ? "display" : "sans",
-            color: "#173c39",
-        };
-
-        const updatedComps = [...comps, newComp];
-        const updatedSlide: Slide = { ...currentSlide, components: updatedComps };
-        const nextSlides = lecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-
-        mutateLecture({ ...lecture, slides: nextSlides });
-        setSelectedCompId(newId);
-    };
-
-    // Thêm khối hình ảnh mới từ ảnh tải lên
-    const handleAddImageComponent = (imageUrl: string) => {
-        if (!lecture || !currentSlide) return;
-        const comps = getSlideComponents(currentSlide);
-        const newId = `img-comp-${Date.now()}`;
-
-        const newComp: SlideComponent = {
-            id: newId,
-            type: "image",
-            content: imageUrl,
-            imageUrl,
-            x: 25,
-            y: 20,
-            width: 50,
-            fontSize: 20,
-            fontWeight: "normal",
-            fontStyle: "normal",
-            textDecoration: "none",
-            textAlign: "left",
-        };
-
-        const updatedComps = [...comps, newComp];
-        const updatedSlide: Slide = { ...currentSlide, components: updatedComps };
-        const nextSlides = lecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-
-        mutateLecture({ ...lecture, slides: nextSlides });
-        setSelectedCompId(newId);
-    };
-
-    // Nhân bản component
-    const handleDuplicateComponent = (comp: SlideComponent) => {
-        if (!lecture || !currentSlide) return;
-        const comps = getSlideComponents(currentSlide);
-        const newComp: SlideComponent = {
-            ...comp,
-            id: `comp-${Date.now()}`,
-            x: Math.min(comp.x + 4, 85),
-            y: Math.min(comp.y + 4, 85),
-        };
-
-        const updatedComps = [...comps, newComp];
-        const updatedSlide: Slide = { ...currentSlide, components: updatedComps };
-        const nextSlides = lecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-
-        mutateLecture({ ...lecture, slides: nextSlides });
-        setSelectedCompId(newComp.id);
-    };
-
-    // Xóa component
-    const handleDeleteComponent = (compId: string) => {
-        if (!lecture || !currentSlide) return;
-        const comps = getSlideComponents(currentSlide);
-        const updatedComps = comps.filter(c => c.id !== compId);
-        const updatedSlide: Slide = { ...currentSlide, components: updatedComps };
-        const nextSlides = lecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-
-        mutateLecture({ ...lecture, slides: nextSlides });
-        if (selectedCompId === compId) setSelectedCompId(null);
-    };
-
-    // Áp dụng layout mẫu cho slide
-    const handleApplyTemplate = (layout: Slide["layout"]) => {
-        if (!lecture || !currentSlide) return;
-        const updatedSlide: Slide = { ...currentSlide, layout };
-        const nextSlides = lecture.slides.map((s, idx) => (idx === activeSlideIndex ? updatedSlide : s));
-        mutateLecture({ ...lecture, slides: nextSlides });
-        showToast(`Đã áp dụng mẫu bố cục ${layout}`, "success");
-    };
-
-    // Thao tác Slide cơ bản (thêm, xóa, nhân bản, di chuyển)
-    const handleSlideOperation = async (body: object) => {
-        if (!lecture) return;
-        try {
-            recordHistory(lecture.slides);
-            const next = await editorApi.operation(lecture._id, body);
-            setLecture(next);
-            setActiveSlideIndex(Math.min(activeSlideIndex, next.slides.length - 1));
-            setSelectedCompId(null);
-            setSaveStatus("saved");
-        } catch (err) {
-            const msg = isAxiosError(err)
-                ? (err.response?.data as { message?: string })?.message || "Lỗi thao tác slide"
-                : "Lỗi thao tác slide";
-            showToast(msg, "error");
-        }
-    };
-
-    // Gọi AI chỉnh sửa slide từ ô prompt
-    const handleApplyAiPrompt = async (instruction: string) => {
-        if (!lecture || !currentSlide || !instruction.trim()) return;
-        try {
-            setIsAiLoading(true);
-            addAiMessage("user", instruction);
-
-            const updated = await editorApi.aiEdit(lecture._id, currentSlide, instruction);
-            recordHistory(lecture.slides);
-            setLecture(updated);
-            setSelectedCompId(null);
-            setSaveStatus("saved");
-
-            addAiMessage("assistant", `Đã hoàn tất chỉnh sửa slide theo yêu cầu: "${instruction}"`);
-            showToast("Đã áp dụng chỉnh sửa AI thành công", "success");
-        } catch (err) {
-            const msg = isAxiosError(err)
-                ? (err.response?.data as { message?: string })?.message || "Không thể thực hiện chỉnh sửa AI"
-                : "Không thể thực hiện chỉnh sửa AI";
-            addAiMessage("assistant", `⚠️ Không thể áp dụng chỉnh sửa: ${msg}`);
-            showToast(msg, "error");
-        } finally {
-            setIsAiLoading(false);
-        }
-    };
-
-    // AI Quick Actions (Viết lại / Rút gọn / Mở rộng) từ mini-action pill
-    const handleAiQuickAction = (action: "rewrite" | "shorten" | "expand") => {
-        const promptMap = {
-            rewrite: "Hãy viết lại các ý trong slide này cho mạch lạc, thu hút và sắc nét hơn",
-            shorten: "Rút gọn nội dung slide này thành 3 ý chính súc tích, ngắn gọn, dễ nhớ",
-            expand: "Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này",
-        };
-        void handleApplyAiPrompt(promptMap[action]);
-    };
-
-    const handleBack = () => {
-        if (onBack) onBack();
-        else navigate("/library");
-    };
-
-    const handlePresent = () => {
-        if (!lecture) return;
-        if (onPresent) onPresent(lecture);
-        else navigate(`/presentation/${lecture._id}`, { state: { lecture } });
-    };
-
-    // MÀN HÌNH ĐANG TẢI
-    if (isLoading) {
-        return (
-            <div className="flex min-h-screen items-center justify-center bg-brand-paper font-sans text-xs font-bold text-brand-ink">
-                <div className="flex flex-col items-center gap-2">
-                    <span className="animate-spin text-2xl text-brand-rust">⟳</span>
-                    <span>Đang tải bài giảng...</span>
-                </div>
-            </div>
-        );
+    const newComp: SlideComponent = {
+      id: newId,
+      type: 'image',
+      content: imageUrl,
+      imageUrl,
+      x: 25,
+      y: 20,
+      width: 50,
+      fontSize: 20,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+      textAlign: 'left'
     }
 
-    // MÀN HÌNH BÁO LỖI KHÔNG CÓ QUYỀN TRUY CẬP (THEO USE-CASE)
-    if (isUnauthorized) {
-        return (
-            <div className="flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center">
-                <span className="text-4xl">🔒</span>
-                <h2 className="mt-3 text-base font-bold text-red-600">Không có quyền truy cập</h2>
-                <p className="mt-1 max-w-sm text-xs text-stone-600">
-                    Bạn không có quyền chỉnh sửa bài giảng này. Vui lòng quay về Thư viện của bạn.
-                </p>
-                <button
-                    type="button"
-                    onClick={() => navigate("/library")}
-                    className="mt-5 rounded-lg bg-brand-ink px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#112d2b]"
-                >
-                    ← Quay về Thư viện
-                </button>
-            </div>
-        );
+    const updatedComps = [...comps, newComp]
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(newId)
+  }
+
+  // Nhân bản component
+  const handleDuplicateComponent = (comp: SlideComponent) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const newComp: SlideComponent = {
+      ...comp,
+      id: `comp-${Date.now()}`,
+      x: Math.min(comp.x + 4, 85),
+      y: Math.min(comp.y + 4, 85)
     }
 
-    // MÀN HÌNH BÁO LỖI TẢI DỮ LIỆU CÓ NÚT THỬ LẠI (THEO USE-CASE)
-    if (loadError || !lecture) {
-        return (
-            <div className="flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center">
-                <span className="text-4xl">⚠️</span>
-                <h2 className="mt-3 text-base font-bold text-red-600">Không thể tải bài giảng</h2>
-                <p className="mt-1 max-w-sm text-xs text-stone-600">
-                    {loadError || "Bài giảng không tồn tại hoặc đã bị xóa."}
-                </p>
-                <div className="mt-5 flex items-center gap-3">
-                    <button
-                        type="button"
-                        onClick={() => void loadLecture()}
-                        className="rounded-lg bg-brand-rust px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35]"
-                    >
-                        Thử lại
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => navigate("/library")}
-                        className="rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-stone-700 shadow-2xs transition hover:bg-stone-50"
-                    >
-                        ← Quay về Thư viện
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    const updatedComps = [...comps, newComp]
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
 
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(newComp.id)
+  }
+
+  // Xóa component
+  const handleDeleteComponent = (compId: string) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const updatedComps = comps.filter((c) => c.id !== compId)
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    if (selectedCompId === compId) setSelectedCompId(null)
+  }
+
+  // Áp dụng layout mẫu cho slide
+  const handleApplyTemplate = (layout: Slide['layout']) => {
+    if (!lecture || !currentSlide) return
+    const updatedSlide: Slide = { ...currentSlide, layout }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+    mutateLecture({ ...lecture, slides: nextSlides })
+    showToast(`Đã áp dụng mẫu bố cục ${layout}`, 'success')
+  }
+
+  // Thao tác Slide cơ bản (thêm, xóa, nhân bản, di chuyển)
+  const handleSlideOperation = async (body: object) => {
+    if (!lecture) return
+    try {
+      recordHistory(lecture.slides)
+      const next = await editorApi.operation(lecture._id, body)
+      setLecture(next)
+      setActiveSlideIndex(Math.min(activeSlideIndex, next.slides.length - 1))
+      setSelectedCompId(null)
+      setSaveStatus('saved')
+    } catch (err) {
+      const msg = isAxiosError(err)
+        ? (err.response?.data as { message?: string })?.message ||
+          'Lỗi thao tác slide'
+        : 'Lỗi thao tác slide'
+      showToast(msg, 'error')
+    }
+  }
+
+  // Gọi AI chỉnh sửa slide từ ô prompt
+  const handleApplyAiPrompt = async (instruction: string) => {
+    if (!lecture || !currentSlide || !instruction.trim()) return
+    try {
+      setIsAiLoading(true)
+      addAiMessage('user', instruction)
+
+      const updated = await editorApi.aiEdit(
+        lecture._id,
+        currentSlide,
+        instruction
+      )
+      recordHistory(lecture.slides)
+      setLecture(updated)
+      setSelectedCompId(null)
+      setSaveStatus('saved')
+
+      addAiMessage(
+        'assistant',
+        `Đã hoàn tất chỉnh sửa slide theo yêu cầu: "${instruction}"`
+      )
+      showToast('Đã áp dụng chỉnh sửa AI thành công', 'success')
+    } catch (err) {
+      const msg = isAxiosError(err)
+        ? (err.response?.data as { message?: string })?.message ||
+          'Không thể thực hiện chỉnh sửa AI'
+        : 'Không thể thực hiện chỉnh sửa AI'
+      addAiMessage('assistant', `⚠️ Không thể áp dụng chỉnh sửa: ${msg}`)
+      showToast(msg, 'error')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // AI Quick Actions (Viết lại / Rút gọn / Mở rộng) từ mini-action pill
+  const handleAiQuickAction = (action: 'rewrite' | 'shorten' | 'expand') => {
+    const promptMap = {
+      rewrite:
+        'Hãy viết lại các ý trong slide này cho mạch lạc, thu hút và sắc nét hơn',
+      shorten:
+        'Rút gọn nội dung slide này thành 3 ý chính súc tích, ngắn gọn, dễ nhớ',
+      expand:
+        'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
+    }
+    void handleApplyAiPrompt(promptMap[action])
+  }
+
+  const handleBack = () => {
+    if (onBack) onBack()
+    else navigate('/library')
+  }
+
+  const handlePresent = () => {
+    if (!lecture) return
+    if (onPresent) onPresent(lecture)
+    else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
+  }
+
+  // MÀN HÌNH ĐANG TẢI
+  if (isLoading) {
     return (
-        <div className="flex h-screen flex-col overflow-hidden bg-brand-paper">
-            {/* 1. HEADER CANVA */}
-            <EditorHeader
-                title={lecture.title}
-                onTitleChange={newTitle => {
-                    const next = { ...lecture, title: newTitle };
-                    mutateLecture(next, false);
-                }}
-                onBack={handleBack}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-                onManualSave={handleManualSave}
-                onOpenExport={() => setIsExportModalOpen(true)}
-                onPresent={handlePresent}
-                saveStatus={saveStatus}
-                countdown={countdown}
-            />
-
-            {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
-            <div className="flex flex-1 overflow-hidden">
-                {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Upload ảnh / Mẫu slide */}
-                <LeftSidebarRail
-                    onAddTextComponent={handleAddTextComponent}
-                    onAddImageComponent={handleAddImageComponent}
-                    onApplyTemplate={handleApplyTemplate}
-                    outline={lecture.outline}
-                />
-
-                {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
-                <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-brand-paper">
-                    {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
-                    {selectedComponent && (
-                        <div className="absolute top-3 left-0 right-0 z-40 flex justify-center pointer-events-none transition-all">
-                            <div className="pointer-events-auto">
-                                <FloatingContextualToolbar
-                                    selectedComponent={selectedComponent}
-                                    onUpdateComponent={patch => {
-                                        if (selectedCompId) handleUpdateComponent(selectedCompId, patch);
-                                    }}
-                                    onDuplicateComponent={handleDuplicateComponent}
-                                    onDeleteComponent={handleDeleteComponent}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Khung Canvas tỷ lệ 16:9 */}
-                    <SlideCanvas
-                        slide={currentSlide}
-                        slideIndex={activeSlideIndex}
-                        totalSlides={lecture.slides.length}
-                        selectedCompId={selectedCompId}
-                        onSelectComponent={setSelectedCompId}
-                        onUpdateComponent={handleUpdateComponent}
-                        onDuplicateComponent={handleDuplicateComponent}
-                        onDeleteComponent={handleDeleteComponent}
-                        onAiQuickAction={handleAiQuickAction}
-                        isAiLoading={isAiLoading}
-                    />
-
-                    {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
-                    <SlideFilmstrip
-                        slides={lecture.slides}
-                        activeSlideIndex={activeSlideIndex}
-                        onSelectSlide={setActiveSlideIndex}
-                        onAddSlide={() =>
-                            void handleSlideOperation({
-                                operation: "add",
-                                index: activeSlideIndex + 1,
-                            })
-                        }
-                        onDuplicateSlide={slideId => void handleSlideOperation({ operation: "duplicate", slideId })}
-                        onDeleteSlide={slideId => void handleSlideOperation({ operation: "delete", slideId })}
-                        onMoveSlide={(slideId, toIndex) =>
-                            void handleSlideOperation({ operation: "move", slideId, toIndex })
-                        }
-                    />
-                </main>
-
-                {/* CỘT PHẢI: Trợ lý AI Copilot */}
-                <AiCopilotPanel onApplyAiPrompt={handleApplyAiPrompt} isAiLoading={isAiLoading} />
-            </div>
-
-            {/* MODAL XUẤT BÀI GIẢNG */}
-            <ExportModal
-                open={isExportModalOpen}
-                onClose={() => setIsExportModalOpen(false)}
-                lecture={lecture}
-                initialSlideIndex={activeSlideIndex}
-                onSuccess={msg => showToast(msg, "success")}
-                onError={msg => showToast(msg, "error")}
-            />
+      <div className='flex min-h-screen items-center justify-center bg-brand-paper font-sans text-xs font-bold text-brand-ink'>
+        <div className='flex flex-col items-center gap-2'>
+          <span className='animate-spin text-2xl text-brand-rust'>⟳</span>
+          <span>Đang tải bài giảng...</span>
         </div>
-    );
-};
+      </div>
+    )
+  }
+
+  // MÀN HÌNH BÁO LỖI KHÔNG CÓ QUYỀN TRUY CẬP (THEO USE-CASE)
+  if (isUnauthorized) {
+    return (
+      <div className='flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center'>
+        <span className='text-4xl'>🔒</span>
+        <h2 className='mt-3 text-base font-bold text-red-600'>
+          Không có quyền truy cập
+        </h2>
+        <p className='mt-1 max-w-sm text-xs text-stone-600'>
+          Bạn không có quyền chỉnh sửa bài giảng này. Vui lòng quay về Thư viện
+          của bạn.
+        </p>
+        <button
+          type='button'
+          onClick={() => navigate('/library')}
+          className='mt-5 rounded-lg bg-brand-ink px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#112d2b]'
+        >
+          ← Quay về Thư viện
+        </button>
+      </div>
+    )
+  }
+
+  // MÀN HÌNH BÁO LỖI TẢI DỮ LIỆU CÓ NÚT THỬ LẠI (THEO USE-CASE)
+  if (loadError || !lecture) {
+    return (
+      <div className='flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center'>
+        <span className='text-4xl'>⚠️</span>
+        <h2 className='mt-3 text-base font-bold text-red-600'>
+          Không thể tải bài giảng
+        </h2>
+        <p className='mt-1 max-w-sm text-xs text-stone-600'>
+          {loadError || 'Bài giảng không tồn tại hoặc đã bị xóa.'}
+        </p>
+        <div className='mt-5 flex items-center gap-3'>
+          <button
+            type='button'
+            onClick={() => void loadLecture()}
+            className='rounded-lg bg-brand-rust px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35]'
+          >
+            Thử lại
+          </button>
+          <button
+            type='button'
+            onClick={() => navigate('/library')}
+            className='rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-stone-700 shadow-2xs transition hover:bg-stone-50'
+          >
+            ← Quay về Thư viện
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className='flex h-screen flex-col overflow-hidden bg-brand-paper'>
+      {/* 1. HEADER CANVA */}
+      <EditorHeader
+        title={lecture.title}
+        onTitleChange={(newTitle) => {
+          const next = { ...lecture, title: newTitle }
+          mutateLecture(next, false)
+        }}
+        onBack={handleBack}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onManualSave={handleManualSave}
+        onOpenExport={() => setIsExportModalOpen(true)}
+        onPresent={handlePresent}
+        saveStatus={saveStatus}
+        countdown={countdown}
+      />
+
+      {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
+      <div className='flex flex-1 overflow-hidden'>
+        {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Upload ảnh / Mẫu slide */}
+        <LeftSidebarRail
+          onAddTextComponent={handleAddTextComponent}
+          onAddImageComponent={handleAddImageComponent}
+          onApplyTemplate={handleApplyTemplate}
+          outline={lecture.outline}
+        />
+
+        {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
+        <main className='relative flex min-w-0 flex-1 flex-col overflow-hidden bg-brand-paper'>
+          {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
+          {selectedComponent && (
+            <div className='absolute top-3 left-0 right-0 z-40 flex justify-center pointer-events-none transition-all'>
+              <div className='pointer-events-auto'>
+                <FloatingContextualToolbar
+                  selectedComponent={selectedComponent}
+                  onUpdateComponent={(patch) => {
+                    if (selectedCompId)
+                      handleUpdateComponent(selectedCompId, patch)
+                  }}
+                  onDuplicateComponent={handleDuplicateComponent}
+                  onDeleteComponent={handleDeleteComponent}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Khung Canvas tỷ lệ 16:9 */}
+          <SlideCanvas
+            slide={currentSlide}
+            slideIndex={activeSlideIndex}
+            totalSlides={lecture.slides.length}
+            selectedCompId={selectedCompId}
+            onSelectComponent={setSelectedCompId}
+            onUpdateComponent={handleUpdateComponent}
+            onDuplicateComponent={handleDuplicateComponent}
+            onDeleteComponent={handleDeleteComponent}
+            onAiQuickAction={handleAiQuickAction}
+            isAiLoading={isAiLoading}
+          />
+
+          {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
+          <SlideFilmstrip
+            slides={lecture.slides}
+            activeSlideIndex={activeSlideIndex}
+            onSelectSlide={setActiveSlideIndex}
+            onAddSlide={() =>
+              void handleSlideOperation({
+                operation: 'add',
+                index: activeSlideIndex + 1
+              })
+            }
+            onDuplicateSlide={(slideId) =>
+              void handleSlideOperation({ operation: 'duplicate', slideId })
+            }
+            onDeleteSlide={(slideId) =>
+              void handleSlideOperation({ operation: 'delete', slideId })
+            }
+            onMoveSlide={(slideId, toIndex) =>
+              void handleSlideOperation({ operation: 'move', slideId, toIndex })
+            }
+          />
+        </main>
+
+        {/* CỘT PHẢI: Trợ lý AI Copilot */}
+        <AiCopilotPanel
+          onApplyAiPrompt={handleApplyAiPrompt}
+          isAiLoading={isAiLoading}
+        />
+      </div>
+
+      {/* MODAL XUẤT BÀI GIẢNG */}
+      <ExportModal
+        open={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        lecture={lecture}
+        initialSlideIndex={activeSlideIndex}
+        onSuccess={(msg) => showToast(msg, 'success')}
+        onError={(msg) => showToast(msg, 'error')}
+      />
+    </div>
+  )
+}
