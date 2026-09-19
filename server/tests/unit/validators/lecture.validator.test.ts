@@ -22,13 +22,46 @@ describe('generateOutlineSchema', () => {
     const shortResult = generateOutlineSchema.safeParse({ prompt: 'abc' })
     expect(shortResult.success).toBe(false)
   })
+
+  it('thành công khi truyền kèm feedback, currentOutline và lectureId', () => {
+    const result = generateOutlineSchema.safeParse({
+      prompt: 'Tạo bài giảng về Machine Learning',
+      feedback: 'Tập trung vào phần ứng dụng thực tế',
+      currentOutline: {
+        title: 'Machine Learning Cơ Bản',
+        sections: [
+          {
+            heading: 'Giới thiệu',
+            bullets: ['Định nghĩa ML', 'Lịch sử phát triển']
+          }
+        ]
+      },
+      lectureId: 'lec-123'
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('thất bại khi currentOutline có heading rỗng', () => {
+    const result = generateOutlineSchema.safeParse({
+      prompt: 'Tạo bài giảng về Machine Learning',
+      currentOutline: {
+        title: 'Machine Learning Cơ Bản',
+        sections: [
+          {
+            heading: '',
+            bullets: ['Ý 1']
+          }
+        ]
+      }
+    })
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('createLectureSchema', () => {
-  it('thành công khi đủ title, pattern và outline hợp lệ', () => {
+  it('thành công khi đủ title và outline hợp lệ', () => {
     const result = createLectureSchema.safeParse({
       title: 'Nhập môn TypeScript',
-      pattern: 'default',
       outline: {
         title: 'Outline TypeScript',
         sections: [
@@ -42,9 +75,8 @@ describe('createLectureSchema', () => {
     expect(result.success).toBe(true)
   })
 
-  it('thất bại khi thiếu title hoặc pattern', () => {
+  it('thất bại khi thiếu title', () => {
     const result = createLectureSchema.safeParse({
-      pattern: 'default',
       outline: {
         title: 'Outline',
         sections: []

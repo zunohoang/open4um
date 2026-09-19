@@ -98,6 +98,8 @@ export const LibraryPage = ({
 
   // State xóa bài giảng / thư mục
   const [lectureToDelete, setLectureToDelete] = useState<string | null>(null)
+  const [lectureToPermanentlyDelete, setLectureToPermanentlyDelete] =
+    useState<Lecture | null>(null)
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null)
 
   // Tải dữ liệu
@@ -286,6 +288,19 @@ export const LibraryPage = ({
     }
   }
 
+  // Thao tác Hard Delete: Xóa vĩnh viễn bài giảng khỏi cơ sở dữ liệu
+  const handleConfirmPermanentDeleteLecture = async () => {
+    if (!lectureToPermanentlyDelete) return
+    try {
+      await lectureApi.permanentDelete(lectureToPermanentlyDelete._id)
+      setLectureToPermanentlyDelete(null)
+      notifySuccess('Đã xóa vĩnh viễn bài giảng khỏi hệ thống')
+      void load()
+    } catch {
+      notifyError('Không thể xóa vĩnh viễn bài giảng')
+    }
+  }
+
   // Thao tác Khôi phục bài giảng về trạng thái hoạt động bình thường
   const handleRestoreLecture = async (lectureId: string) => {
     try {
@@ -362,33 +377,6 @@ export const LibraryPage = ({
             )}
           </div>
         </div>
-
-        {/* Nút hành động */}
-        {activeViewMode === 'trash' ? (
-          <button
-            type='button'
-            onClick={(e) => {
-              e.stopPropagation()
-              void handleRestoreLecture(lecture._id)
-            }}
-            className='shrink-0 border border-emerald-700 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100'
-            title='Khôi phục bài giảng về Thư viện'
-          >
-            ♻️ Khôi phục
-          </button>
-        ) : (
-          <button
-            type='button'
-            onClick={(e) => {
-              e.stopPropagation()
-              handleContextMenu(e, lecture)
-            }}
-            className='p-1 text-stone-400 hover:text-emerald-950 transition'
-            title='Tùy chọn bài giảng'
-          >
-            ⋮
-          </button>
-        )}
       </div>
     </article>
   )
@@ -801,6 +789,17 @@ export const LibraryPage = ({
                 <span>♻️</span>
                 <span>Khôi phục bài giảng</span>
               </button>
+              <button
+                type='button'
+                onClick={() => {
+                  setLectureToPermanentlyDelete(contextMenu.lecture)
+                  setContextMenu(null)
+                }}
+                className='mt-0.5 flex w-full items-center gap-2 px-3 py-2 text-left font-bold text-red-700 hover:bg-red-50 transition'
+              >
+                <span>🗑️</span>
+                <span>Xóa vĩnh viễn</span>
+              </button>
             </div>
           ) : (
             <div className='space-y-0.5 py-1'>
@@ -1096,6 +1095,17 @@ export const LibraryPage = ({
         cancelLabel='Hủy'
         onConfirm={() => void handleConfirmDeleteLecture()}
         onCancel={() => setLectureToDelete(null)}
+      />
+
+      {/* DIALOG XÁC NHẬN XÓA VĨNH VIỄN BÀI GIẢNG KHỎI THÙNG RÁC */}
+      <ConfirmDialog
+        open={Boolean(lectureToPermanentlyDelete)}
+        title='Xác nhận xóa vĩnh viễn bài giảng'
+        message={`Bạn có chắc chắn muốn xóa vĩnh viễn bài giảng "${lectureToPermanentlyDelete?.title}" không? Toàn bộ slide và dữ liệu liên quan sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu và KHÔNG THỂ khôi phục lại.`}
+        confirmLabel='Xóa vĩnh viễn'
+        cancelLabel='Hủy'
+        onConfirm={() => void handleConfirmPermanentDeleteLecture()}
+        onCancel={() => setLectureToPermanentlyDelete(null)}
       />
 
       {/* DIALOG XÁC NHẬN XÓA THƯ MỤC */}

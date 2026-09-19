@@ -4,6 +4,7 @@ const creditConfigSchema = new Schema(
   {
     pricePerSlide: { type: Number, default: 10 },
     pricePerAiEdit: { type: Number, default: 5 },
+    pricePerOutline: { type: Number, default: 5 },
     signupBonus: { type: Number, default: 100 }
   },
   { timestamps: true }

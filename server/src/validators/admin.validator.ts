@@ -36,6 +36,11 @@ export const updateCreditConfigSchema = z.object({
     .int('Giá chỉnh sửa AI phải là số nguyên')
     .positive('Giá chỉnh sửa AI phải lớn hơn 0')
     .optional(),
+  pricePerOutline: z.coerce
+    .number({ message: 'Giá sinh outline phải là số' })
+    .int('Giá sinh outline phải là số nguyên')
+    .positive('Giá sinh outline phải lớn hơn 0')
+    .optional(),
   signupBonus: z.coerce
     .number({ message: 'Thưởng đăng ký phải là số' })
     .int('Thưởng đăng ký phải là số nguyên')
