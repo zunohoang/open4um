@@ -1,8 +1,10 @@
-import { useRef, useEffect, useState } from 'react'
 import type { Slide, SlideComponent } from '@/lib/types'
+import { Copy, Sparkles, Trash2 } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { FONT_MAP } from '../constants/theme-options'
 
 interface SlideCanvasProps {
-  slide?: Slide | null
+  slide: Slide | null | undefined
   slideIndex: number
   totalSlides: number
   selectedCompId: string | null
@@ -11,17 +13,7 @@ interface SlideCanvasProps {
   onDuplicateComponent: (comp: SlideComponent) => void
   onDeleteComponent: (id: string) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
-  isAiLoading: boolean
-}
-
-interface DragState {
-  type: 'move' | 'resize'
-  compId: string
-  startX: number
-  startY: number
-  initialX: number
-  initialY: number
-  initialWidth: number
+  isAiLoading?: boolean
 }
 
 export const SlideCanvas = ({
@@ -34,13 +26,24 @@ export const SlideCanvas = ({
   onDuplicateComponent,
   onDeleteComponent,
   onAiQuickAction,
-  isAiLoading
+  isAiLoading = false
 }: SlideCanvasProps) => {
   const canvasRef = useRef<HTMLDivElement>(null)
-  const [dragState, setDragState] = useState<DragState | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
 
-  // Bắt đầu di chuyển phần tử
+  // Quản lý trạng thái kéo thả di chuyển hoặc co giãn phần tử
+  const [dragState, setDragState] = useState<{
+    type: 'move' | 'resize'
+    compId: string
+    startX: number
+    startY: number
+    initialX: number
+    initialY: number
+    initialWidth: number
+    initialHeight?: number
+  } | null>(null)
+
+  // Bắt đầu kéo di chuyển vị trí phần tử
   const handleStartMove = (e: React.MouseEvent, comp: SlideComponent) => {
     e.stopPropagation()
     onSelectComponent(comp.id)
@@ -52,11 +55,12 @@ export const SlideCanvas = ({
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
-      initialWidth: comp.width ?? 50
+      initialWidth: comp.width ?? 50,
+      initialHeight: comp.height ?? 30
     })
   }
 
-  // Bắt đầu kéo chốt resize góc
+  // Bắt đầu co giãn kích thước bằng 4 chốt góc
   const handleStartResize = (e: React.MouseEvent, comp: SlideComponent) => {
     e.stopPropagation()
     onSelectComponent(comp.id)
@@ -68,7 +72,8 @@ export const SlideCanvas = ({
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
-      initialWidth: comp.width ?? 50
+      initialWidth: comp.width ?? 50,
+      initialHeight: comp.height ?? 30
     })
   }
 
@@ -97,9 +102,16 @@ export const SlideCanvas = ({
         onUpdateComponent(dragState.compId, { x: nextX, y: nextY })
       } else if (dragState.type === 'resize') {
         const nextWidth = Math.round(
-          Math.max(10, Math.min(96, dragState.initialWidth + deltaPercentX))
+          Math.max(5, Math.min(96, dragState.initialWidth + deltaPercentX))
         )
-        onUpdateComponent(dragState.compId, { width: nextWidth })
+        const patch: Partial<SlideComponent> = { width: nextWidth }
+        if (dragState.initialHeight !== undefined) {
+          const nextHeight = Math.round(
+            Math.max(3, Math.min(96, dragState.initialHeight + deltaPercentY))
+          )
+          patch.height = nextHeight
+        }
+        onUpdateComponent(dragState.compId, patch)
       }
     }
 
@@ -116,6 +128,96 @@ export const SlideCanvas = ({
   }, [dragState, onUpdateComponent])
 
   const components = slide?.components || []
+
+  // Helper render hình khối
+  const renderShapeElement = (comp: SlideComponent) => {
+    const shapeType = comp.shapeType || 'rectangle'
+    const fill =
+      comp.fillColor === 'transparent'
+        ? 'transparent'
+        : comp.fillColor || '#c45b3f'
+    const stroke = comp.borderColor || '#173c39'
+    const strokeW = comp.borderWidth ?? 0
+    const radius = comp.borderRadius ?? 0
+
+    switch (shapeType) {
+      case 'circle':
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: '9999px'
+            }}
+          />
+        )
+      case 'triangle':
+        return (
+          <svg
+            viewBox='0 0 100 100'
+            preserveAspectRatio='none'
+            className='h-full w-full'
+          >
+            <polygon
+              points='50,5 98,95 2,95'
+              fill={fill}
+              stroke={strokeW > 0 ? stroke : 'none'}
+              strokeWidth={strokeW}
+            />
+          </svg>
+        )
+      case 'star':
+        return (
+          <svg
+            viewBox='0 0 100 100'
+            preserveAspectRatio='none'
+            className='h-full w-full'
+          >
+            <polygon
+              points='50,5 63,38 98,40 70,62 80,96 50,75 20,96 30,62 2,40 37,38'
+              fill={fill}
+              stroke={strokeW > 0 ? stroke : 'none'}
+              strokeWidth={strokeW}
+            />
+          </svg>
+        )
+      case 'line':
+        return (
+          <div
+            className='w-full'
+            style={{
+              height: `${Math.max(2, strokeW || 2)}px`,
+              backgroundColor: stroke || fill
+            }}
+          />
+        )
+      case 'rounded-rect':
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: `${radius || 16}px`
+            }}
+          />
+        )
+      case 'rectangle':
+      case 'square':
+      default:
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: `${radius}px`
+            }}
+          />
+        )
+    }
+  }
 
   return (
     <div
@@ -138,7 +240,8 @@ export const SlideCanvas = ({
         {/* Render các components trên Canvas */}
         {components.map((comp) => {
           const isSelected = selectedCompId === comp.id
-          const isText = comp.type !== 'image'
+          const isText = comp.type !== 'image' && comp.type !== 'shape'
+          const isShape = comp.type === 'shape'
 
           return (
             <div
@@ -148,6 +251,10 @@ export const SlideCanvas = ({
                 left: `${comp.x}%`,
                 top: `${comp.y}%`,
                 width: comp.width ? `${comp.width}%` : 'auto',
+                height:
+                  isShape && comp.shapeType !== 'line' && comp.height
+                    ? `${comp.height}%`
+                    : 'auto',
                 maxWidth: '96%'
               }}
               onMouseDown={(e) => handleStartMove(e, comp)}
@@ -190,7 +297,7 @@ export const SlideCanvas = ({
                     title='Kéo để co giãn kích thước'
                   />
 
-                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG (AI QUICK ACTIONS) */}
+                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG */}
                   <div
                     onMouseDown={(e) => e.stopPropagation()}
                     className='absolute -top-10 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-1 shadow-lg backdrop-blur-xs select-none'
@@ -201,10 +308,11 @@ export const SlideCanvas = ({
                           type='button'
                           onClick={() => onAiQuickAction('rewrite')}
                           disabled={isAiLoading}
-                          className='rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50'
+                          className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50'
                           title='Yêu cầu AI viết lại ý văn'
                         >
-                          ✨ Viết lại
+                          <Sparkles size={11} />
+                          <span>Viết lại</span>
                         </button>
                         <span className='text-stone-300'>|</span>
                         <button
@@ -233,30 +341,34 @@ export const SlideCanvas = ({
                     <button
                       type='button'
                       onClick={() => onDuplicateComponent(comp)}
-                      className='rounded-full px-1.5 py-0.5 text-xs text-stone-600 hover:bg-stone-100'
+                      className='flex items-center justify-center rounded-full p-1 text-stone-600 hover:bg-stone-100'
                       title='Nhân bản'
                     >
-                      📋
+                      <Copy size={13} />
                     </button>
                     <button
                       type='button'
                       onClick={() => onDeleteComponent(comp.id)}
-                      className='rounded-full px-1.5 py-0.5 text-xs text-red-600 hover:bg-red-50'
+                      className='flex items-center justify-center rounded-full p-1 text-red-600 hover:bg-red-50'
                       title='Xóa'
                     >
-                      🗑️
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </>
               )}
 
-              {/* NỘI DUNG PHẦN TỬ (HÌNH ẢNH HOẶC VĂN BẢN) */}
-              {comp.type === 'image' ? (
-                <div className='overflow-hidden rounded-sm'>
+              {/* NỘI DUNG PHẦN TỬ (HÌNH KHỐI, HÌNH ẢNH HOẶC VĂN BẢN) */}
+              {comp.type === 'shape' ? (
+                <div className='h-full w-full pointer-events-none'>
+                  {renderShapeElement(comp)}
+                </div>
+              ) : comp.type === 'image' ? (
+                <div className='overflow-hidden rounded-sm pointer-events-none'>
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide graphic'
-                    className='h-auto w-full max-h-[70vh] object-contain pointer-events-none'
+                    className='h-auto w-full max-h-[70vh] object-contain'
                   />
                 </div>
               ) : editingTextId === comp.id ? (
@@ -274,16 +386,14 @@ export const SlideCanvas = ({
                     fontStyle: comp.fontStyle ?? 'normal',
                     textAlign: comp.textAlign ?? 'left',
                     color: comp.color || '#173c39',
+                    fontFamily:
+                      FONT_MAP[comp.fontFamily || 'sans'] ||
+                      comp.fontFamily ||
+                      'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none'
                   }}
-                  className={`w-full resize-none rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none ${
-                    comp.fontFamily === 'display'
-                      ? 'font-serif'
-                      : comp.fontFamily === 'mono'
-                        ? 'font-mono'
-                        : 'font-sans'
-                  }`}
+                  className='w-full resize-none rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none'
                   rows={comp.content.split('\n').length || 2}
                 />
               ) : (
@@ -296,17 +406,15 @@ export const SlideCanvas = ({
                     textDecoration: comp.textDecoration ?? 'none',
                     textAlign: comp.textAlign ?? 'left',
                     color: comp.color || '#173c39',
+                    fontFamily:
+                      FONT_MAP[comp.fontFamily || 'sans'] ||
+                      comp.fontFamily ||
+                      'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
                     lineHeight: 1.3
                   }}
-                  className={`w-full ${
-                    comp.fontFamily === 'display'
-                      ? 'font-serif'
-                      : comp.fontFamily === 'mono'
-                        ? 'font-mono'
-                        : 'font-sans'
-                  }`}
+                  className='w-full'
                 >
                   {comp.type === 'bullets' ? (
                     <ul className='space-y-1.5 list-disc pl-5'>

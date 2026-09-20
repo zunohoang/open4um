@@ -1,3 +1,14 @@
+import {
+  Check,
+  Cloud,
+  FileDown,
+  Home,
+  Loader2,
+  Play,
+  Redo2,
+  Sparkles,
+  Undo2
+} from 'lucide-react'
 import { useEditorStore } from '../store/editor.store'
 
 interface EditorHeaderProps {
@@ -37,10 +48,10 @@ export const EditorHeader = ({
         <button
           type='button'
           onClick={onBack}
-          className='flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold text-stone-200 transition hover:bg-emerald-900/60 hover:text-white'
+          className='flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold text-stone-200 transition hover:bg-emerald-900/60 hover:text-white cursor-pointer'
           title='Trở về thư viện'
         >
-          <span className='text-sm'>🏠</span>
+          <Home size={15} />
           <span className='hidden sm:inline'>Thư viện</span>
         </button>
 
@@ -51,14 +62,14 @@ export const EditorHeader = ({
           type='button'
           onClick={onUndo}
           disabled={!canUndo}
-          className={`flex h-8 w-8 items-center justify-center rounded-md text-base transition ${
+          className={`flex h-8 w-8 items-center justify-center rounded-md transition ${
             canUndo
-              ? 'text-stone-200 hover:bg-emerald-900/60 hover:text-white active:scale-95'
+              ? 'text-stone-200 hover:bg-emerald-900/60 hover:text-white active:scale-95 cursor-pointer'
               : 'cursor-not-allowed text-emerald-800/60'
           }`}
           title='Hoàn tác (Ctrl+Z)'
         >
-          ↶
+          <Undo2 size={16} />
         </button>
 
         {/* Nút Redo */}
@@ -66,14 +77,14 @@ export const EditorHeader = ({
           type='button'
           onClick={onRedo}
           disabled={!canRedo}
-          className={`flex h-8 w-8 items-center justify-center rounded-md text-base transition ${
+          className={`flex h-8 w-8 items-center justify-center rounded-md transition ${
             canRedo
-              ? 'text-stone-200 hover:bg-emerald-900/60 hover:text-white active:scale-95'
+              ? 'text-stone-200 hover:bg-emerald-900/60 hover:text-white active:scale-95 cursor-pointer'
               : 'cursor-not-allowed text-emerald-800/60'
           }`}
           title='Làm lại (Ctrl+Y)'
         >
-          ↷
+          <Redo2 size={16} />
         </button>
 
         <span className='text-emerald-800'>|</span>
@@ -96,28 +107,31 @@ export const EditorHeader = ({
         >
           {saveStatus === 'saving' ? (
             <>
-              <span className='animate-spin text-sm text-amber-300'>⟳</span>
+              <Loader2 size={14} className='animate-spin text-amber-300' />
               <span className='hidden text-[11px] font-medium sm:inline'>
                 Đang lưu...
               </span>
             </>
           ) : countdown !== null ? (
             <>
-              <span className='animate-pulse text-sm text-amber-300'>⏳</span>
+              <Cloud size={14} className='animate-pulse text-amber-300' />
               <span className='hidden text-[11px] font-medium sm:inline'>
                 Lưu sau {countdown}s
               </span>
             </>
           ) : saveStatus === 'unsaved' ? (
             <>
-              <span className='text-sm text-amber-300'>☁•</span>
+              <Cloud size={14} className='text-amber-300' />
               <span className='hidden text-[11px] font-bold text-amber-300 sm:inline'>
                 Chưa lưu (Bấm lưu)
               </span>
             </>
           ) : (
             <>
-              <span className='text-sm text-emerald-400'>☁✓</span>
+              <div className='flex items-center text-emerald-400'>
+                <Cloud size={14} />
+                <Check size={11} className='-ml-1' />
+              </div>
               <span className='hidden text-[11px] font-medium text-stone-300 sm:inline'>
                 Đã lưu
               </span>
@@ -144,14 +158,14 @@ export const EditorHeader = ({
         <button
           type='button'
           onClick={toggleAiPanel}
-          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-bold transition ${
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-bold transition cursor-pointer ${
             isAiPanelOpen
               ? 'border border-brand-rust/50 bg-emerald-900/60 text-brand-rust'
               : 'text-stone-300 hover:bg-emerald-900/40 hover:text-white'
           }`}
           title='Bật / Tắt bảng Trợ lý AI'
         >
-          <span>✨</span>
+          <Sparkles size={14} />
           <span className='hidden md:inline'>Trợ lý AI</span>
         </button>
 
@@ -159,10 +173,10 @@ export const EditorHeader = ({
         <button
           type='button'
           onClick={onOpenExport}
-          className='flex items-center gap-1.5 rounded-md border border-emerald-800 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-stone-200 shadow-2xs transition hover:bg-emerald-800 hover:text-white active:scale-95'
+          className='flex items-center gap-1.5 rounded-md border border-emerald-800 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-stone-200 shadow-2xs transition hover:bg-emerald-800 hover:text-white active:scale-95 cursor-pointer'
           title='Xuất bài giảng (PNG, PDF...)'
         >
-          <span>📤</span>
+          <FileDown size={14} />
           <span className='hidden sm:inline'>Xuất</span>
         </button>
 
@@ -170,10 +184,10 @@ export const EditorHeader = ({
         <button
           type='button'
           onClick={onPresent}
-          className='flex items-center gap-1.5 rounded-md bg-brand-rust px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95'
+          className='flex items-center gap-1.5 rounded-md bg-brand-rust px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 cursor-pointer'
           title='Trình chiếu toàn màn hình (F5/Present)'
         >
-          <span>▶</span>
+          <Play size={14} />
           <span>Trình chiếu</span>
         </button>
       </div>

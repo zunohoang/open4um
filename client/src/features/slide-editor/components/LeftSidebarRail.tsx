@@ -1,13 +1,27 @@
+import { useToast } from '@/components/ui/Toast'
+import type { Outline, ShapeType, Slide } from '@/lib/types'
+import {
+  AlignLeft,
+  FileText,
+  Heading1,
+  Heading2,
+  LayoutTemplate,
+  List,
+  Quote,
+  Shapes,
+  Trash2,
+  Type,
+  UploadCloud
+} from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useEditorStore } from '../store/editor.store'
-import { useToast } from '@/components/ui/Toast'
-import type { Outline, Slide } from '@/lib/types'
 
 interface LeftSidebarRailProps {
   onAddTextComponent: (
     type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote'
   ) => void
   onAddImageComponent: (imageUrl: string) => void
+  onAddShapeComponent: (shapeType: ShapeType) => void
   onApplyTemplate: (layout: Slide['layout']) => void
   outline?: Outline | null
 }
@@ -22,9 +36,74 @@ const ALLOWED_IMAGE_TYPES = [
   'image/svg+xml'
 ]
 
+const SHAPE_ITEMS: Array<{
+  type: ShapeType
+  name: string
+  icon: React.ReactNode
+}> = [
+  {
+    type: 'rectangle',
+    name: 'Chữ nhật',
+    icon: (
+      <div className='h-8 w-12 rounded-xs border-2 border-brand-rust bg-brand-rust/20' />
+    )
+  },
+  {
+    type: 'square',
+    name: 'Hình vuông',
+    icon: (
+      <div className='h-8 w-8 rounded-xs border-2 border-brand-rust bg-brand-rust/20' />
+    )
+  },
+  {
+    type: 'circle',
+    name: 'Hình tròn',
+    icon: (
+      <div className='h-8 w-8 rounded-full border-2 border-brand-rust bg-brand-rust/20' />
+    )
+  },
+  {
+    type: 'rounded-rect',
+    name: 'Bo góc',
+    icon: (
+      <div className='h-8 w-12 rounded-lg border-2 border-brand-rust bg-brand-rust/20' />
+    )
+  },
+  {
+    type: 'triangle',
+    name: 'Tam giác',
+    icon: (
+      <svg className='h-8 w-8 text-brand-rust' viewBox='0 0 24 24'>
+        <polygon
+          points='12,3 22,21 2,21'
+          className='fill-brand-rust/20 stroke-brand-rust stroke-2'
+        />
+      </svg>
+    )
+  },
+  {
+    type: 'star',
+    name: 'Ngôi sao',
+    icon: (
+      <svg className='h-8 w-8 text-brand-rust' viewBox='0 0 24 24'>
+        <polygon
+          points='12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26'
+          className='fill-brand-rust/20 stroke-brand-rust stroke-2'
+        />
+      </svg>
+    )
+  },
+  {
+    type: 'line',
+    name: 'Đường kẻ',
+    icon: <div className='h-0.5 w-12 bg-brand-rust' />
+  }
+]
+
 export const LeftSidebarRail = ({
   onAddTextComponent,
   onAddImageComponent,
+  onAddShapeComponent,
   onApplyTemplate,
   outline
 }: LeftSidebarRailProps) => {
@@ -74,14 +153,12 @@ export const LeftSidebarRail = ({
       setIsUploading(false)
       const dataUrl = reader.result as string
 
-      // Thêm vào danh sách ảnh đã tải trong store
       addUploadedImage({
         url: dataUrl,
         name: file.name,
         size: file.size
       })
 
-      // Tự động tạo đối tượng ảnh và chèn vào slide
       onAddImageComponent(dataUrl)
       showToast('Tải ảnh lên và chèn vào slide thành công!', 'success')
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -111,8 +188,23 @@ export const LeftSidebarRail = ({
           }`}
           title='Chèn văn bản'
         >
-          <span className='text-lg'>🔤</span>
+          <Type size={20} />
           <span className='mt-1 text-[10px] font-medium'>Văn bản</span>
+        </button>
+
+        {/* Tab Hình khối / Thành phần (MỚI) */}
+        <button
+          type='button'
+          onClick={() => setLeftRailTab('shapes')}
+          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+            leftRailTab === 'shapes' && isDrawerOpen
+              ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
+              : 'hover:bg-emerald-900/40 hover:text-white'
+          }`}
+          title='Chèn hình khối'
+        >
+          <Shapes size={20} />
+          <span className='mt-1 text-[10px] font-medium'>Hình khối</span>
         </button>
 
         {/* Tab Tải lên */}
@@ -126,7 +218,7 @@ export const LeftSidebarRail = ({
           }`}
           title='Tải hình ảnh lên'
         >
-          <span className='text-lg'>☁️</span>
+          <UploadCloud size={20} />
           <span className='mt-1 text-[10px] font-medium'>Tải lên</span>
         </button>
 
@@ -141,7 +233,7 @@ export const LeftSidebarRail = ({
           }`}
           title='Bố cục mẫu slide'
         >
-          <span className='text-lg'>🎨</span>
+          <LayoutTemplate size={20} />
           <span className='mt-1 text-[10px] font-medium'>Mẫu slide</span>
         </button>
 
@@ -153,7 +245,7 @@ export const LeftSidebarRail = ({
             className='group mt-auto flex w-15 flex-col items-center justify-center rounded-lg py-2 transition hover:bg-stone-900 hover:text-stone-200'
             title='Xem dàn ý'
           >
-            <span className='text-base'>📑</span>
+            <FileText size={18} />
             <span className='mt-1 text-[9px] font-medium'>Dàn ý</span>
           </button>
         )}
@@ -179,7 +271,10 @@ export const LeftSidebarRail = ({
                   onClick={() => onAddTextComponent('title')}
                   className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3.5 text-left font-serif text-lg font-bold text-stone-900 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
-                  <span>Thêm tiêu đề lớn</span>
+                  <div className='flex items-center gap-2.5'>
+                    <Heading1 size={20} className='text-brand-rust' />
+                    <span>Thêm tiêu đề lớn</span>
+                  </div>
                   <span className='text-[10px] font-mono text-stone-400 font-normal'>
                     H1
                   </span>
@@ -191,7 +286,10 @@ export const LeftSidebarRail = ({
                   onClick={() => onAddTextComponent('subtitle')}
                   className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3 text-left font-sans text-sm font-semibold text-stone-700 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
-                  <span>Thêm tiêu đề phụ</span>
+                  <div className='flex items-center gap-2.5'>
+                    <Heading2 size={18} className='text-stone-600' />
+                    <span>Thêm tiêu đề phụ</span>
+                  </div>
                   <span className='text-[10px] font-mono text-stone-400 font-normal'>
                     H2
                   </span>
@@ -203,7 +301,10 @@ export const LeftSidebarRail = ({
                   onClick={() => onAddTextComponent('text')}
                   className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3 text-left font-sans text-xs text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
-                  <span>Thêm một chút nội dung văn bản</span>
+                  <div className='flex items-center gap-2.5'>
+                    <AlignLeft size={16} className='text-stone-500' />
+                    <span>Thêm nội dung văn bản</span>
+                  </div>
                   <span className='text-[10px] font-mono text-stone-400'>
                     Body
                   </span>
@@ -215,8 +316,8 @@ export const LeftSidebarRail = ({
                   onClick={() => onAddTextComponent('bullets')}
                   className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3 text-left font-sans text-xs text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
-                  <div className='flex items-center gap-2'>
-                    <span>•=</span>
+                  <div className='flex items-center gap-2.5'>
+                    <List size={16} className='text-stone-500' />
                     <span>Danh sách ý (Bullets)</span>
                   </div>
                   <span className='text-[10px] font-mono text-stone-400'>
@@ -230,11 +331,45 @@ export const LeftSidebarRail = ({
                   onClick={() => onAddTextComponent('quote')}
                   className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3 text-left font-serif text-xs italic text-stone-700 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
-                  <span>“ Khung trích dẫn đáng chú ý ”</span>
+                  <div className='flex items-center gap-2.5'>
+                    <Quote size={16} className='text-stone-500' />
+                    <span>“ Khung trích dẫn ”</span>
+                  </div>
                   <span className='text-[10px] font-mono text-stone-400 font-normal'>
                     Quote
                   </span>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB HÌNH KHỐI (SHAPES - MỚI) */}
+          {leftRailTab === 'shapes' && (
+            <div className='flex flex-1 flex-col overflow-y-auto p-4'>
+              <div className='mb-3'>
+                <h3 className='text-sm font-bold text-stone-900'>Hình khối</h3>
+                <p className='text-xs text-stone-500'>
+                  Click để chèn hình khối vào slide
+                </p>
+              </div>
+
+              <div className='grid grid-cols-2 gap-2.5'>
+                {SHAPE_ITEMS.map((item) => (
+                  <button
+                    key={item.type}
+                    type='button'
+                    onClick={() => onAddShapeComponent(item.type)}
+                    className='group flex flex-col items-center justify-center gap-2 rounded-xl border border-stone-200 bg-stone-50 p-3 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:shadow-xs active:scale-95'
+                    title={`Chèn ${item.name}`}
+                  >
+                    <div className='flex h-10 items-center justify-center transition group-hover:scale-110'>
+                      {item.icon}
+                    </div>
+                    <span className='text-xs font-semibold text-stone-700 group-hover:text-brand-rust'>
+                      {item.name}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -263,9 +398,9 @@ export const LeftSidebarRail = ({
                 type='button'
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                className='flex w-full items-center justify-center gap-2 rounded-lg bg-brand-rust py-3 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 disabled:opacity-60'
+                className='flex w-full items-center justify-center gap-2 rounded-lg bg-brand-rust py-3 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 disabled:opacity-60 cursor-pointer'
               >
-                <span>☁️</span>
+                <UploadCloud size={18} />
                 <span>
                   {isUploading ? 'Đang tải lên...' : 'Tải hình ảnh lên'}
                 </span>
@@ -308,14 +443,14 @@ export const LeftSidebarRail = ({
                           className='absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-stone-900/70 text-xs text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100'
                           title='Xóa khỏi thư viện tải lên'
                         >
-                          ✕
+                          <Trash2 size={12} />
                         </button>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className='mt-6 flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-200 p-6 text-center'>
-                    <span className='text-3xl text-stone-300'>🖼️</span>
+                    <UploadCloud size={36} className='text-stone-300' />
                     <p className='mt-2 text-xs font-semibold text-stone-500'>
                       Chưa có hình ảnh nào
                     </p>

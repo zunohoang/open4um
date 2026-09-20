@@ -2,7 +2,7 @@ import { ExportModal } from '@/components/ui/ExportModal'
 import { useToast } from '@/components/ui/Toast'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
-import type { Lecture, Slide, SlideComponent } from '@/lib/types'
+import type { Lecture, ShapeType, Slide, SlideComponent } from '@/lib/types'
 import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -437,6 +437,40 @@ export const EditorPage = ({
     setSelectedCompId(newId)
   }
 
+  // Thêm khối hình khối mới (Shape)
+  const handleAddShapeComponent = (shapeType: ShapeType) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const newId = `shape-${Date.now()}`
+
+    const isLine = shapeType === 'line'
+    const isSquareOrCircle = shapeType === 'square' || shapeType === 'circle'
+
+    const newComp: SlideComponent = {
+      id: newId,
+      type: 'shape',
+      shapeType,
+      content: '',
+      fillColor: isLine ? 'transparent' : '#c45b3f',
+      borderColor: '#173c39',
+      borderWidth: isLine ? 3 : 0,
+      borderRadius: shapeType === 'rounded-rect' ? 16 : 0,
+      x: 35,
+      y: 30,
+      width: isLine ? 40 : isSquareOrCircle ? 25 : 35,
+      height: isLine ? 2 : isSquareOrCircle ? 25 : 20
+    }
+
+    const updatedComps = [...comps, newComp]
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(newId)
+  }
+
   // Nhân bản component
   const handleDuplicateComponent = (comp: SlideComponent) => {
     if (!lecture || !currentSlide) return
@@ -651,6 +685,7 @@ export const EditorPage = ({
         <LeftSidebarRail
           onAddTextComponent={handleAddTextComponent}
           onAddImageComponent={handleAddImageComponent}
+          onAddShapeComponent={handleAddShapeComponent}
           onApplyTemplate={handleApplyTemplate}
           outline={lecture.outline}
         />
