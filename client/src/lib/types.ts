@@ -33,11 +33,25 @@ export interface Outline {
   sections: OutlineSection[]
 }
 
+export type ShapeType =
+  | 'rectangle'
+  | 'circle'
+  | 'square'
+  | 'rounded-rect'
+  | 'triangle'
+  | 'star'
+  | 'line'
+
 export interface SlideComponent {
   id: string
-  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image'
+  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image' | 'shape'
   content: string
   imageUrl?: string
+  shapeType?: ShapeType
+  fillColor?: string
+  borderColor?: string
+  borderWidth?: number
+  borderRadius?: number
   x: number // % từ mép trái (0 - 100)
   y: number // % từ mép trên (0 - 100)
   width?: number // % chiều rộng
@@ -49,7 +63,16 @@ export interface SlideComponent {
   textCase?: 'normal' | 'uppercase'
   textAlign?: 'left' | 'center' | 'right'
   color?: string
-  fontFamily?: 'display' | 'sans' | 'mono'
+  fontFamily?:
+    | 'sans'
+    | 'display'
+    | 'playfair'
+    | 'montserrat'
+    | 'jakarta'
+    | 'merriweather'
+    | 'handwriting'
+    | 'mono'
+    | string
 }
 
 export interface Slide {

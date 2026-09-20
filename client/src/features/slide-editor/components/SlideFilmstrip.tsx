@@ -1,4 +1,15 @@
 import type { Slide } from '@/lib/types'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Copy,
+  Plus,
+  Trash2
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useEditorStore } from '../store/editor.store'
 
@@ -87,10 +98,14 @@ export const SlideFilmstrip = ({
           <button
             type='button'
             onClick={toggleFilmstrip}
-            className='flex items-center gap-1 font-semibold text-stone-700 hover:text-brand-rust transition'
+            className='flex items-center gap-1.5 font-semibold text-stone-700 hover:text-brand-rust transition cursor-pointer'
             title={isFilmstripOpen ? 'Thu nhỏ dải slide' : 'Mở rộng dải slide'}
           >
-            <span>{isFilmstripOpen ? '▼' : '▲'}</span>
+            {isFilmstripOpen ? (
+              <ChevronDown size={14} />
+            ) : (
+              <ChevronUp size={14} />
+            )}
             <span>{isFilmstripOpen ? 'Ẩn dải slide' : 'Hiện dải slide'}</span>
           </button>
 
@@ -112,12 +127,12 @@ export const SlideFilmstrip = ({
                 disabled={!canScrollLeft}
                 className={`flex h-5 w-5 items-center justify-center rounded border border-stone-300 bg-white text-xs font-bold transition ${
                   canScrollLeft
-                    ? 'text-stone-700 hover:border-brand-rust hover:text-brand-rust'
+                    ? 'text-stone-700 hover:border-brand-rust hover:text-brand-rust cursor-pointer'
                     : 'cursor-not-allowed opacity-30'
                 }`}
                 title='Trượt sang trái'
               >
-                ‹
+                <ChevronLeft size={13} />
               </button>
               <button
                 type='button'
@@ -125,12 +140,12 @@ export const SlideFilmstrip = ({
                 disabled={!canScrollRight}
                 className={`flex h-5 w-5 items-center justify-center rounded border border-stone-300 bg-white text-xs font-bold transition ${
                   canScrollRight
-                    ? 'text-stone-700 hover:border-brand-rust hover:text-brand-rust'
+                    ? 'text-stone-700 hover:border-brand-rust hover:text-brand-rust cursor-pointer'
                     : 'cursor-not-allowed opacity-30'
                 }`}
                 title='Trượt sang phải'
               >
-                ›
+                <ChevronRight size={13} />
               </button>
             </div>
           )}
@@ -154,15 +169,16 @@ export const SlideFilmstrip = ({
 
               return (
                 <div
-                  key={slide.id || index}
+                  key={slide.id}
                   onClick={() => onSelectSlide(index)}
-                  className={`group relative flex h-20 w-32 shrink-0 cursor-pointer flex-col justify-between overflow-hidden rounded-md border bg-white p-2 shadow-2xs transition ${
+                  className={`group relative flex h-20 w-28 shrink-0 cursor-pointer flex-col justify-between rounded-md border bg-white p-2 shadow-xs transition hover:shadow-md ${
                     isActive
                       ? 'border-brand-rust ring-2 ring-brand-rust/30 font-bold'
                       : 'border-stone-300 hover:border-stone-400'
                   }`}
+                  title={`Trang ${index + 1}: ${slide.title || 'Slide trống'}`}
                 >
-                  {/* Số thứ tự slide */}
+                  {/* Header thẻ: Số thứ tự và menu thao tác nhanh */}
                   <div className='flex items-center justify-between'>
                     <span className='font-mono text-[10px] font-bold text-stone-400'>
                       {index + 1}
@@ -178,10 +194,10 @@ export const SlideFilmstrip = ({
                         type='button'
                         disabled={index === 0}
                         onClick={() => onMoveSlide(slide.id, index - 1)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20'
+                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20 cursor-pointer'
                         title='Di chuyển sang trái'
                       >
-                        ←
+                        <ArrowLeft size={10} />
                       </button>
 
                       {/* Di chuyển sau */}
@@ -189,20 +205,20 @@ export const SlideFilmstrip = ({
                         type='button'
                         disabled={index === slides.length - 1}
                         onClick={() => onMoveSlide(slide.id, index + 1)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20'
+                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20 cursor-pointer'
                         title='Di chuyển sang phải'
                       >
-                        →
+                        <ArrowRight size={10} />
                       </button>
 
                       {/* Nhân bản */}
                       <button
                         type='button'
                         onClick={() => onDuplicateSlide(slide.id)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[9px] hover:bg-stone-200'
+                        className='flex h-4 w-4 items-center justify-center rounded text-[9px] hover:bg-stone-200 cursor-pointer'
                         title='Nhân bản slide'
                       >
-                        📋
+                        <Copy size={10} />
                       </button>
 
                       {/* Xóa */}
@@ -210,10 +226,10 @@ export const SlideFilmstrip = ({
                         <button
                           type='button'
                           onClick={() => onDeleteSlide(slide.id)}
-                          className='flex h-4 w-4 items-center justify-center rounded text-[9px] text-red-600 hover:bg-red-50'
+                          className='flex h-4 w-4 items-center justify-center rounded text-[9px] text-red-600 hover:bg-red-50 cursor-pointer'
                           title='Xóa slide'
                         >
-                          🗑️
+                          <Trash2 size={10} />
                         </button>
                       )}
                     </div>
@@ -231,11 +247,11 @@ export const SlideFilmstrip = ({
             <button
               type='button'
               onClick={onAddSlide}
-              className='flex h-20 w-28 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-stone-400 bg-stone-50 text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust'
+              className='flex h-20 w-28 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-stone-400 bg-stone-50 text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust cursor-pointer'
               title='Thêm slide mới'
             >
-              <span className='text-lg font-bold'>+</span>
-              <span className='text-[10px] font-semibold uppercase tracking-wider'>
+              <Plus size={20} className='font-bold' />
+              <span className='mt-1 text-[10px] font-semibold uppercase tracking-wider'>
                 Thêm slide
               </span>
             </button>

@@ -1,3 +1,4 @@
+import { Lightbulb, Loader2, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import { useEditorStore } from '../store/editor.store'
 
@@ -36,7 +37,7 @@ export const AiCopilotPanel = ({
       {/* Header Panel */}
       <div className='flex h-12 items-center justify-between border-b border-stone-200 px-4'>
         <div className='flex items-center gap-2'>
-          <span className='text-brand-rust font-bold text-base'>✨</span>
+          <Sparkles size={16} className='text-brand-rust' />
           <span className='text-xs font-bold uppercase tracking-wider text-brand-ink'>
             Trợ lý AI
           </span>
@@ -44,10 +45,10 @@ export const AiCopilotPanel = ({
         <button
           type='button'
           onClick={toggleAiPanel}
-          className='flex h-6 w-6 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700'
+          className='flex h-6 w-6 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 cursor-pointer'
           title='Đóng bảng AI'
         >
-          ✕
+          <X size={16} />
         </button>
       </div>
 
@@ -56,9 +57,7 @@ export const AiCopilotPanel = ({
         {aiMessages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex flex-col ${
-              msg.role === 'user' ? 'items-end' : 'items-start'
-            }`}
+            className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
             <div
               className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs shadow-2xs ${
@@ -79,7 +78,7 @@ export const AiCopilotPanel = ({
 
         {isAiLoading && (
           <div className='flex items-center gap-2 rounded-xl bg-orange-50/80 p-3 text-xs text-brand-rust border border-brand-rust/30'>
-            <span className='animate-spin text-base'>⟳</span>
+            <Loader2 size={16} className='animate-spin' />
             <span className='font-medium'>
               AI đang phân tích và tinh chỉnh slide...
             </span>
@@ -97,9 +96,10 @@ export const AiCopilotPanel = ({
                 key={sug}
                 type='button'
                 onClick={() => setInstruction(sug)}
-                className='w-full text-left rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[11px] text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust'
+                className='flex w-full items-center gap-1.5 text-left rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[11px] text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust cursor-pointer'
               >
-                ✦ {sug}
+                <Lightbulb size={12} className='text-amber-500 shrink-0' />
+                <span>{sug}</span>
               </button>
             ))}
           </div>
@@ -132,9 +132,9 @@ export const AiCopilotPanel = ({
           <button
             type='submit'
             disabled={!instruction.trim() || isAiLoading}
-            className='flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-rust py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 disabled:opacity-50'
+            className='flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-rust py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 disabled:opacity-50 cursor-pointer'
           >
-            <span>✨</span>
+            <Sparkles size={14} />
             <span>{isAiLoading ? 'Đang xử lý...' : 'Áp dụng AI'}</span>
           </button>
         </form>
