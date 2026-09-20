@@ -35,15 +35,18 @@ export interface Outline {
 
 export interface SlideComponent {
   id: string
-  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote'
+  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image'
   content: string
+  imageUrl?: string
   x: number // % từ mép trái (0 - 100)
   y: number // % từ mép trên (0 - 100)
   width?: number // % chiều rộng
+  height?: number // % chiều cao
   fontSize?: number // px
   fontWeight?: 'normal' | 'bold'
   fontStyle?: 'normal' | 'italic'
   textDecoration?: 'none' | 'underline'
+  textCase?: 'normal' | 'uppercase'
   textAlign?: 'left' | 'center' | 'right'
   color?: string
   fontFamily?: 'display' | 'sans' | 'mono'

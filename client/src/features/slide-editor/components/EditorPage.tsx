@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { isAxiosError } from 'axios'
-import { editorApi } from '@/features/slide-editor/api/editor.api'
 import { ExportModal } from '@/components/ui/ExportModal'
 import { useToast } from '@/components/ui/Toast'
+import { useAuthStore } from '@/features/auth/store/auth.store'
+import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type { Lecture, Slide, SlideComponent } from '@/lib/types'
+import { isAxiosError } from 'axios'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useEditorStore } from '../store/editor.store'
+import { AiCopilotPanel } from './AiCopilotPanel'
+import { EditorHeader } from './EditorHeader'
+import { FloatingContextualToolbar } from './FloatingContextualToolbar'
+import { LeftSidebarRail } from './LeftSidebarRail'
+import { SlideCanvas } from './SlideCanvas'
+import { SlideFilmstrip } from './SlideFilmstrip'
 
 interface EditorPageProps {
   initialLecture?: Lecture
@@ -12,23 +20,7 @@ interface EditorPageProps {
   onPresent?: (lecture: Lecture) => void
 }
 
-const AI_SUGGESTIONS = [
-  'Rút gọn thành 3 ý chính súc tích',
-  'Thêm ví dụ thực tế minh họa',
-  'Viết lại với giọng điệu trang trọng',
-  'Tóm tắt kết luận ngắn gọn, dễ nhớ'
-]
-
-const COLOR_SWATCHES = [
-  { name: 'Đen than', value: '#1c1917' },
-  { name: 'Xanh rừng', value: '#064e3b' },
-  { name: 'Cam đất', value: '#c2410c' },
-  { name: 'Xám đá', value: '#78716c' },
-  { name: 'Trắng', value: '#ffffff' },
-  { name: 'Đỏ rượu', value: '#991b1b' }
-]
-
-// Hàm chuyển đổi/khởi tạo component kéo thả từ dữ liệu slide
+// Khởi tạo các components cho slide nếu chưa có
 const getSlideComponents = (slide: Slide): SlideComponent[] => {
   if (slide.components && slide.components.length > 0) {
     return slide.components
@@ -36,7 +28,6 @@ const getSlideComponents = (slide: Slide): SlideComponent[] => {
 
   const comps: SlideComponent[] = []
 
-  // 1. Tiêu đề
   comps.push({
     id: `title-${slide.id}`,
     type: 'title',
@@ -45,16 +36,15 @@ const getSlideComponents = (slide: Slide): SlideComponent[] => {
     y: 12,
     width: 84,
     fontSize:
-      slide.titleSize === 'xl' ? 52 : slide.titleSize === 'sm' ? 28 : 40,
+      slide.titleSize === 'xl' ? 48 : slide.titleSize === 'sm' ? 26 : 36,
     fontWeight: 'bold',
     fontStyle: 'normal',
     textDecoration: 'none',
     textAlign: slide.titleAlign || 'left',
     fontFamily: 'display',
-    color: '#064e3b'
+    color: '#1c1917'
   })
 
-  // 2. Phụ đề nếu có
   if (slide.subtitle) {
     comps.push({
       id: `sub-${slide.id}`,
@@ -69,11 +59,10 @@ const getSlideComponents = (slide: Slide): SlideComponent[] => {
       textDecoration: 'none',
       textAlign: slide.titleAlign || 'left',
       fontFamily: 'sans',
-      color: '#78716c'
+      color: '#64748b'
     })
   }
 
-  // 3. Nội dung chính / Bullets
   if (slide.bullets && slide.bullets.length > 0) {
     comps.push({
       id: `bullets-${slide.id}`,
@@ -104,99 +93,60 @@ export const EditorPage = ({
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
+  const { user } = useAuthStore()
+
+  const {
+    activeSlideIndex,
+    setActiveSlideIndex,
+    selectedCompId,
+    setSelectedCompId,
+    recordHistory,
+    undo,
+    redo,
+    addAiMessage
+  } = useEditorStore()
 
   const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
-
   const [lecture, setLecture] = useState<Lecture | null>(
     initialLecture || lectureFromState || null
   )
   const [isLoading, setIsLoading] = useState(!lecture)
-  const [active, setActive] = useState(0)
-  const [instruction, setInstruction] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [isUnauthorized, setIsUnauthorized] = useState(false)
   const [isAiLoading, setIsAiLoading] = useState(false)
-
-  // Tab bảng điều khiển bên phải: Xem Dàn ý, Chat AI hay Chỉnh sửa Canvas
-  const [rightPanelTab, setRightPanelTab] = useState<
-    'outline' | 'chat' | 'edit'
-  >('edit')
-  const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
-
-  // Component đang được chọn trên Canvas
-  const [selectedCompId, setSelectedCompId] = useState<string | null>(null)
-
-  // Trạng thái kéo thả Canvas
-  const [dragState, setDragState] = useState<{
-    compId: string
-    startX: number
-    startY: number
-    initialCompX: number
-    initialCompY: number
-  } | null>(null)
-
-  const canvasRef = useRef<HTMLDivElement>(null)
-
-  // HỆ THỐNG AUTOSAVE CÓ BẬT/TẮT & ĐẾM NGƯỢC 2S
-  // Mặc định là TẮT (false) mỗi phiên làm việc
-  const [isAutosaveEnabled, setIsAutosaveEnabled] = useState(false)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const [countdown, setCountdown] = useState<number | null>(null)
-  const [status, setStatus] = useState<'Đã lưu' | 'Chưa lưu' | 'Đang lưu...'>(
-    'Đã lưu'
-  )
-
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
 
-  const showSuccess = (msg: string) => {
-    showToast(msg, 'success')
-  }
+  // Trạng thái Autosave đếm ngược
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>(
+    'saved'
+  )
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   )
-
-  // Ref lưu bản mới nhất của lecture để dùng trong timer
   const lectureRef = useRef(lecture)
   useEffect(() => {
     lectureRef.current = lecture
   }, [lecture])
 
-  // Tự động tải bài giảng từ URL param id nếu chưa có sẵn
-  useEffect(() => {
-    if (!lecture && params.id) {
-      setIsLoading(true)
-      void editorApi
-        .get(params.id)
-        .then((loaded) => {
-          setLecture(loaded)
-        })
-        .catch(() => {
-          showToast('Không thể tải bài giảng từ máy chủ', 'error')
-        })
-        .finally(() => {
-          setIsLoading(false)
-        })
-    }
-  }, [params.id, lecture, showToast])
-
-  // Hàm thực hiện lưu bài giảng lên máy chủ
+  // Lưu bài giảng lên server
   const triggerSaveToServer = useCallback(
     async (toSave: Lecture) => {
-      setStatus('Đang lưu...')
+      setSaveStatus('saving')
       setCountdown(null)
       try {
         await editorApi.autosave(toSave)
-        setStatus('Đã lưu')
-        setHasUnsavedChanges(false)
+        setSaveStatus('saved')
       } catch {
-        setStatus('Chưa lưu')
+        setSaveStatus('unsaved')
         showToast('Không thể lưu thay đổi vào máy chủ', 'error')
       }
     },
     [showToast]
   )
 
-  // Xóa các timer đếm ngược
   const clearCountdownTimers = useCallback(() => {
     if (countdownTimerRef.current) {
       clearTimeout(countdownTimerRef.current)
@@ -209,25 +159,83 @@ export const EditorPage = ({
     setCountdown(null)
   }, [])
 
-  // Khi có thay đổi dữ liệu slide/lecture
-  const onLectureMutated = useCallback(
-    (next: Lecture) => {
-      setLecture(next)
-      setHasUnsavedChanges(true)
+  // Tải dữ liệu bài giảng từ server
+  const loadLecture = useCallback(async () => {
+    if (!params.id) return
+    setIsLoading(true)
+    setLoadError(null)
+    setIsUnauthorized(false)
 
-      // Nếu TẮT tự động lưu: chỉ đánh dấu chưa lưu, không hẹn giờ
-      if (!isAutosaveEnabled) {
-        setStatus('Chưa lưu')
-        clearCountdownTimers()
+    try {
+      const loaded = await editorApi.get(params.id)
+
+      // Kiểm tra quyền truy cập theo Use-case
+      if (
+        user &&
+        loaded.userId &&
+        loaded.userId !== user.id &&
+        user.role !== 'admin'
+      ) {
+        setIsUnauthorized(true)
+        setIsLoading(false)
         return
       }
 
-      // Nếu BẬT tự động lưu: reset và kích hoạt đếm ngược 2s
+      setLecture(loaded)
+
+      // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
+      const savedIndexStr = sessionStorage.getItem(
+        `open4um_last_slide_${loaded._id}`
+      )
+      if (savedIndexStr !== null) {
+        const savedIndex = Number(savedIndexStr)
+        if (
+          !isNaN(savedIndex) &&
+          savedIndex >= 0 &&
+          savedIndex < loaded.slides.length
+        ) {
+          setActiveSlideIndex(savedIndex)
+        }
+      }
+    } catch (err) {
+      const msg = isAxiosError(err)
+        ? (err.response?.data as { message?: string })?.message ||
+          'Không thể tải bài giảng'
+        : 'Không thể kết nối đến máy chủ'
+      setLoadError(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [params.id, user, setActiveSlideIndex])
+
+  useEffect(() => {
+    if (!lecture && params.id) {
+      void loadLecture()
+    }
+  }, [lecture, params.id, loadLecture])
+
+  // Khi có thay đổi dữ liệu slide/lecture -> Ghi nhận Undo history và kích hoạt Autosave 2s
+  const mutateLecture = useCallback(
+    (next: Lecture, shouldRecordHistory = true) => {
+      if (shouldRecordHistory && lectureRef.current) {
+        recordHistory(lectureRef.current.slides)
+      }
+
+      setLecture(next)
+      setSaveStatus('unsaved')
+
+      // Lưu vị trí slide hiện tại vào sessionStorage
+      if (next._id) {
+        sessionStorage.setItem(
+          `open4um_last_slide_${next._id}`,
+          String(activeSlideIndex)
+        )
+      }
+
+      // Đếm ngược 2s Autosave tự động
       clearCountdownTimers()
       setCountdown(2)
-      setStatus('Chưa lưu')
 
-      // Cập nhật số giây đếm ngược: 2 -> 1
       countdownIntervalRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev === null || prev <= 1) return 1
@@ -235,7 +243,6 @@ export const EditorPage = ({
         })
       }, 1000)
 
-      // Sau 2s thì tiến hành gửi request lưu
       countdownTimerRef.current = setTimeout(() => {
         clearCountdownTimers()
         if (lectureRef.current) {
@@ -243,55 +250,98 @@ export const EditorPage = ({
         }
       }, 2000)
     },
-    [clearCountdownTimers, isAutosaveEnabled, triggerSaveToServer]
+    [activeSlideIndex, clearCountdownTimers, recordHistory, triggerSaveToServer]
   )
 
-  // Lưu thủ công (khi ấn nút hoặc phím tắt Ctrl+S)
+  // Lưu thủ công (Ctrl+S / Cmd+S)
   const handleManualSave = useCallback(() => {
     if (!lecture) return
     clearCountdownTimers()
     void triggerSaveToServer(lecture)
   }, [clearCountdownTimers, lecture, triggerSaveToServer])
 
-  // Lắng nghe phím tắt Ctrl+S / Cmd+S
+  // Xử lý Undo
+  const handleUndo = useCallback(() => {
+    if (!lecture) return
+    const prevSlides = undo(lecture.slides)
+    if (prevSlides) {
+      setLecture((prev) => (prev ? { ...prev, slides: prevSlides } : prev))
+      setSaveStatus('unsaved')
+      clearCountdownTimers()
+      void triggerSaveToServer({ ...lecture, slides: prevSlides })
+    }
+  }, [clearCountdownTimers, lecture, triggerSaveToServer, undo])
+
+  // Xử lý Redo
+  const handleRedo = useCallback(() => {
+    if (!lecture) return
+    const nextSlides = redo(lecture.slides)
+    if (nextSlides) {
+      setLecture((prev) => (prev ? { ...prev, slides: nextSlides } : prev))
+      setSaveStatus('unsaved')
+      clearCountdownTimers()
+      void triggerSaveToServer({ ...lecture, slides: nextSlides })
+    }
+  }, [clearCountdownTimers, lecture, redo, triggerSaveToServer])
+
+  // Lắng nghe phím tắt toàn cục (Ctrl+Z, Ctrl+Y, Ctrl+S)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      // Phím tắt Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         handleManualSave()
+        return
+      }
+      // Phím tắt Undo (Ctrl+Z)
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'z'
+      ) {
+        e.preventDefault()
+        handleUndo()
+        return
+      }
+      // Phím tắt Redo (Ctrl+Y hoặc Ctrl+Shift+Z)
+      if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        e.preventDefault()
+        handleRedo()
+        return
       }
     }
+
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleManualSave])
+  }, [handleManualSave, handleUndo, handleRedo])
 
   // Dọn dẹp timer khi unmount
   useEffect(() => {
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
-  // THAO TÁC COMPONENT VÀ CANVAS KÉO THẢ
-  const slide = lecture?.slides[active]
-  const currentComponents = slide ? getSlideComponents(slide) : []
-  const selectedComponent = currentComponents.find(
-    (c) => c.id === selectedCompId
-  )
+  // THAO TÁC TRÊN SLIDE VÀ COMPONENT
+  const currentSlide = lecture?.slides[activeSlideIndex]
+  const currentComponents = currentSlide ? getSlideComponents(currentSlide) : []
+  const selectedComponent =
+    currentComponents.find((c) => c.id === selectedCompId) || null
 
-  // Cập nhật một hoặc nhiều thuộc tính của component
-  const updateComponent = useCallback(
-    (
-      compId: string,
-      patch: Partial<SlideComponent>,
-      sourceSlide = lectureRef.current?.slides[active]
-    ) => {
+  // Cập nhật thuộc tính của một component
+  const handleUpdateComponent = useCallback(
+    (compId: string, patch: Partial<SlideComponent>) => {
       const currentLecture = lectureRef.current
-      if (!currentLecture || !sourceSlide) return
+      if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
+
+      const sourceSlide = currentLecture.slides[activeSlideIndex]
       const comps = getSlideComponents(sourceSlide)
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
 
-      // Đồng bộ ngược lại title và bullets để AI Edit và Presentation cũ vẫn hoạt động chuẩn
+      // Đồng bộ ngược title và bullets để AI và Presentation luôn hoạt động tốt
       const titleComp = updatedComps.find((c) => c.type === 'title')
       const subComp = updatedComps.find((c) => c.type === 'subtitle')
       const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
@@ -307,17 +357,19 @@ export const EditorPage = ({
       }
 
       const nextSlides = currentLecture.slides.map((s, idx) =>
-        idx === active ? updatedSlide : s
+        idx === activeSlideIndex ? updatedSlide : s
       )
-      onLectureMutated({ ...currentLecture, slides: nextSlides })
+      mutateLecture({ ...currentLecture, slides: nextSlides })
     },
-    [active, onLectureMutated]
+    [activeSlideIndex, mutateLecture]
   )
 
-  // Thêm component mới vào Canvas
-  const addComponent = (type: SlideComponent['type']) => {
-    if (!lecture || !slide) return
-    const comps = getSlideComponents(slide)
+  // Thêm khối văn bản mới
+  const handleAddTextComponent = (
+    type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote'
+  ) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
     const newId = `comp-${Date.now()}`
 
     const newComp: SlideComponent = {
@@ -329,1103 +381,352 @@ export const EditorPage = ({
           : type === 'subtitle'
             ? 'Dòng phụ đề mới'
             : type === 'quote'
-              ? 'Nhập trích dẫn đáng chú ý tại đây...'
-              : 'Nội dung ý mới...',
+              ? 'Nhập trích dẫn ý nghĩa tại đây...'
+              : 'Nội dung văn bản mới...',
       x: 12,
-      y: 20 + comps.length * 8,
+      y: 20 + comps.length * 6,
       width: 76,
       fontSize: type === 'title' ? 36 : type === 'subtitle' ? 18 : 20,
       fontWeight: type === 'title' ? 'bold' : 'normal',
       fontStyle: type === 'quote' || type === 'subtitle' ? 'italic' : 'normal',
       textDecoration: 'none',
+      textCase: 'normal',
       textAlign: type === 'quote' ? 'center' : 'left',
       fontFamily: type === 'title' || type === 'quote' ? 'display' : 'sans',
-      color: type === 'title' ? '#064e3b' : '#1c1917'
+      color: '#173c39'
     }
 
     const updatedComps = [...comps, newComp]
-    const updatedSlide: Slide = {
-      ...slide,
-      components: updatedComps
-    }
-
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
     const nextSlides = lecture.slides.map((s, idx) =>
-      idx === active ? updatedSlide : s
+      idx === activeSlideIndex ? updatedSlide : s
     )
-    onLectureMutated({ ...lecture, slides: nextSlides })
+
+    mutateLecture({ ...lecture, slides: nextSlides })
     setSelectedCompId(newId)
-    setRightPanelTab('edit')
   }
 
-  // Xóa component
-  const deleteComponent = (compId: string) => {
-    if (!lecture || !slide) return
-    const comps = getSlideComponents(slide)
-    const updatedComps = comps.filter((c) => c.id !== compId)
-    const updatedSlide: Slide = {
-      ...slide,
-      components: updatedComps
+  // Thêm khối hình ảnh mới từ ảnh tải lên
+  const handleAddImageComponent = (imageUrl: string) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const newId = `img-comp-${Date.now()}`
+
+    const newComp: SlideComponent = {
+      id: newId,
+      type: 'image',
+      content: imageUrl,
+      imageUrl,
+      x: 25,
+      y: 20,
+      width: 50,
+      fontSize: 20,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+      textAlign: 'left'
     }
+
+    const updatedComps = [...comps, newComp]
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
     const nextSlides = lecture.slides.map((s, idx) =>
-      idx === active ? updatedSlide : s
+      idx === activeSlideIndex ? updatedSlide : s
     )
-    onLectureMutated({ ...lecture, slides: nextSlides })
-    if (selectedCompId === compId) setSelectedCompId(null)
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(newId)
   }
 
   // Nhân bản component
-  const duplicateComponent = (comp: SlideComponent) => {
-    if (!lecture || !slide) return
-    const comps = getSlideComponents(slide)
+  const handleDuplicateComponent = (comp: SlideComponent) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
     const newComp: SlideComponent = {
       ...comp,
       id: `comp-${Date.now()}`,
       x: Math.min(comp.x + 4, 85),
       y: Math.min(comp.y + 4, 85)
     }
+
     const updatedComps = [...comps, newComp]
-    const updatedSlide: Slide = {
-      ...slide,
-      components: updatedComps
-    }
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
     const nextSlides = lecture.slides.map((s, idx) =>
-      idx === active ? updatedSlide : s
+      idx === activeSlideIndex ? updatedSlide : s
     )
-    onLectureMutated({ ...lecture, slides: nextSlides })
+
+    mutateLecture({ ...lecture, slides: nextSlides })
     setSelectedCompId(newComp.id)
   }
 
-  // Bắt đầu kéo chuột trên component
-  const handleComponentMouseDown = (
-    e: React.MouseEvent,
-    comp: SlideComponent
-  ) => {
-    e.stopPropagation()
-    setSelectedCompId(comp.id)
-    setDragState({
-      compId: comp.id,
-      startX: e.clientX,
-      startY: e.clientY,
-      initialCompX: comp.x,
-      initialCompY: comp.y
-    })
+  // Xóa component
+  const handleDeleteComponent = (compId: string) => {
+    if (!lecture || !currentSlide) return
+    const comps = getSlideComponents(currentSlide)
+    const updatedComps = comps.filter((c) => c.id !== compId)
+    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    if (selectedCompId === compId) setSelectedCompId(null)
   }
 
-  // Lắng nghe di chuyển và thả chuột toàn màn hình khi đang kéo thả
-  useEffect(() => {
-    if (!dragState || !canvasRef.current) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const canvasEl = canvasRef.current
-      if (!canvasEl) return
-      const rect = canvasEl.getBoundingClientRect()
-
-      const deltaX = e.clientX - dragState.startX
-      const deltaY = e.clientY - dragState.startY
-
-      const deltaPercentX = (deltaX / rect.width) * 100
-      const deltaPercentY = (deltaY / rect.height) * 100
-
-      const nextX = Math.round(
-        Math.max(1, Math.min(88, dragState.initialCompX + deltaPercentX))
-      )
-      const nextY = Math.round(
-        Math.max(1, Math.min(88, dragState.initialCompY + deltaPercentY))
-      )
-
-      updateComponent(dragState.compId, { x: nextX, y: nextY })
-    }
-
-    const handleMouseUp = () => {
-      setDragState(null)
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [dragState, updateComponent])
+  // Áp dụng layout mẫu cho slide
+  const handleApplyTemplate = (layout: Slide['layout']) => {
+    if (!lecture || !currentSlide) return
+    const updatedSlide: Slide = { ...currentSlide, layout }
+    const nextSlides = lecture.slides.map((s, idx) =>
+      idx === activeSlideIndex ? updatedSlide : s
+    )
+    mutateLecture({ ...lecture, slides: nextSlides })
+    showToast(`Đã áp dụng mẫu bố cục ${layout}`, 'success')
+  }
 
   // Thao tác Slide cơ bản (thêm, xóa, nhân bản, di chuyển)
-  const operation = async (body: object) => {
+  const handleSlideOperation = async (body: object) => {
     if (!lecture) return
     try {
+      recordHistory(lecture.slides)
       const next = await editorApi.operation(lecture._id, body)
       setLecture(next)
-      setActive(Math.min(active, next.slides.length - 1))
+      setActiveSlideIndex(Math.min(activeSlideIndex, next.slides.length - 1))
       setSelectedCompId(null)
+      setSaveStatus('saved')
     } catch (err) {
       const msg = isAxiosError(err)
         ? (err.response?.data as { message?: string })?.message ||
-          'Không thực hiện được thao tác slide'
-        : 'Không thực hiện được thao tác slide'
+          'Lỗi thao tác slide'
+        : 'Lỗi thao tác slide'
       showToast(msg, 'error')
     }
   }
 
-  // AI Edit
-  const aiEdit = async () => {
-    if (!lecture) return
-    const currentSlide = lecture.slides[active]
-    if (!instruction.trim() || !currentSlide) return
+  // Gọi AI chỉnh sửa slide từ ô prompt
+  const handleApplyAiPrompt = async (instruction: string) => {
+    if (!lecture || !currentSlide || !instruction.trim()) return
     try {
       setIsAiLoading(true)
+      addAiMessage('user', instruction)
+
       const updated = await editorApi.aiEdit(
         lecture._id,
         currentSlide,
         instruction
       )
+      recordHistory(lecture.slides)
       setLecture(updated)
-      setInstruction('')
-      setStatus('Đã lưu')
-      setHasUnsavedChanges(false)
       setSelectedCompId(null)
-      showToast('Đã áp dụng chỉnh sửa AI cho slide thành công', 'success')
+      setSaveStatus('saved')
+
+      addAiMessage(
+        'assistant',
+        `Đã hoàn tất chỉnh sửa slide theo yêu cầu: "${instruction}"`
+      )
+      showToast('Đã áp dụng chỉnh sửa AI thành công', 'success')
     } catch (err) {
       const msg = isAxiosError(err)
         ? (err.response?.data as { message?: string })?.message ||
-          'Không áp dụng được AI edit'
-        : 'Không áp dụng được AI edit'
+          'Không thể thực hiện chỉnh sửa AI'
+        : 'Không thể thực hiện chỉnh sửa AI'
+      addAiMessage('assistant', `⚠️ Không thể áp dụng chỉnh sửa: ${msg}`)
       showToast(msg, 'error')
     } finally {
       setIsAiLoading(false)
     }
   }
 
-  const handleBack = () => {
-    if (onBack) {
-      onBack()
-    } else {
-      navigate(-1)
+  // AI Quick Actions (Viết lại / Rút gọn / Mở rộng) từ mini-action pill
+  const handleAiQuickAction = (action: 'rewrite' | 'shorten' | 'expand') => {
+    const promptMap = {
+      rewrite:
+        'Hãy viết lại các ý trong slide này cho mạch lạc, thu hút và sắc nét hơn',
+      shorten:
+        'Rút gọn nội dung slide này thành 3 ý chính súc tích, ngắn gọn, dễ nhớ',
+      expand:
+        'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
     }
+    void handleApplyAiPrompt(promptMap[action])
+  }
+
+  const handleBack = () => {
+    if (onBack) onBack()
+    else navigate('/library')
   }
 
   const handlePresent = () => {
     if (!lecture) return
-    if (onPresent) {
-      onPresent(lecture)
-    } else {
-      navigate(`/presentation/${lecture._id}`, { state: { lecture } })
-    }
+    if (onPresent) onPresent(lecture)
+    else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
   }
 
+  // MÀN HÌNH ĐANG TẢI
   if (isLoading) {
     return (
-      <div className='flex min-h-screen items-center justify-center bg-brand-paper font-sans text-xs font-bold text-stone-600'>
-        Đang tải bài giảng...
+      <div className='flex min-h-screen items-center justify-center bg-brand-paper font-sans text-xs font-bold text-brand-ink'>
+        <div className='flex flex-col items-center gap-2'>
+          <span className='animate-spin text-2xl text-brand-rust'>⟳</span>
+          <span>Đang tải bài giảng...</span>
+        </div>
       </div>
     )
   }
 
-  if (!lecture) {
+  // MÀN HÌNH BÁO LỖI KHÔNG CÓ QUYỀN TRUY CẬP (THEO USE-CASE)
+  if (isUnauthorized) {
     return (
-      <div className='flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans'>
-        <p className='text-sm font-bold text-red-700'>
-          Không tìm thấy bài giảng
+      <div className='flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center'>
+        <span className='text-4xl'>🔒</span>
+        <h2 className='mt-3 text-base font-bold text-red-600'>
+          Không có quyền truy cập
+        </h2>
+        <p className='mt-1 max-w-sm text-xs text-stone-600'>
+          Bạn không có quyền chỉnh sửa bài giảng này. Vui lòng quay về Thư viện
+          của bạn.
         </p>
         <button
           type='button'
           onClick={() => navigate('/library')}
-          className='mt-4 bg-orange-700 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800'
+          className='mt-5 rounded-lg bg-brand-ink px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#112d2b]'
         >
-          ← Trở về Thư viện
+          ← Quay về Thư viện
         </button>
+      </div>
+    )
+  }
+
+  // MÀN HÌNH BÁO LỖI TẢI DỮ LIỆU CÓ NÚT THỬ LẠI (THEO USE-CASE)
+  if (loadError || !lecture) {
+    return (
+      <div className='flex min-h-screen flex-col items-center justify-center bg-brand-paper p-6 font-sans text-center'>
+        <span className='text-4xl'>⚠️</span>
+        <h2 className='mt-3 text-base font-bold text-red-600'>
+          Không thể tải bài giảng
+        </h2>
+        <p className='mt-1 max-w-sm text-xs text-stone-600'>
+          {loadError || 'Bài giảng không tồn tại hoặc đã bị xóa.'}
+        </p>
+        <div className='mt-5 flex items-center gap-3'>
+          <button
+            type='button'
+            onClick={() => void loadLecture()}
+            className='rounded-lg bg-brand-rust px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-xs transition hover:bg-[#b04f35]'
+          >
+            Thử lại
+          </button>
+          <button
+            type='button'
+            onClick={() => navigate('/library')}
+            className='rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-stone-700 shadow-2xs transition hover:bg-stone-50'
+          >
+            ← Quay về Thư viện
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <main className='min-h-screen bg-stone-200'>
-      {/* Header trang soạn thảo màu xanh rừng kinh điển */}
-      <header className='flex h-16 items-center gap-4 bg-emerald-950 px-5 text-white sm:px-8 font-sans'>
-        <button
-          className='text-xs font-bold uppercase tracking-wider text-stone-200 hover:text-white transition'
-          onClick={handleBack}
-          title='Quay lại thư viện (Hỗ trợ nút chuột Back)'
-        >
-          ← Thư viện
-        </button>
+    <div className='flex h-screen flex-col overflow-hidden bg-brand-paper'>
+      {/* 1. HEADER CANVA */}
+      <EditorHeader
+        title={lecture.title}
+        onTitleChange={(newTitle) => {
+          const next = { ...lecture, title: newTitle }
+          mutateLecture(next, false)
+        }}
+        onBack={handleBack}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onManualSave={handleManualSave}
+        onOpenExport={() => setIsExportModalOpen(true)}
+        onPresent={handlePresent}
+        saveStatus={saveStatus}
+        countdown={countdown}
+      />
 
-        <span className='text-stone-500'>|</span>
-
-        {/* Tiêu đề bài giảng */}
-        <input
-          className='max-w-xs sm:max-w-sm border-b border-emerald-700 bg-transparent px-1 py-1 text-sm font-semibold outline-none focus:border-white'
-          value={lecture.title}
-          onChange={(event) => {
-            const next = { ...lecture, title: event.target.value }
-            onLectureMutated(next)
-          }}
+      {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
+      <div className='flex flex-1 overflow-hidden'>
+        {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Upload ảnh / Mẫu slide */}
+        <LeftSidebarRail
+          onAddTextComponent={handleAddTextComponent}
+          onAddImageComponent={handleAddImageComponent}
+          onApplyTemplate={handleApplyTemplate}
+          outline={lecture.outline}
         />
 
-        {/* KHU VỰC ĐIỀU KHIỂN AUTOSAVE & TRẠNG THÁI LƯU */}
-        <div className='ml-auto flex items-center gap-3'>
-          {/* Nút gạt Bật/Tắt Tự động lưu (Mặc định là TẮT) */}
-          <div className='flex items-center gap-2 border border-emerald-800 bg-emerald-900/60 px-3 py-1.5'>
-            <span className='text-xs font-medium text-stone-200'>
-              Tự động lưu:
-            </span>
-            <button
-              type='button'
-              onClick={() => {
-                setIsAutosaveEnabled((prev) => !prev)
-                clearCountdownTimers()
-              }}
-              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                isAutosaveEnabled ? 'bg-orange-600' : 'bg-stone-600'
-              }`}
-              title={
-                isAutosaveEnabled
-                  ? 'Đang BẬT tự động lưu (Delay 2s). Nhấn để tắt.'
-                  : 'Đang TẮT tự động lưu. Nhấn để bật.'
-              }
-            >
-              <span
-                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                  isAutosaveEnabled ? 'translate-x-4.5' : 'translate-x-1'
-                }`}
-              />
-            </button>
-            <span className='font-mono text-[11px] font-bold text-stone-300'>
-              {isAutosaveEnabled ? 'BẬT' : 'TẮT'}
-            </span>
-          </div>
-
-          {/* Trạng thái đếm ngược hoặc lưu thủ công */}
-          {isAutosaveEnabled ? (
-            <div className='flex items-center gap-1.5 font-mono text-xs'>
-              {countdown !== null ? (
-                <span className='animate-pulse font-bold text-orange-400'>
-                  ⏳ Lưu sau {countdown}s...
-                </span>
-              ) : status === 'Đang lưu...' ? (
-                <span className='text-emerald-300'>Đang lưu...</span>
-              ) : (
-                <span className='font-bold text-emerald-400'>✓ Đã lưu</span>
-              )}
-            </div>
-          ) : (
-            <div className='flex items-center gap-2'>
-              {hasUnsavedChanges ? (
-                <button
-                  type='button'
-                  onClick={handleManualSave}
-                  className='bg-orange-700 hover:bg-orange-800 px-3 py-1.5 font-sans text-xs font-bold uppercase tracking-wider text-white shadow-xs transition active:translate-y-0.5'
-                  title='Nhấn để lưu hoặc dùng Ctrl+S'
-                >
-                  💾 Lưu thay đổi
-                </button>
-              ) : (
-                <span className='font-mono text-xs font-bold text-emerald-400'>
-                  ✓ Đã lưu
-                </span>
-              )}
+        {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
+        <main className='relative flex min-w-0 flex-1 flex-col overflow-hidden bg-brand-paper'>
+          {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
+          {selectedComponent && (
+            <div className='absolute top-3 left-0 right-0 z-40 flex justify-center pointer-events-none transition-all'>
+              <div className='pointer-events-auto'>
+                <FloatingContextualToolbar
+                  selectedComponent={selectedComponent}
+                  onUpdateComponent={(patch) => {
+                    if (selectedCompId)
+                      handleUpdateComponent(selectedCompId, patch)
+                  }}
+                  onDuplicateComponent={handleDuplicateComponent}
+                  onDeleteComponent={handleDeleteComponent}
+                />
+              </div>
             </div>
           )}
 
-          {/* Nút Mở Modal Xuất bản */}
-          <button
-            type='button'
-            onClick={() => setIsExportModalOpen(true)}
-            className='flex items-center gap-1.5 border border-stone-600 bg-stone-800/90 px-3.5 py-1.5 font-sans text-xs font-bold text-stone-200 transition hover:bg-stone-700 hover:text-white'
-            title='Mở hộp thoại xuất slide đơn hoặc toàn bộ bài giảng'
-          >
-            <span>📤</span>
-            <span>Xuất bài giảng</span>
-          </button>
+          {/* Khung Canvas tỷ lệ 16:9 */}
+          <SlideCanvas
+            slide={currentSlide}
+            slideIndex={activeSlideIndex}
+            totalSlides={lecture.slides.length}
+            selectedCompId={selectedCompId}
+            onSelectComponent={setSelectedCompId}
+            onUpdateComponent={handleUpdateComponent}
+            onDuplicateComponent={handleDuplicateComponent}
+            onDeleteComponent={handleDeleteComponent}
+            onAiQuickAction={handleAiQuickAction}
+            isAiLoading={isAiLoading}
+          />
 
-          {/* Nút Trình chiếu */}
-          <button
-            className='border border-emerald-600 bg-emerald-900/80 px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition hover:bg-emerald-800'
-            onClick={handlePresent}
-          >
-            Trình chiếu
-          </button>
-        </div>
-      </header>
+          {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
+          <SlideFilmstrip
+            slides={lecture.slides}
+            activeSlideIndex={activeSlideIndex}
+            onSelectSlide={setActiveSlideIndex}
+            onAddSlide={() =>
+              void handleSlideOperation({
+                operation: 'add',
+                index: activeSlideIndex + 1
+              })
+            }
+            onDuplicateSlide={(slideId) =>
+              void handleSlideOperation({ operation: 'duplicate', slideId })
+            }
+            onDeleteSlide={(slideId) =>
+              void handleSlideOperation({ operation: 'delete', slideId })
+            }
+            onMoveSlide={(slideId, toIndex) =>
+              void handleSlideOperation({ operation: 'move', slideId, toIndex })
+            }
+          />
+        </main>
 
-      {/* Modal Xuất bản bài giảng */}
+        {/* CỘT PHẢI: Trợ lý AI Copilot */}
+        <AiCopilotPanel
+          onApplyAiPrompt={handleApplyAiPrompt}
+          isAiLoading={isAiLoading}
+        />
+      </div>
+
+      {/* MODAL XUẤT BÀI GIẢNG */}
       <ExportModal
         open={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         lecture={lecture}
-        initialSlideIndex={active}
-        onSuccess={(msg) => showSuccess(msg)}
+        initialSlideIndex={activeSlideIndex}
+        onSuccess={(msg) => showToast(msg, 'success')}
         onError={(msg) => showToast(msg, 'error')}
       />
-
-      {/* Modal Phóng to xem lại Dàn ý */}
-      {isOutlineModalOpen && lecture.outline && (
-        <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-xs font-sans'
-          onClick={() => setIsOutlineModalOpen(false)}
-        >
-          <div
-            className='relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden border border-stone-300 bg-white shadow-2xl'
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className='flex items-center justify-between border-b border-stone-300 bg-white px-6 py-4'>
-              <div>
-                <span className='font-sans text-xs font-bold tracking-widest text-orange-700 uppercase'>
-                  Dàn ý của bài giảng
-                </span>
-                <h3 className='text-xl font-medium text-emerald-950 font-display'>
-                  Dàn ý bài giảng ({lecture.outline.sections.length} phần)
-                </h3>
-              </div>
-              <button
-                type='button'
-                onClick={() => setIsOutlineModalOpen(false)}
-                className='p-1.5 text-stone-400 hover:text-emerald-950 transition text-lg'
-                aria-label='Đóng'
-              >
-                ✕
-              </button>
-            </div>
-            <div className='flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar'>
-              {lecture.outline.sections.map((sec, idx) => {
-                return (
-                  <div
-                    key={idx}
-                    className='border border-stone-200 bg-stone-50/50 p-4'
-                  >
-                    <div className='flex items-baseline gap-2'>
-                      <span className='font-mono text-xs font-bold text-orange-700'>
-                        {String(idx + 1).padStart(2, '0')}.
-                      </span>
-                      <strong className='text-sm font-semibold text-emerald-950 font-display'>
-                        {sec.heading}
-                      </strong>
-                    </div>
-                    {sec.bullets && sec.bullets.length > 0 && (
-                      <ul className='mt-2 list-disc pl-5 text-xs text-stone-600 space-y-1'>
-                        {sec.bullets.map((b, bIdx) => (
-                          <li key={bIdx} className='leading-relaxed'>
-                            {b}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cấu trúc 3 cột chuẩn */}
-      <div className='flex h-[calc(100vh-4rem)] overflow-hidden bg-brand-paper'>
-        {/* Cột 1 (Trái - 240px): Danh sách slide thumbnail dọc sắc nét */}
-        <aside className='flex w-60 shrink-0 flex-col overflow-y-auto border-r border-stone-300 bg-stone-100 p-4 font-sans'>
-          <button
-            className='mb-4 w-full border border-dashed border-orange-700 bg-orange-50/60 px-3 py-2.5 text-xs font-bold text-orange-800 uppercase tracking-wider transition hover:bg-orange-100'
-            onClick={() =>
-              void operation({ operation: 'add', index: active + 1 })
-            }
-          >
-            + Thêm slide
-          </button>
-
-          <div className='flex-1 space-y-2'>
-            {lecture.slides.map((item, index) => (
-              <button
-                className={`w-full border p-3 text-left transition ${
-                  index === active
-                    ? 'border-orange-700 bg-white font-bold text-emerald-950 shadow-[3px_3px_0_#c2410c]'
-                    : 'border-stone-300 bg-stone-50 text-stone-600 hover:border-stone-400 hover:bg-white'
-                }`}
-                key={item.id}
-                onClick={() => {
-                  setActive(index)
-                  setSelectedCompId(null)
-                }}
-              >
-                <span className='block font-mono text-[10px] text-stone-400'>
-                  SLIDE {String(index + 1).padStart(2, '0')}
-                </span>
-                <strong className='mt-0.5 block truncate text-xs text-stone-900 font-display'>
-                  {item.title || 'Slide trống'}
-                </strong>
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        {/* Cột 2 (Giữa - flex-1): KHUNG CANVAS KÉO THẢ TỰ DO */}
-        <section
-          className='flex min-w-0 flex-1 flex-col items-center justify-center overflow-y-auto p-8'
-          onClick={() => setSelectedCompId(null)}
-        >
-          {/* Canvas 16:9 với khả năng kéo thả và viền bao khi chọn */}
-          <div
-            ref={canvasRef}
-            className='relative aspect-video w-full max-w-4xl overflow-hidden border border-stone-300 shadow-2xl transition-all select-none border-t-8 bg-white text-emerald-950'
-          >
-            {/* Chỉ số slide góc trên bên phải canvas */}
-            <span className='absolute right-4 top-4 font-mono text-xs opacity-50 z-10 pointer-events-none'>
-              {active + 1} / {lecture.slides.length}
-            </span>
-
-            {/* Render các component tự do có thể kéo thả */}
-            {currentComponents.map((comp) => {
-              const isSelected = selectedCompId === comp.id
-
-              return (
-                <div
-                  key={comp.id}
-                  style={{
-                    position: 'absolute',
-                    left: `${comp.x}%`,
-                    top: `${comp.y}%`,
-                    width: comp.width ? `${comp.width}%` : 'auto',
-                    maxWidth: '94%'
-                  }}
-                  onMouseDown={(e) => handleComponentMouseDown(e, comp)}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setSelectedCompId(comp.id)
-                  }}
-                  className={`group/comp cursor-move transition-shadow ${
-                    isSelected
-                      ? 'ring-2 ring-orange-600 ring-offset-2 ring-offset-white z-30'
-                      : 'hover:ring-1 hover:ring-stone-400 z-20'
-                  }`}
-                >
-                  {/* VIỀN BAO KÍN & 4 CHỐT ĐIỀU KHIỂN KHI SELECT */}
-                  {isSelected && (
-                    <>
-                      {/* 4 chấm góc định vị */}
-                      <span className='absolute -top-1.5 -left-1.5 h-3 w-3 border-2 border-white bg-orange-600 shadow-xs pointer-events-none' />
-                      <span className='absolute -top-1.5 -right-1.5 h-3 w-3 border-2 border-white bg-orange-600 shadow-xs pointer-events-none' />
-                      <span className='absolute -bottom-1.5 -left-1.5 h-3 w-3 border-2 border-white bg-orange-600 shadow-xs pointer-events-none' />
-                      <span className='absolute -bottom-1.5 -right-1.5 h-3 w-3 border-2 border-white bg-orange-600 shadow-xs pointer-events-none' />
-
-                      {/* Tag định danh loại component */}
-                      <span className='absolute -top-5 left-0 bg-orange-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow-xs pointer-events-none'>
-                        {comp.type === 'title'
-                          ? 'Tiêu đề'
-                          : comp.type === 'subtitle'
-                            ? 'Phụ đề'
-                            : comp.type === 'bullets'
-                              ? 'Danh sách ý'
-                              : comp.type === 'quote'
-                                ? 'Trích dẫn'
-                                : 'Văn bản'}
-                      </span>
-                    </>
-                  )}
-
-                  {/* NỘI DUNG COMPONENT HIỂN THỊ TRÊN CANVAS */}
-                  <div
-                    style={{
-                      fontSize: `${comp.fontSize ?? 20}px`,
-                      fontWeight: comp.fontWeight ?? 'normal',
-                      fontStyle: comp.fontStyle ?? 'normal',
-                      textDecoration: comp.textDecoration ?? 'none',
-                      textAlign: comp.textAlign ?? 'left',
-                      color: comp.color || '#064e3b',
-                      lineHeight: 1.3
-                    }}
-                    className={`w-full ${
-                      comp.fontFamily === 'display'
-                        ? 'font-display'
-                        : comp.fontFamily === 'mono'
-                          ? 'font-mono'
-                          : 'font-sans'
-                    }`}
-                  >
-                    {comp.type === 'bullets' ? (
-                      <ul className='space-y-1.5 list-disc pl-5'>
-                        {comp.content
-                          .split('\n')
-                          .filter((s) => s.trim())
-                          .map((bullet, idx) => (
-                            <li key={idx}>{bullet}</li>
-                          ))}
-                      </ul>
-                    ) : comp.type === 'quote' ? (
-                      <div className='italic border-y border-stone-300 py-3 px-2'>
-                        “ {comp.content} ”
-                      </div>
-                    ) : (
-                      <div>{comp.content}</div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Thanh công cụ quản lý slide phía dưới canvas */}
-          <div className='mt-6 flex flex-wrap justify-center gap-2 font-sans text-xs'>
-            <button
-              className='border border-stone-400 bg-white px-4 py-2 font-semibold text-stone-700 transition hover:bg-stone-100'
-              onClick={() =>
-                slide &&
-                void operation({ operation: 'duplicate', slideId: slide.id })
-              }
-            >
-              📋 Nhân bản slide
-            </button>
-            <button
-              className='border border-stone-400 bg-white px-4 py-2 font-semibold text-stone-700 transition hover:bg-stone-100 disabled:opacity-40'
-              disabled={active === 0}
-              onClick={() =>
-                slide &&
-                void operation({
-                  operation: 'move',
-                  slideId: slide.id,
-                  toIndex: Math.max(0, active - 1)
-                })
-              }
-            >
-              ← Di chuyển
-            </button>
-            <button
-              className='border border-stone-400 bg-white px-4 py-2 font-semibold text-stone-700 transition hover:bg-stone-100 disabled:opacity-40'
-              disabled={active === lecture.slides.length - 1}
-              onClick={() =>
-                slide &&
-                void operation({
-                  operation: 'move',
-                  slideId: slide.id,
-                  toIndex: Math.min(lecture.slides.length - 1, active + 1)
-                })
-              }
-            >
-              Di chuyển →
-            </button>
-            <button
-              className='border border-red-300 bg-white px-4 py-2 font-semibold text-red-700 transition hover:bg-red-50'
-              onClick={() =>
-                slide &&
-                void operation({ operation: 'delete', slideId: slide.id })
-              }
-            >
-              🗑️ Xóa slide
-            </button>
-          </div>
-        </section>
-
-        {/* Cột 3 (Phải - 320px): CHAT PANEL & BẢNG ĐỊNH DẠNG */}
-        <aside className='flex w-80 shrink-0 flex-col overflow-hidden border-l border-stone-300 bg-stone-50 font-sans'>
-          {/* Header thanh công cụ phải: Căn giữa 3 nút chọn panel */}
-          <div className='flex items-center justify-center border-b border-stone-300 bg-white px-2 py-2.5'>
-            {/* Nút chuyển đổi giữa Dàn ý, Chat Panel và Edit Panel */}
-            <div className='flex border border-stone-300 bg-stone-100 p-0.5'>
-              <button
-                type='button'
-                onClick={() => setRightPanelTab('outline')}
-                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
-                  rightPanelTab === 'outline'
-                    ? 'bg-orange-700 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-emerald-950'
-                }`}
-                title='Xem lại dàn ý bài giảng'
-              >
-                <span>📑 Dàn ý</span>
-              </button>
-              <button
-                type='button'
-                onClick={() => setRightPanelTab('chat')}
-                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
-                  rightPanelTab === 'chat'
-                    ? 'bg-orange-700 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-emerald-950'
-                }`}
-                title='Mở khung trò chuyện / gợi ý với AI'
-              >
-                <span>🤖 Chat AI</span>
-              </button>
-              <button
-                type='button'
-                onClick={() => setRightPanelTab('edit')}
-                className={`flex items-center gap-1 px-2 py-1 text-xs font-bold transition ${
-                  rightPanelTab === 'edit'
-                    ? 'bg-orange-700 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-emerald-950'
-                }`}
-                title='Chỉnh sửa định dạng phần tử trên Canvas'
-              >
-                <span>✏️ Định dạng</span>
-              </button>
-            </div>
-          </div>
-
-          {/* TAB 0: OUTLINE PANEL */}
-          {rightPanelTab === 'outline' && (
-            <div className='flex flex-1 flex-col overflow-hidden'>
-              <div className='flex items-center justify-between border-b border-stone-200 bg-white px-4 py-2.5'>
-                <div className='flex items-center gap-2'>
-                  <span className='text-xs font-bold uppercase tracking-wider text-emerald-950'>
-                    Dàn ý bài giảng
-                  </span>
-                  {lecture.outline?.sections && (
-                    <span className='rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-800'>
-                      {lecture.outline.sections.length} phần
-                    </span>
-                  )}
-                </div>
-                {lecture.outline?.sections && (
-                  <button
-                    type='button'
-                    onClick={() => setIsOutlineModalOpen(true)}
-                    className='text-stone-400 hover:text-emerald-950 p-1 text-xs transition'
-                    title='Phóng to dàn ý bài giảng'
-                  >
-                    ⤢ Phóng to
-                  </button>
-                )}
-              </div>
-
-              <div className='flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar'>
-                {lecture.outline?.sections &&
-                lecture.outline.sections.length > 0 ? (
-                  lecture.outline.sections.map((sec, idx) => {
-                    return (
-                      <div
-                        key={idx}
-                        className='border border-stone-200 bg-white p-3 shadow-2xs transition hover:border-stone-300'
-                      >
-                        <div className='flex items-baseline gap-1.5'>
-                          <span className='font-mono text-xs font-bold text-orange-700'>
-                            {String(idx + 1).padStart(2, '0')}.
-                          </span>
-                          <strong className='text-xs font-semibold text-emerald-950 font-display'>
-                            {sec.heading}
-                          </strong>
-                        </div>
-                        {sec.bullets && sec.bullets.length > 0 && (
-                          <ul className='mt-2 list-disc pl-4 text-[11px] text-stone-600 space-y-1'>
-                            {sec.bullets.map((b, bIdx) => (
-                              <li key={bIdx} className='leading-relaxed'>
-                                {b}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    )
-                  })
-                ) : (
-                  <div className='flex h-full min-h-55 flex-col items-center justify-center p-6 text-center text-stone-400'>
-                    <div className='text-3xl mb-2 opacity-60'>📑</div>
-                    <p className='text-xs font-bold text-stone-700'>
-                      Chưa có dàn ý lưu trữ
-                    </p>
-                    <p className='mt-1 text-[11px] text-stone-400 max-w-50 leading-relaxed'>
-                      Bài giảng này được tạo từ canvas trống hoặc không có thông
-                      tin dàn ý AI.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 1: CHAT PANEL */}
-          {rightPanelTab === 'chat' && (
-            <div className='flex flex-1 flex-col justify-between overflow-hidden'>
-              {/* Phần GIỮA khung bên phải: Card gợi ý & chip lệnh mẫu */}
-              <div className='flex flex-1 flex-col items-center justify-center p-5 text-center overflow-y-auto'>
-                <div className='w-full border border-stone-300 bg-white p-4 shadow-xs'>
-                  <div className='text-2xl mb-1.5'>💡</div>
-                  <p className='text-xs font-bold text-stone-700 leading-relaxed'>
-                    Nhập chỉ dẫn tự nhiên để AI hoàn thiện nội dung slide.
-                  </p>
-                  <p className='mt-1 text-[11px] text-stone-400'>
-                    AI sẽ phân tích nội dung hiện tại và áp dụng các thay đổi
-                    bạn mong muốn.
-                  </p>
-                </div>
-
-                {/* Các chip lệnh mẫu nhanh */}
-                <div className='mt-5 w-full text-left'>
-                  <span className='block mb-2 text-[10px] font-bold uppercase tracking-wider text-stone-400'>
-                    Gợi ý lệnh nhanh:
-                  </span>
-                  <div className='space-y-1.5'>
-                    {AI_SUGGESTIONS.map((sug) => (
-                      <button
-                        key={sug}
-                        type='button'
-                        onClick={() => setInstruction(sug)}
-                        className='w-full text-left border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-stone-600 transition hover:border-orange-700 hover:bg-orange-50/60'
-                      >
-                        ✦ {sug}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Phần DƯỚI CÙNG: Input textarea và nút Áp dụng AI */}
-              <div className='mt-auto border-t border-stone-300 bg-white p-4'>
-                <label
-                  htmlFor='ai-instruction-input'
-                  className='block text-[10px] font-bold uppercase tracking-wider text-stone-600 mb-1.5'
-                >
-                  Chỉ dẫn cho AI:
-                </label>
-                <textarea
-                  id='ai-instruction-input'
-                  className='w-full resize-none border border-stone-300 bg-stone-50 p-2.5 text-xs outline-orange-700 font-sans'
-                  rows={3}
-                  value={instruction}
-                  onChange={(event) => setInstruction(event.target.value)}
-                  placeholder='Ví dụ: Rút gọn thành 3 ý chính dễ nhớ...'
-                />
-                <button
-                  type='button'
-                  className='mt-2.5 flex w-full items-center justify-center gap-2 bg-orange-700 py-2.5 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800 active:translate-y-0.5 disabled:opacity-50'
-                  onClick={() => void aiEdit()}
-                  disabled={!instruction.trim() || isAiLoading}
-                >
-                  {isAiLoading ? 'Đang phân tích và xử lý...' : 'Áp dụng AI'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: EDIT PANEL (ĐỊNH DẠNG) */}
-          {rightPanelTab === 'edit' && (
-            <div className='flex-1 overflow-y-auto p-4 space-y-4 text-xs font-sans'>
-              {selectedComponent ? (
-                /* KHI CÓ COMPONENT ĐANG ĐƯỢC CHỌN */
-                <div className='space-y-4'>
-                  <div className='border-b border-stone-200 pb-2.5 flex items-center justify-between'>
-                    <div>
-                      <span className='font-bold uppercase tracking-wider text-emerald-950 text-xs block'>
-                        Định dạng thành phần
-                      </span>
-                      <span className='text-[10px] text-stone-400 font-mono'>
-                        Vị trí: X: {selectedComponent.x}%, Y:{' '}
-                        {selectedComponent.y}%
-                      </span>
-                    </div>
-                    <span className='bg-orange-100 text-orange-900 border border-orange-300 px-2 py-0.5 text-[10px] font-bold uppercase'>
-                      {selectedComponent.type}
-                    </span>
-                  </div>
-
-                  {/* CỠ CHỮ & TĂNG GIẢM */}
-                  <div className='border border-stone-300 bg-white p-3 space-y-2'>
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600'>
-                      Cỡ chữ (Font Size)
-                    </span>
-                    <div className='flex items-center gap-2'>
-                      <button
-                        type='button'
-                        onClick={() =>
-                          updateComponent(selectedComponent.id, {
-                            fontSize: Math.max(
-                              12,
-                              (selectedComponent.fontSize ?? 20) - 2
-                            )
-                          })
-                        }
-                        className='h-8 w-8 border border-stone-300 bg-stone-100 font-bold hover:bg-stone-200 text-sm'
-                        title='Giảm cỡ chữ'
-                      >
-                        -
-                      </button>
-                      <input
-                        type='number'
-                        className='h-8 flex-1 border border-stone-300 px-2 text-center text-xs font-mono font-bold'
-                        value={selectedComponent.fontSize ?? 20}
-                        onChange={(e) =>
-                          updateComponent(selectedComponent.id, {
-                            fontSize: Math.max(8, Number(e.target.value) || 20)
-                          })
-                        }
-                      />
-                      <button
-                        type='button'
-                        onClick={() =>
-                          updateComponent(selectedComponent.id, {
-                            fontSize: Math.min(
-                              96,
-                              (selectedComponent.fontSize ?? 20) + 2
-                            )
-                          })
-                        }
-                        className='h-8 w-8 border border-stone-300 bg-stone-100 font-bold hover:bg-stone-200 text-sm'
-                        title='Tăng cỡ chữ'
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* KIỂU CHỮ (BOLD / ITALIC / UNDERLINE) */}
-                  <div className='border border-stone-300 bg-white p-3 space-y-2'>
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600'>
-                      Kiểu chữ & Căn lề
-                    </span>
-                    <div className='grid grid-cols-2 gap-2'>
-                      {/* Đậm, Nghiêng, Gạch chân */}
-                      <div className='flex border border-stone-300'>
-                        <button
-                          type='button'
-                          onClick={() =>
-                            updateComponent(selectedComponent.id, {
-                              fontWeight:
-                                selectedComponent.fontWeight === 'bold'
-                                  ? 'normal'
-                                  : 'bold'
-                            })
-                          }
-                          className={`flex-1 py-1.5 text-center font-bold text-xs transition ${
-                            selectedComponent.fontWeight === 'bold'
-                              ? 'bg-emerald-950 text-white'
-                              : 'bg-stone-50 text-stone-700 hover:bg-stone-200'
-                          }`}
-                          title='In đậm'
-                        >
-                          B
-                        </button>
-                        <button
-                          type='button'
-                          onClick={() =>
-                            updateComponent(selectedComponent.id, {
-                              fontStyle:
-                                selectedComponent.fontStyle === 'italic'
-                                  ? 'normal'
-                                  : 'italic'
-                            })
-                          }
-                          className={`flex-1 py-1.5 text-center italic font-bold text-xs border-x border-stone-300 transition ${
-                            selectedComponent.fontStyle === 'italic'
-                              ? 'bg-emerald-950 text-white'
-                              : 'bg-stone-50 text-stone-700 hover:bg-stone-200'
-                          }`}
-                          title='In nghiêng'
-                        >
-                          I
-                        </button>
-                        <button
-                          type='button'
-                          onClick={() =>
-                            updateComponent(selectedComponent.id, {
-                              textDecoration:
-                                selectedComponent.textDecoration === 'underline'
-                                  ? 'none'
-                                  : 'underline'
-                            })
-                          }
-                          className={`flex-1 py-1.5 text-center underline font-bold text-xs transition ${
-                            selectedComponent.textDecoration === 'underline'
-                              ? 'bg-emerald-950 text-white'
-                              : 'bg-stone-50 text-stone-700 hover:bg-stone-200'
-                          }`}
-                          title='Gạch chân'
-                        >
-                          U
-                        </button>
-                      </div>
-
-                      {/* Căn lề: Trái / Giữa / Phải */}
-                      <div className='flex border border-stone-300'>
-                        {(['left', 'center', 'right'] as const).map((align) => (
-                          <button
-                            key={align}
-                            type='button'
-                            onClick={() =>
-                              updateComponent(selectedComponent.id, {
-                                textAlign: align
-                              })
-                            }
-                            className={`flex-1 py-1.5 text-center text-xs font-semibold transition ${
-                              (selectedComponent.textAlign || 'left') === align
-                                ? 'bg-orange-700 text-white font-bold'
-                                : 'bg-stone-50 text-stone-600 hover:bg-stone-200'
-                            }`}
-                            title={
-                              align === 'left'
-                                ? 'Căn trái'
-                                : align === 'center'
-                                  ? 'Căn giữa'
-                                  : 'Căn phải'
-                            }
-                          >
-                            {align === 'left'
-                              ? '⬅'
-                              : align === 'center'
-                                ? '⬌'
-                                : '➡'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* BẢNG MÀU CHỮ & PHÔNG CHỮ */}
-                  <div className='border border-stone-300 bg-white p-3 space-y-2.5'>
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600'>
-                      Màu sắc chữ
-                    </span>
-                    <div className='flex items-center gap-2'>
-                      {COLOR_SWATCHES.map((swatch) => (
-                        <button
-                          key={swatch.value}
-                          type='button'
-                          onClick={() =>
-                            updateComponent(selectedComponent.id, {
-                              color: swatch.value
-                            })
-                          }
-                          style={{ backgroundColor: swatch.value }}
-                          className={`h-6 w-6 border transition ${
-                            selectedComponent.color === swatch.value
-                              ? 'ring-2 ring-orange-600 ring-offset-1 border-stone-400'
-                              : 'border-stone-300 hover:scale-110'
-                          }`}
-                          title={swatch.name}
-                        />
-                      ))}
-                    </div>
-
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600 pt-1'>
-                      Kiểu phông
-                    </span>
-                    <div className='flex border border-stone-300'>
-                      {(['display', 'sans', 'mono'] as const).map((font) => (
-                        <button
-                          key={font}
-                          type='button'
-                          onClick={() =>
-                            updateComponent(selectedComponent.id, {
-                              fontFamily: font
-                            })
-                          }
-                          className={`flex-1 py-1.5 text-center text-[11px] transition ${
-                            (selectedComponent.fontFamily || 'sans') === font
-                              ? 'bg-emerald-950 text-white font-bold'
-                              : 'bg-stone-50 text-stone-600 hover:bg-stone-200'
-                          }`}
-                        >
-                          {font === 'display'
-                            ? 'Lora Serif'
-                            : font === 'mono'
-                              ? 'Mono'
-                              : 'Inter Sans'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* NỘI DUNG VĂN BẢN CỦA COMPONENT */}
-                  <div className='border border-stone-300 bg-white p-3 space-y-1.5'>
-                    <span className='block text-[10px] font-bold uppercase tracking-wider text-stone-600'>
-                      Nội dung văn bản
-                    </span>
-                    <textarea
-                      className='w-full border border-stone-300 p-2 text-xs outline-orange-700 font-sans'
-                      rows={4}
-                      value={selectedComponent.content}
-                      onChange={(e) =>
-                        updateComponent(selectedComponent.id, {
-                          content: e.target.value
-                        })
-                      }
-                      placeholder='Nhập nội dung...'
-                    />
-                  </div>
-
-                  {/* HÀNH ĐỘNG: NHÂN BẢN & XÓA */}
-                  <div className='flex gap-2 pt-1'>
-                    <button
-                      type='button'
-                      onClick={() => duplicateComponent(selectedComponent)}
-                      className='flex-1 border border-stone-300 bg-white py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition'
-                    >
-                      📋 Nhân bản
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => deleteComponent(selectedComponent.id)}
-                      className='flex-1 border border-red-300 bg-red-50 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition'
-                    >
-                      🗑️ Xóa thành phần
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* KHI CHƯA CHỌN COMPONENT NÀO: HIỂN THỊ CÁC NÚT THÊM MỚI VÀ CÀI ĐẶT CHUNG */
-                <div className='space-y-4'>
-                  <div className='border-b border-stone-200 pb-2.5'>
-                    <span className='font-bold uppercase tracking-wider text-emerald-950 text-xs block'>
-                      Canvas & Thêm thành phần
-                    </span>
-                    <p className='text-xs text-stone-500 mt-1'>
-                      Click vào bất kỳ phần tử nào trên canvas để kéo thả vị trí
-                      hoặc chọn thêm mới bên dưới:
-                    </p>
-                  </div>
-
-                  {/* CÁC NÚT THÊM COMPONENT MỚI */}
-                  <div className='space-y-2'>
-                    <button
-                      type='button'
-                      onClick={() => addComponent('title')}
-                      className='flex w-full items-center justify-between border border-stone-300 bg-white p-3 hover:border-orange-700 hover:bg-orange-50/50 transition font-medium'
-                    >
-                      <span>+ Thêm Tiêu đề (Heading)</span>
-                      <span className='text-stone-400 text-[10px] font-mono'>
-                        H1
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => addComponent('subtitle')}
-                      className='flex w-full items-center justify-between border border-stone-300 bg-white p-3 hover:border-orange-700 hover:bg-orange-50/50 transition font-medium'
-                    >
-                      <span>+ Thêm Phụ đề (Subtitle)</span>
-                      <span className='text-stone-400 text-[10px] font-mono'>
-                        H2
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => addComponent('text')}
-                      className='flex w-full items-center justify-between border border-stone-300 bg-white p-3 hover:border-orange-700 hover:bg-orange-50/50 transition font-medium'
-                    >
-                      <span>+ Thêm Đoạn văn bản (Text)</span>
-                      <span className='text-stone-400 text-[10px] font-mono'>
-                        Paragraph
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => addComponent('bullets')}
-                      className='flex w-full items-center justify-between border border-stone-300 bg-white p-3 hover:border-orange-700 hover:bg-orange-50/50 transition font-medium'
-                    >
-                      <span>+ Thêm Danh sách ý (Bullets)</span>
-                      <span className='text-stone-400 text-[10px] font-mono'>
-                        List
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => addComponent('quote')}
-                      className='flex w-full items-center justify-between border border-stone-300 bg-white p-3 hover:border-orange-700 hover:bg-orange-50/50 transition font-medium'
-                    >
-                      <span>+ Thêm Khung trích dẫn (Quote)</span>
-                      <span className='text-stone-400 text-[10px] font-mono'>
-                        Quote
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </aside>
-      </div>
-    </main>
+    </div>
   )
 }

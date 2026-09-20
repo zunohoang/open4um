@@ -1,40 +1,40 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 @theme {
-  --font-display: 'Lora', Georgia, 'Times New Roman', serif;
-  --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
-  --color-brand-ink: #173c39;
-  --color-brand-paper: #f5f1e8;
-  --color-brand-rust: #c45b3f;
+    --font-display: "Lora", Georgia, "Times New Roman", serif;
+    --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+    --color-brand-ink: #173c39;
+    --color-brand-paper: #f5f1e8;
+    --color-brand-rust: #c45b3f;
 }
 
 @layer base {
-  body {
-    @apply m-0 min-w-80 bg-brand-paper font-display text-brand-ink;
-  }
+    body {
+        @apply m-0 min-w-80 bg-brand-paper font-display text-brand-ink;
+    }
 
-  button {
-    @apply cursor-pointer;
-  }
+    button {
+        @apply cursor-pointer;
+    }
 }
 
 /* Custom scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+    width: 6px;
+    height: 6px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #d6d3d1; /* stone-300 */
-  border-radius: 9999px;
+    background: #c45b3f; /* brand-rust */
+    border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #a8a29e; /* stone-400 */
+    background: #b04f35;
 }
 .custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: #d6d3d1 transparent;
+    scrollbar-width: thin;
+    scrollbar-color: #c45b3f transparent;
 }
-
