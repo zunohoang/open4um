@@ -8,6 +8,8 @@ import {
 const baseEnv = {
   NODE_ENV: 'production',
   PORT: '4000',
+  RELEASE_SHA: '0123456789abcdef0123456789abcdef01234567',
+  RELEASE_ENVIRONMENT: 'production',
   CORS_ALLOWED_ORIGINS:
     'https://slides.sbltcup.dev, https://slides-cup.sbltcup.dev',
   MONGO_URI: 'mongodb://localhost:27017/abslider',
@@ -105,6 +107,34 @@ describe('production admin environment', () => {
     } catch (error) {
       expect(issuePaths(error)).toContain('MINIO_PUBLIC_ENDPOINT')
     }
+  })
+
+  it('bắt buộc release provenance hợp lệ trong production', () => {
+    try {
+      parseEnv({
+        ...baseEnv,
+        RELEASE_SHA: '',
+        RELEASE_ENVIRONMENT: '',
+        ADMIN_EMAIL: 'owner@example.com',
+        ADMIN_PASSWORD: 'Strong!Password123'
+      })
+      throw new Error('Expected environment validation to fail')
+    } catch (error) {
+      expect(issuePaths(error)).toEqual(
+        expect.arrayContaining(['RELEASE_SHA', 'RELEASE_ENVIRONMENT'])
+      )
+    }
+  })
+
+  it('từ chối release SHA sai định dạng', () => {
+    expect(() =>
+      parseEnv({
+        ...baseEnv,
+        RELEASE_SHA: 'latest',
+        ADMIN_EMAIL: 'owner@example.com',
+        ADMIN_PASSWORD: 'Strong!Password123'
+      })
+    ).toThrow(ZodError)
   })
 
   it('giữ fallback seed mặc định cho development khi biến admin để trống', () => {

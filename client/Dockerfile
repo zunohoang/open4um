@@ -9,10 +9,17 @@ COPY . .
 
 ARG VITE_API_BASE_URL
 ARG VITE_ENABLE_EMAIL_VERIFICATION=true
+ARG RELEASE_SHA
+ARG RELEASE_ENVIRONMENT
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_ENABLE_EMAIL_VERIFICATION=${VITE_ENABLE_EMAIL_VERIFICATION}
 
-RUN test -n "$VITE_API_BASE_URL" && npm run build
+RUN test -n "$VITE_API_BASE_URL" \
+  && printf '%s' "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+  && printf '%s' "$RELEASE_ENVIRONMENT" | grep -Eq '^(develop|production)$' \
+  && npm run build \
+  && printf '{"sha":"%s","environment":"%s"}\n' \
+    "$RELEASE_SHA" "$RELEASE_ENVIRONMENT" > dist/version.json
 
 FROM ${NGINX_IMAGE} AS runtime
 COPY nginx.conf /etc/nginx/nginx.conf

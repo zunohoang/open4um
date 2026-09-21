@@ -38,6 +38,22 @@ const optionalUrl = z.preprocess(
   z.string().url().optional()
 )
 
+const optionalReleaseSha = z.preprocess(
+  emptyStringToUndefined,
+  z
+    .string()
+    .regex(
+      /^[0-9a-f]{40}$/,
+      'RELEASE_SHA must be a 40-character lowercase Git SHA'
+    )
+    .optional()
+)
+
+const optionalReleaseEnvironment = z.preprocess(
+  emptyStringToUndefined,
+  z.enum(['develop', 'production']).optional()
+)
+
 const booleanString = z
   .enum(['true', 'false'])
   .default('false')
@@ -56,6 +72,8 @@ const envSchema = z
     PORT: z.coerce.number().default(4000),
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    RELEASE_SHA: optionalReleaseSha,
+    RELEASE_ENVIRONMENT: optionalReleaseEnvironment,
     CORS_ALLOWED_ORIGINS: commaSeparatedOrigins,
     MONGO_URI: z.string().url(),
     REDIS_URL: z.string().url(),
@@ -95,6 +113,22 @@ const envSchema = z
     }
 
     if (values.NODE_ENV !== 'production') return
+
+    if (!values.RELEASE_SHA) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RELEASE_SHA'],
+        message: 'RELEASE_SHA is required in production'
+      })
+    }
+
+    if (!values.RELEASE_ENVIRONMENT) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RELEASE_ENVIRONMENT'],
+        message: 'RELEASE_ENVIRONMENT is required in production'
+      })
+    }
 
     for (const origin of values.CORS_ALLOWED_ORIGINS) {
       const url = new URL(origin)
