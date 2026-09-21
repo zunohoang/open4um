@@ -1,4 +1,6 @@
 process.env.NODE_ENV = 'test'
+delete process.env.RELEASE_SHA
+delete process.env.RELEASE_ENVIRONMENT
 process.env.PORT = '4000'
 process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173'
 process.env.MONGO_URI = 'mongodb://localhost:27017'
