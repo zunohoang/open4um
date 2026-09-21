@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 export PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 unset DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH
@@ -191,6 +191,7 @@ internal_checks() {
 rollback() {
   local failed_status="$?"
   local rollback_status=0
+  local cleanup_status=0
   trap - ERR
   set +e
 
@@ -214,9 +215,28 @@ rollback() {
   fi
 
   if [[ "$rollback_status" -eq 0 ]]; then
+    rm -f -- "${current_link}.new"
+    cleanup_status="$?"
+  fi
+  if [[ "$rollback_status" -eq 0 && "$cleanup_status" -eq 0 ]]; then
+    rm -f -- "$candidate_manifest"
+    cleanup_status="$?"
+    if [[ "$cleanup_status" -eq 0 ]]; then
+      rmdir -- "$candidate_dir"
+      cleanup_status="$?"
+    fi
+  fi
+
+  if [[ "$rollback_status" -eq 0 && "$cleanup_status" -eq 0 ]]; then
     printf 'ROLLBACK_SUCCEEDED environment=%s restored_sha=%s\n' \
       "$release_environment" "${previous_sha:-none}" >&2
     exit "$failed_status"
+  fi
+
+  if [[ "$rollback_status" -eq 0 ]]; then
+    printf 'ROLLBACK_CLEANUP_FAILED environment=%s candidate_sha=%s\n' \
+      "$release_environment" "$release_sha" >&2
+    exit 70
   fi
 
   printf 'ROLLBACK_FAILED environment=%s candidate_sha=%s previous_sha=%s\n' \

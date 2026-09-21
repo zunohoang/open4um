@@ -42,6 +42,8 @@ extract_function() {
 }
 
 bash -n "$deploy_script" "$smoke_script"
+grep -Fx 'set -Eeuo pipefail' "$deploy_script" >/dev/null ||
+  fail 'deploy wrapper must inherit ERR traps inside functions'
 
 normalizer_source="$(extract_function normalize_registry_reference)"
 verifier_source="$(extract_function verify_pulled_digest)"

@@ -22,7 +22,7 @@ RUN test -n "$VITE_API_BASE_URL" \
     "$RELEASE_SHA" "$RELEASE_ENVIRONMENT" > dist/version.json
 
 FROM ${NGINX_IMAGE} AS runtime
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 USER nginx
