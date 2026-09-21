@@ -289,10 +289,19 @@ export const duplicateLecture = async (userId: string, id: string) => {
   const slides = JSON.parse(JSON.stringify(source.slides)) as Array<
     Record<string, unknown>
   >
-  const clonedSlides = slides.map((slide) => ({
-    ...slide,
-    id: `slide-${crypto.randomUUID()}`
-  }))
+  const clonedSlides = slides.map((slide) => {
+    const components = Array.isArray(slide.components)
+      ? (slide.components as Array<Record<string, unknown>>).map((comp) => ({
+          ...comp,
+          id: `comp-${crypto.randomUUID()}`
+        }))
+      : slide.components
+    return {
+      ...slide,
+      id: `slide-${crypto.randomUUID()}`,
+      ...(components !== undefined ? { components } : {})
+    }
+  })
   return LectureModel.create({
     userId,
     folderId: source.folderId,
@@ -336,9 +345,22 @@ export const applySlideOperation = async (
   } else if (operation.operation === 'delete') {
     slides.splice(sourceIndex, 1)
   } else if (operation.operation === 'duplicate') {
+    const sourceSlide = slides[sourceIndex]
+    const clonedComponents = Array.isArray(sourceSlide.components)
+      ? (sourceSlide.components as Array<Record<string, unknown>>).map(
+          (comp) => ({
+            ...comp,
+            id: `comp-${crypto.randomUUID()}`
+          })
+        )
+      : sourceSlide.components
+
     const clone = {
-      ...slides[sourceIndex],
-      id: `slide-${crypto.randomUUID()}`
+      ...sourceSlide,
+      id: `slide-${crypto.randomUUID()}`,
+      ...(clonedComponents !== undefined
+        ? { components: clonedComponents }
+        : {})
     }
     slides.splice(sourceIndex + 1, 0, clone)
   } else if (operation.operation === 'update') {
