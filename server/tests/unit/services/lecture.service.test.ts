@@ -67,7 +67,8 @@ import {
   createLecture,
   createBlankLecture,
   getLecture,
-  hardDeleteLecture
+  hardDeleteLecture,
+  applySlideOperation
 } from '@/services/lecture.service'
 
 describe('lecture.service unit tests', () => {
@@ -452,6 +453,149 @@ describe('lecture.service unit tests', () => {
         userId: 'user-1'
       })
       expect(result).toEqual({ message: 'Đã xóa vĩnh viễn bài giảng' })
+    })
+  })
+
+  describe('applySlideOperation', () => {
+    it('thêm slide mới thành công tại chỉ số chỉ định', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1',
+        slides: [{ id: 's1', title: 'Slide 1' }],
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+
+      const result = await applySlideOperation('user-1', 'lecture-123', {
+        operation: 'add',
+        index: 1
+      })
+
+      expect(mockLecture.set).toHaveBeenCalledWith(
+        'slides',
+        expect.arrayContaining([
+          expect.objectContaining({ id: 's1' }),
+          expect.objectContaining({
+            id: expect.stringMatching(/^slide-/),
+            title: '',
+            bullets: []
+          })
+        ])
+      )
+      expect(mockLecture.save).toHaveBeenCalled()
+      expect(result).toBe(mockLecture)
+    })
+
+    it('ném lỗi 400 khi cố xóa slide duy nhất còn lại', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1',
+        slides: [{ id: 's1', title: 'Slide 1' }],
+        set: jest.fn(),
+        save: jest.fn()
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+
+      await expect(
+        applySlideOperation('user-1', 'lecture-123', {
+          operation: 'delete',
+          slideId: 's1'
+        })
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Bài giảng phải có ít nhất một slide'
+      })
+      expect(mockLecture.save).not.toHaveBeenCalled()
+    })
+
+    it('xóa slide thành công khi bài giảng có nhiều hơn 1 slide', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1',
+        slides: [
+          { id: 's1', title: 'Slide 1' },
+          { id: 's2', title: 'Slide 2' }
+        ],
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+
+      await applySlideOperation('user-1', 'lecture-123', {
+        operation: 'delete',
+        slideId: 's1'
+      })
+
+      expect(mockLecture.set).toHaveBeenCalledWith('slides', [
+        { id: 's2', title: 'Slide 2' }
+      ])
+      expect(mockLecture.save).toHaveBeenCalled()
+    })
+
+    it('nhân bản slide và tự động tạo mới ID cho các component con', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1',
+        slides: [
+          {
+            id: 's1',
+            title: 'Slide 1',
+            components: [
+              { id: 'comp-old-1', type: 'title', content: 'Tiêu đề' },
+              { id: 'comp-old-2', type: 'bullets', content: 'Ý 1' }
+            ]
+          }
+        ],
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+
+      await applySlideOperation('user-1', 'lecture-123', {
+        operation: 'duplicate',
+        slideId: 's1'
+      })
+
+      const updatedSlides = mockLecture.set.mock.calls[0][1]
+      expect(updatedSlides).toHaveLength(2)
+      expect(updatedSlides[0].id).toBe('s1')
+      expect(updatedSlides[1].id).toMatch(/^slide-/)
+      expect(updatedSlides[1].id).not.toBe('s1')
+      // Đảm bảo components của slide nhân bản có ID mới khác với bản gốc
+      expect(updatedSlides[1].components[0].id).toMatch(/^comp-/)
+      expect(updatedSlides[1].components[0].id).not.toBe('comp-old-1')
+      expect(updatedSlides[1].components[1].id).toMatch(/^comp-/)
+      expect(updatedSlides[1].components[1].id).not.toBe('comp-old-2')
+      expect(updatedSlides[1].components[0].content).toBe('Tiêu đề')
+    })
+
+    it('di chuyển slide đến vị trí đích chính xác', async () => {
+      const mockLecture = {
+        _id: 'lecture-123',
+        userId: 'user-1',
+        slides: [
+          { id: 's1', title: 'Slide 1' },
+          { id: 's2', title: 'Slide 2' },
+          { id: 's3', title: 'Slide 3' }
+        ],
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+
+      await applySlideOperation('user-1', 'lecture-123', {
+        operation: 'move',
+        slideId: 's1',
+        toIndex: 2
+      })
+
+      const updatedSlides = mockLecture.set.mock.calls[0][1]
+      expect(updatedSlides.map((s: { id: string }) => s.id)).toEqual([
+        's2',
+        's3',
+        's1'
+      ])
     })
   })
 })
