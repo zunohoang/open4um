@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ "$#" -eq 2 ]] || fail 'usage: smoke-abslider <develop|production> <commit-sha>'
+
+readonly release_environment="$1"
+readonly release_sha="$2"
+
+[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'commit SHA must contain exactly 40 lowercase hex characters'
+
+case "$release_environment" in
+  develop)
+    readonly frontend_origin='https://dev-slides.sbltcup.dev'
+    readonly api_origin='https://dev-slides-api.sbltcup.dev'
+    readonly media_origin='https://dev-slides-media.sbltcup.dev'
+    ;;
+  production)
+    readonly frontend_origin='https://slides.sbltcup.dev'
+    readonly api_origin='https://slides-api.sbltcup.dev'
+    readonly media_origin='https://slides-media.sbltcup.dev'
+    ;;
+  *)
+    fail "unsupported environment: ${release_environment}"
+    ;;
+esac
+
+readonly temporary_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf -- "$temporary_dir"
+}
+trap cleanup EXIT
+
+curl_common=(
+  --fail
+  --silent
+  --show-error
+  --connect-timeout 10
+  --max-time 30
+)
+
+curl "${curl_common[@]}" --output /dev/null "${frontend_origin}/"
+curl "${curl_common[@]}" --output /dev/null "${frontend_origin}/health"
+curl "${curl_common[@]}" --output "${temporary_dir}/frontend-version.json" "${frontend_origin}/version.json"
+curl "${curl_common[@]}" --output "${temporary_dir}/backend-live.json" "${api_origin}/api/v1/health/live"
+curl "${curl_common[@]}" --output "${temporary_dir}/backend-ready.json" "${api_origin}/api/v1/health/ready"
+curl "${curl_common[@]}" --output /dev/null "${media_origin}/minio/health/live"
+
+python3 - \
+  "${temporary_dir}/frontend-version.json" \
+  "${temporary_dir}/backend-live.json" \
+  "${temporary_dir}/backend-ready.json" \
+  "$release_sha" \
+  "$release_environment" <<'PY'
+import json
+import sys
+
+frontend_path, live_path, ready_path, expected_sha, expected_environment = sys.argv[1:]
+
+with open(frontend_path, encoding="utf-8") as stream:
+    frontend = json.load(stream)
+with open(live_path, encoding="utf-8") as stream:
+    live = json.load(stream)
+with open(ready_path, encoding="utf-8") as stream:
+    ready = json.load(stream)
+
+assert frontend == {
+    "sha": expected_sha,
+    "environment": expected_environment,
+}
+
+for payload in (live, ready):
+    assert payload["data"]["release"] == {
+        "sha": expected_sha,
+        "environment": expected_environment,
+    }
+
+assert live["success"] is True
+assert live["data"]["status"] == "ok"
+assert ready["success"] is True
+assert ready["data"]["status"] == "ready"
+assert ready["data"]["checks"] == {
+    "mongo": "up",
+    "redis": "up",
+    "minio": "up",
+}
+PY
+
+curl "${curl_common[@]}" \
+  --dump-header "${temporary_dir}/allowed-origin.headers" \
+  --output /dev/null \
+  --header "Origin: ${frontend_origin}" \
+  "${api_origin}/api/v1/health/live"
+
+tr -d '\r' <"${temporary_dir}/allowed-origin.headers" |
+  grep -Fxi "access-control-allow-origin: ${frontend_origin}" >/dev/null ||
+  fail 'expected frontend origin was not allowed by CORS'
+
+curl "${curl_common[@]}" \
+  --dump-header "${temporary_dir}/foreign-origin.headers" \
+  --output /dev/null \
+  --header 'Origin: https://foreign.invalid' \
+  "${api_origin}/api/v1/health/live"
+
+if tr -d '\r' <"${temporary_dir}/foreign-origin.headers" |
+  grep -qi '^access-control-allow-origin:'; then
+  fail 'foreign origin unexpectedly received an allow-origin header'
+fi
+
+for hostname in \
+  "${frontend_origin#https://}" \
+  "${api_origin#https://}" \
+  "${media_origin#https://}"; do
+  redirect="$({
+    curl \
+      --silent \
+      --show-error \
+      --output /dev/null \
+      --connect-timeout 10 \
+      --max-time 30 \
+      --write-out '%{http_code} %{redirect_url}' \
+      "http://${hostname}/"
+  })"
+  status="${redirect%% *}"
+  target="${redirect#* }"
+
+  case "$status" in
+    301|302|307|308) ;;
+    *) fail "HTTP did not redirect for ${hostname}: ${status}" ;;
+  esac
+  [[ "$target" == "https://${hostname}/"* ]] || fail "unexpected redirect target for ${hostname}"
+done
+
+printf 'SMOKE_OK environment=%s sha=%s\n' "$release_environment" "$release_sha"

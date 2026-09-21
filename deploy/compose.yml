@@ -24,6 +24,7 @@ services:
       start_period: 20s
     security_opt:
       - no-new-privileges:true
+    mem_limit: ${MONGO_MEMORY_LIMIT:-640m}
     logging: &default-logging
       driver: json-file
       options:
@@ -43,6 +44,7 @@ services:
       retries: 12
     security_opt:
       - no-new-privileges:true
+    mem_limit: ${REDIS_MEMORY_LIMIT:-160m}
     logging: *default-logging
 
   minio:
@@ -69,6 +71,7 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    mem_limit: ${MINIO_MEMORY_LIMIT:-384m}
     logging: *default-logging
 
   server:
@@ -79,6 +82,8 @@ services:
       PORT: "4000"
       HEALTH_CHECK_TIMEOUT_MS: ${HEALTH_CHECK_TIMEOUT_MS:-3000}
       SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
+      RELEASE_SHA: ${RELEASE_SHA:?set RELEASE_SHA}
+      RELEASE_ENVIRONMENT: ${RELEASE_ENVIRONMENT:?set RELEASE_ENVIRONMENT}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS}
       MONGO_URI: ${MONGO_URI:?set MONGO_URI}
       REDIS_URL: redis://redis:6379
@@ -107,6 +112,7 @@ services:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
+    mem_limit: ${SERVER_MEMORY_LIMIT:-512m}
     stop_grace_period: 20s
     logging: *default-logging
 
@@ -120,6 +126,7 @@ services:
       - /tmp:size=16m,mode=1777
     security_opt:
       - no-new-privileges:true
+    mem_limit: ${CLIENT_MEMORY_LIMIT:-128m}
     logging: *default-logging
 
 volumes:

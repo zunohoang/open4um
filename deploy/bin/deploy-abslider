@@ -7,17 +7,29 @@ unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 readonly install_root='/opt/abslider'
 readonly compose_file="${install_root}/shared/compose.yml"
-readonly lock_file="${install_root}/shared/deploy.lock"
+readonly smoke_script="${install_root}/bin/smoke-abslider"
+readonly releases_root="${install_root}/releases"
+readonly lock_file="${releases_root}/.deploy.lock"
 readonly registry_prefix='docker.io/ducchert87'
+readonly minimum_free_disk_kb=2097152
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
 
-if [[ "$#" -ne 4 ]]; then
-  fail 'usage: deploy-abslider <develop|production> <commit-sha> <client-digest-ref> <server-digest-ref>'
-fi
+assert_trusted_file() {
+  local path="$1"
+  local expected_owner="$2"
+  local expected_mode="$3"
+
+  [[ -f "$path" && ! -L "$path" ]] || fail "trusted file is missing or not regular: ${path}"
+  [[ "$(stat --format='%U:%G' "$path")" == "$expected_owner" ]] || fail "unexpected owner for ${path}"
+  [[ "$(stat --format='%a' "$path")" == "$expected_mode" ]] || fail "unexpected mode for ${path}"
+  [[ ! -w "$path" ]] || fail "trusted file is writable by abslider-deploy: ${path}"
+}
+
+[[ "$#" -eq 4 ]] || fail 'usage: deploy-abslider <develop|production> <commit-sha> <client-digest-ref> <server-digest-ref>'
 
 readonly release_environment="$1"
 readonly release_sha="$2"
@@ -43,12 +55,12 @@ esac
 [[ "${server_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'invalid server digest reference'
 
 readonly secret_file="${install_root}/shared/${release_environment}.env"
-readonly environment_root="${install_root}/releases/${release_environment}"
+readonly environment_root="${releases_root}/${release_environment}"
 readonly client_digest="${client_image##*@sha256:}"
 readonly server_digest="${server_image##*@sha256:}"
 readonly release_id="${release_sha}-${client_digest:0:12}-${server_digest:0:12}"
 readonly candidate_dir="${environment_root}/${release_id}"
-readonly candidate_images="${candidate_dir}/images.env"
+readonly candidate_manifest="${candidate_dir}/release.env"
 readonly current_link="${environment_root}/current"
 
 [[ "$(id -un)" == 'abslider-deploy' ]] || fail 'wrapper must run as abslider-deploy'
@@ -57,101 +69,155 @@ readonly rootless_socket="${DOCKER_HOST#unix://}"
 [[ "$rootless_socket" == "/run/user/${EUID}/docker.sock" ]] || fail 'unexpected rootless Docker socket path'
 [[ -S "$rootless_socket" ]] || fail 'rootless Docker socket is unavailable'
 docker info --format '{{json .SecurityOptions}}' | grep -q 'name=rootless' || fail 'Docker daemon is not rootless'
-[[ -f "$0" && ! -L "$0" ]] || fail 'deployment wrapper must be a regular file, not a symlink'
-[[ "$(stat --format='%U:%G' "$0")" == 'root:root' ]] || fail 'deployment wrapper must be owned by root:root'
-[[ ! -w "$0" ]] || fail 'deployment wrapper must not be writable by abslider-deploy'
-[[ -f "$compose_file" && ! -L "$compose_file" ]] || fail "missing trusted Compose file: ${compose_file}"
-[[ -f "$secret_file" && ! -L "$secret_file" ]] || fail "missing secret environment file: ${secret_file}"
-[[ ! -w "$compose_file" ]] || fail 'trusted Compose file must not be writable by abslider-deploy'
-[[ ! -w "$secret_file" ]] || fail 'secret environment file must not be writable by abslider-deploy'
 
-install -d -m 0750 "$environment_root"
-install -d -m 0750 "$candidate_dir"
+assert_trusted_file "$0" 'root:root' '755'
+assert_trusted_file "$compose_file" 'root:root' '644'
+assert_trusted_file "$smoke_script" 'root:root' '755'
+assert_trusted_file "$secret_file" 'root:abslider-deploy' '640'
+
+if grep -Eq '^(ABSLIDER_(CLIENT|SERVER)_IMAGE|RELEASE_(SHA|ENVIRONMENT))=' "$secret_file"; then
+  fail 'secret environment file must not override release manifest values'
+fi
+
+[[ -d "$releases_root" && ! -L "$releases_root" ]] || fail "missing releases root: ${releases_root}"
+[[ -w "$releases_root" ]] || fail 'releases root is not writable by abslider-deploy'
 
 exec 9>"$lock_file"
 flock --exclusive --wait 30 9 || fail 'another ABSlider deployment is running'
 
+readonly available_disk_kb="$(df --output=avail -k "$releases_root" | tail -n 1 | tr -d '[:space:]')"
+[[ "$available_disk_kb" =~ ^[0-9]+$ ]] || fail 'could not determine available disk space'
+(( available_disk_kb >= minimum_free_disk_kb )) || fail 'less than 2 GiB disk is available for deployment'
+
+install -d -m 0750 "$environment_root"
+[[ ! -e "$candidate_dir" ]] || fail "release candidate already exists: ${release_id}"
+install -d -m 0750 "$candidate_dir"
+
 previous_dir=''
+previous_manifest=''
+previous_sha=''
 if [[ -L "$current_link" ]]; then
   previous_dir="$(readlink --canonicalize "$current_link")"
   case "$previous_dir" in
     "${environment_root}"/*) ;;
     *) fail "current release points outside ${environment_root}" ;;
   esac
-  [[ -f "${previous_dir}/images.env" ]] || fail 'current release manifest is missing'
+  previous_manifest="${previous_dir}/release.env"
+  [[ -f "$previous_manifest" ]] || fail 'current release manifest is missing'
+  previous_sha="$(sed -n 's/^RELEASE_SHA=//p' "$previous_manifest")"
+  [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'previous release SHA is invalid'
 fi
 
-candidate_tmp="$(mktemp "${candidate_dir}/images.env.XXXXXX")"
+readonly created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+candidate_tmp="$(mktemp "${candidate_dir}/release.env.XXXXXX")"
 cleanup_candidate_tmp() {
   rm -f -- "$candidate_tmp"
 }
 trap cleanup_candidate_tmp EXIT
 
 {
+  printf 'RELEASE_ENVIRONMENT=%s\n' "$release_environment"
+  printf 'RELEASE_SHA=%s\n' "$release_sha"
   printf 'ABSLIDER_CLIENT_IMAGE=%s\n' "$client_image"
   printf 'ABSLIDER_SERVER_IMAGE=%s\n' "$server_image"
+  printf 'CREATED_AT=%s\n' "$created_at"
 } >"$candidate_tmp"
 chmod 0600 "$candidate_tmp"
-mv -- "$candidate_tmp" "$candidate_images"
+mv -- "$candidate_tmp" "$candidate_manifest"
 
-compose() {
+compose_with_manifest() {
+  local manifest="$1"
+  shift
+
   docker compose \
     --project-name "$compose_project" \
     --env-file "$secret_file" \
-    --env-file "$candidate_images" \
+    --env-file "$manifest" \
     --file "$compose_file" \
     "$@"
 }
 
+verify_pulled_digest() {
+  local image="$1"
+
+  docker image inspect "$image" >/dev/null
+  docker image inspect \
+    --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+    "$image" |
+    grep -Fx "$image" >/dev/null || fail "pulled image digest does not match ${image}"
+}
+
+internal_checks() {
+  local manifest="$1"
+  local backend_address
+  local frontend_address
+  local media_address
+
+  backend_address="$(compose_with_manifest "$manifest" port server 4000)"
+  frontend_address="$(compose_with_manifest "$manifest" port client 8080)"
+  media_address="$(compose_with_manifest "$manifest" port minio 9000)"
+
+  [[ "$backend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
+  [[ "$frontend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
+  [[ "$media_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
+
+  [[ -z "$(compose_with_manifest "$manifest" port mongo 27017 2>/dev/null || true)" ]] || return 1
+  [[ -z "$(compose_with_manifest "$manifest" port redis 6379 2>/dev/null || true)" ]] || return 1
+  [[ -z "$(compose_with_manifest "$manifest" port minio 9001 2>/dev/null || true)" ]] || return 1
+
+  curl --fail --silent --show-error "http://${backend_address}/api/v1/health/ready" >/dev/null
+  curl --fail --silent --show-error "http://${frontend_address}/health" >/dev/null
+  curl --fail --silent --show-error "http://${media_address}/minio/health/live" >/dev/null
+}
+
 rollback() {
   local failed_status="$?"
+  local rollback_status=0
   trap - ERR
+  set +e
 
-  printf 'Deployment failed for %s at %s; starting rollback\n' \
-    "$release_environment" \
-    "$release_sha" >&2
+  printf 'Deployment failed environment=%s sha=%s; starting rollback\n' \
+    "$release_environment" "$release_sha" >&2
 
-  if [[ -n "$previous_dir" ]]; then
-    docker compose \
-      --project-name "$compose_project" \
-      --env-file "$secret_file" \
-      --env-file "${previous_dir}/images.env" \
-      --file "$compose_file" \
-      up --detach --wait --wait-timeout 180 || true
+  if [[ -n "$previous_manifest" ]]; then
+    compose_with_manifest "$previous_manifest" up --detach --wait --wait-timeout 180
+    rollback_status="$?"
+    if [[ "$rollback_status" -eq 0 ]]; then
+      internal_checks "$previous_manifest"
+      rollback_status="$?"
+    fi
+    if [[ "$rollback_status" -eq 0 ]]; then
+      "$smoke_script" "$release_environment" "$previous_sha"
+      rollback_status="$?"
+    fi
   else
-    compose down || true
+    compose_with_manifest "$candidate_manifest" down
+    rollback_status="$?"
   fi
 
-  exit "$failed_status"
+  if [[ "$rollback_status" -eq 0 ]]; then
+    printf 'ROLLBACK_SUCCEEDED environment=%s restored_sha=%s\n' \
+      "$release_environment" "${previous_sha:-none}" >&2
+    exit "$failed_status"
+  fi
+
+  printf 'ROLLBACK_FAILED environment=%s candidate_sha=%s previous_sha=%s\n' \
+    "$release_environment" "$release_sha" "${previous_sha:-none}" >&2
+  exit 70
 }
 trap rollback ERR
 
-compose config --quiet
-compose pull
-compose up --detach --wait --wait-timeout 180
-
-backend_address="$(compose port server 4000)"
-frontend_address="$(compose port client 8080)"
-if [[ ! "$backend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
-  printf 'ERROR: backend is not bound to IPv4 loopback\n' >&2
-  false
-fi
-if [[ ! "$frontend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
-  printf 'ERROR: frontend is not bound to IPv4 loopback\n' >&2
-  false
-fi
-
-curl --fail --silent --show-error \
-  "http://${backend_address}/api/v1/health/ready" >/dev/null
-curl --fail --silent --show-error \
-  "http://${frontend_address}/health" >/dev/null
+compose_with_manifest "$candidate_manifest" config --quiet
+compose_with_manifest "$candidate_manifest" pull
+verify_pulled_digest "$client_image"
+verify_pulled_digest "$server_image"
+compose_with_manifest "$candidate_manifest" up --detach --wait --wait-timeout 180
+internal_checks "$candidate_manifest"
+"$smoke_script" "$release_environment" "$release_sha"
 
 ln --symbolic --force --no-dereference "$candidate_dir" "${current_link}.new"
 mv --no-target-directory "${current_link}.new" "$current_link"
 
 trap - ERR
-printf 'DEPLOYED environment=%s sha=%s client=%s server=%s\n' \
-  "$release_environment" \
-  "$release_sha" \
-  "$client_image" \
-  "$server_image"
+printf 'DEPLOYED environment=%s sha=%s client=%s server=%s created_at=%s\n' \
+  "$release_environment" "$release_sha" "$client_image" "$server_image" "$created_at"
