@@ -137,14 +137,32 @@ compose_with_manifest() {
     "$@"
 }
 
-verify_pulled_digest() {
+normalize_registry_reference() {
   local image="$1"
 
+  printf '%s\n' "${image#docker.io/}"
+}
+
+verify_pulled_digest() {
+  local image="$1"
+  local normalized_image
+  local pulled_image
+
+  normalized_image="$(normalize_registry_reference "$image")"
+
   docker image inspect "$image" >/dev/null
-  docker image inspect \
-    --format '{{range .RepoDigests}}{{println .}}{{end}}' \
-    "$image" |
-    grep -Fx "$image" >/dev/null || fail "pulled image digest does not match ${image}"
+
+  while IFS= read -r pulled_image; do
+    if [[ "$(normalize_registry_reference "$pulled_image")" == "$normalized_image" ]]; then
+      return 0
+    fi
+  done < <(
+    docker image inspect \
+      --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+      "$image"
+  )
+
+  fail "pulled image digest does not match ${image}"
 }
 
 internal_checks() {
