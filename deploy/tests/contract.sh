@@ -35,7 +35,53 @@ expect_failure() {
   }
 }
 
+extract_function() {
+  local function_name="$1"
+
+  sed -n "/^${function_name}() {/,/^}/p" "$deploy_script"
+}
+
 bash -n "$deploy_script" "$smoke_script"
+
+normalizer_source="$(extract_function normalize_registry_reference)"
+verifier_source="$(extract_function verify_pulled_digest)"
+[[ -n "$normalizer_source" ]] || fail 'normalize_registry_reference function was not found'
+[[ -n "$verifier_source" ]] || fail 'verify_pulled_digest function was not found'
+
+(
+  eval "$normalizer_source"
+  eval "$verifier_source"
+
+  mock_repo_digest="${client_digest_ref#docker.io/}"
+
+  docker() {
+    if [[ "$*" == *'--format'* ]]; then
+      printf '%s\n' "$mock_repo_digest"
+    fi
+  }
+
+  fail() {
+    printf 'FAIL: %s\n' "$*" >&2
+    return 1
+  }
+
+  verify_pulled_digest "$client_digest_ref" ||
+    fail 'digest verification rejected Docker Hub canonical name'
+
+  mock_repo_digest="$client_digest_ref"
+  verify_pulled_digest "$client_digest_ref" ||
+    fail 'digest verification rejected fully qualified Docker Hub name'
+
+  mock_repo_digest="ducchert87/open4um-server@${client_digest_ref##*@}"
+  if verify_pulled_digest "$client_digest_ref" 2>/dev/null; then
+    fail 'digest verification accepted a different repository'
+  fi
+
+  mock_repo_digest="ducchert87/open4um-client@${server_digest_ref##*@}"
+  if verify_pulled_digest "$client_digest_ref" 2>/dev/null; then
+    fail 'digest verification accepted a different digest'
+  fi
+)
 
 expect_failure 'usage: deploy-abslider' "$deploy_script"
 expect_failure \
