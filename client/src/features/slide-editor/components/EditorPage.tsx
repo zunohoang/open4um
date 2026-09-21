@@ -13,75 +13,12 @@ import { FloatingContextualToolbar } from './FloatingContextualToolbar'
 import { LeftSidebarRail } from './LeftSidebarRail'
 import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
+import { getSlideComponents } from '../utils/slide'
 
 interface EditorPageProps {
   initialLecture?: Lecture
   onBack?: () => void
   onPresent?: (lecture: Lecture) => void
-}
-
-// Khởi tạo các components cho slide nếu chưa có
-const getSlideComponents = (slide: Slide): SlideComponent[] => {
-  if (slide.components && slide.components.length > 0) {
-    return slide.components
-  }
-
-  const comps: SlideComponent[] = []
-
-  comps.push({
-    id: `title-${slide.id}`,
-    type: 'title',
-    content: slide.title || 'Tiêu đề slide',
-    x: 8,
-    y: 12,
-    width: 84,
-    fontSize:
-      slide.titleSize === 'xl' ? 48 : slide.titleSize === 'sm' ? 26 : 36,
-    fontWeight: 'bold',
-    fontStyle: 'normal',
-    textDecoration: 'none',
-    textAlign: slide.titleAlign || 'left',
-    fontFamily: 'display',
-    color: '#1c1917'
-  })
-
-  if (slide.subtitle) {
-    comps.push({
-      id: `sub-${slide.id}`,
-      type: 'subtitle',
-      content: slide.subtitle,
-      x: 8,
-      y: 26,
-      width: 84,
-      fontSize: 18,
-      fontWeight: 'normal',
-      fontStyle: 'italic',
-      textDecoration: 'none',
-      textAlign: slide.titleAlign || 'left',
-      fontFamily: 'sans',
-      color: '#64748b'
-    })
-  }
-
-  if (slide.bullets && slide.bullets.length > 0) {
-    comps.push({
-      id: `bullets-${slide.id}`,
-      type: 'bullets',
-      content: slide.bullets.join('\n'),
-      x: 8,
-      y: slide.subtitle ? 38 : 28,
-      width: 84,
-      fontSize: 20,
-      fontWeight: 'normal',
-      fontStyle: 'normal',
-      textDecoration: 'none',
-      textAlign: 'left',
-      fontFamily: 'sans',
-      color: '#1c1917'
-    })
-  }
-
-  return comps
 }
 
 export const EditorPage = ({
@@ -214,7 +151,29 @@ export const EditorPage = ({
     }
   }, [lecture, params.id, loadLecture])
 
-  // Khi có thay đổi dữ liệu slide/lecture -> Ghi nhận Undo history và kích hoạt Autosave 2s
+  // Đồng bộ vị trí slide đang xem vào sessionStorage
+  useEffect(() => {
+    if (lecture?._id && activeSlideIndex >= 0) {
+      sessionStorage.setItem(
+        `open4um_last_slide_${lecture._id}`,
+        String(activeSlideIndex)
+      )
+    }
+  }, [lecture?._id, activeSlideIndex])
+
+  // Cảnh báo người dùng khi có thay đổi chưa được lưu trước khi đóng tab
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatus === 'unsaved') {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [saveStatus])
+
+  // Cập nhật trạng thái bài giảng và kích hoạt đếm ngược Autosave (2 giây)
   const mutateLecture = useCallback(
     (next: Lecture, shouldRecordHistory = true) => {
       if (shouldRecordHistory && lectureRef.current) {
@@ -224,15 +183,6 @@ export const EditorPage = ({
       setLecture(next)
       setSaveStatus('unsaved')
 
-      // Lưu vị trí slide hiện tại vào sessionStorage
-      if (next._id) {
-        sessionStorage.setItem(
-          `open4um_last_slide_${next._id}`,
-          String(activeSlideIndex)
-        )
-      }
-
-      // Đếm ngược 2s Autosave tự động
       clearCountdownTimers()
       setCountdown(2)
 
@@ -250,7 +200,7 @@ export const EditorPage = ({
         }
       }, 2000)
     },
-    [activeSlideIndex, clearCountdownTimers, recordHistory, triggerSaveToServer]
+    [clearCountdownTimers, recordHistory, triggerSaveToServer]
   )
 
   // Lưu thủ công (Ctrl+S / Cmd+S)
@@ -517,22 +467,84 @@ export const EditorPage = ({
     showToast(`Đã áp dụng mẫu bố cục ${layout}`, 'success')
   }
 
-  // Thao tác Slide cơ bản (thêm, xóa, nhân bản, di chuyển)
-  const handleSlideOperation = async (body: object) => {
+  const handleAddSlide = (atIndex?: number) => {
     if (!lecture) return
-    try {
-      recordHistory(lecture.slides)
-      const next = await editorApi.operation(lecture._id, body)
-      setLecture(next)
-      setActiveSlideIndex(Math.min(activeSlideIndex, next.slides.length - 1))
-      setSelectedCompId(null)
-      setSaveStatus('saved')
-    } catch (err) {
-      const msg = isAxiosError(err)
-        ? (err.response?.data as { message?: string })?.message ||
-          'Lỗi thao tác slide'
-        : 'Lỗi thao tác slide'
-      showToast(msg, 'error')
+    const targetIndex = atIndex ?? lecture.slides.length
+    const newSlide: Slide = {
+      id: `slide-${crypto.randomUUID()}`,
+      title: 'Tiêu đề slide',
+      bullets: []
+    }
+
+    const nextSlides = [...lecture.slides]
+    nextSlides.splice(targetIndex, 0, newSlide)
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(null)
+    setActiveSlideIndex(targetIndex)
+  }
+
+  const handleDeleteSlide = (slideId: string) => {
+    if (!lecture) return
+    if (lecture.slides.length <= 1) {
+      showToast('Bài giảng phải có ít nhất một slide', 'error')
+      return
+    }
+
+    const targetIndex = lecture.slides.findIndex((s) => s.id === slideId)
+    if (targetIndex === -1) return
+
+    const nextSlides = lecture.slides.filter((s) => s.id !== slideId)
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(null)
+
+    if (targetIndex < activeSlideIndex) {
+      setActiveSlideIndex(activeSlideIndex - 1)
+    } else if (targetIndex === activeSlideIndex) {
+      setActiveSlideIndex(Math.min(activeSlideIndex, nextSlides.length - 1))
+    }
+  }
+
+  const handleDuplicateSlide = (slideId: string) => {
+    if (!lecture) return
+    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
+    if (sourceIndex === -1) return
+
+    const sourceSlide = lecture.slides[sourceIndex]
+    const clonedSlide: Slide = {
+      ...sourceSlide,
+      id: `slide-${crypto.randomUUID()}`,
+      components: getSlideComponents(sourceSlide).map((comp) => ({
+        ...comp,
+        id: `comp-${crypto.randomUUID()}`
+      }))
+    }
+
+    const nextSlides = [...lecture.slides]
+    nextSlides.splice(sourceIndex + 1, 0, clonedSlide)
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setSelectedCompId(null)
+    setActiveSlideIndex(sourceIndex + 1)
+  }
+
+  const handleMoveSlide = (slideId: string, toIndex: number) => {
+    if (!lecture) return
+    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
+    if (sourceIndex === -1 || sourceIndex === toIndex) return
+
+    const nextSlides = [...lecture.slides]
+    const [moved] = nextSlides.splice(sourceIndex, 1)
+    nextSlides.splice(toIndex, 0, moved)
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+
+    if (sourceIndex === activeSlideIndex) {
+      setActiveSlideIndex(toIndex)
+    } else if (sourceIndex < activeSlideIndex && toIndex >= activeSlideIndex) {
+      setActiveSlideIndex(activeSlideIndex - 1)
+    } else if (sourceIndex > activeSlideIndex && toIndex <= activeSlideIndex) {
+      setActiveSlideIndex(activeSlideIndex + 1)
     }
   }
 
@@ -584,6 +596,10 @@ export const EditorPage = ({
   }
 
   const handleBack = () => {
+    if (saveStatus === 'unsaved' && lectureRef.current) {
+      clearCountdownTimers()
+      void triggerSaveToServer(lectureRef.current)
+    }
     if (onBack) onBack()
     else navigate('/library')
   }
@@ -712,6 +728,7 @@ export const EditorPage = ({
           {/* Khung Canvas tỷ lệ 16:9 */}
           <SlideCanvas
             slide={currentSlide}
+            components={currentComponents}
             slideIndex={activeSlideIndex}
             totalSlides={lecture.slides.length}
             selectedCompId={selectedCompId}
@@ -728,21 +745,10 @@ export const EditorPage = ({
             slides={lecture.slides}
             activeSlideIndex={activeSlideIndex}
             onSelectSlide={setActiveSlideIndex}
-            onAddSlide={() =>
-              void handleSlideOperation({
-                operation: 'add',
-                index: activeSlideIndex + 1
-              })
-            }
-            onDuplicateSlide={(slideId) =>
-              void handleSlideOperation({ operation: 'duplicate', slideId })
-            }
-            onDeleteSlide={(slideId) =>
-              void handleSlideOperation({ operation: 'delete', slideId })
-            }
-            onMoveSlide={(slideId, toIndex) =>
-              void handleSlideOperation({ operation: 'move', slideId, toIndex })
-            }
+            onAddSlide={handleAddSlide}
+            onDuplicateSlide={handleDuplicateSlide}
+            onDeleteSlide={handleDeleteSlide}
+            onMoveSlide={handleMoveSlide}
           />
         </main>
 

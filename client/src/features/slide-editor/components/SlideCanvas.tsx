@@ -2,9 +2,11 @@ import type { Slide, SlideComponent } from '@/lib/types'
 import { Copy, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 import { FONT_MAP } from '../constants/theme-options'
+import { getSlideComponents } from '../utils/slide'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
+  components?: SlideComponent[]
   slideIndex: number
   totalSlides: number
   selectedCompId: string | null
@@ -18,6 +20,7 @@ interface SlideCanvasProps {
 
 export const SlideCanvas = ({
   slide,
+  components: passedComponents,
   slideIndex,
   totalSlides,
   selectedCompId,
@@ -127,7 +130,8 @@ export const SlideCanvas = ({
     }
   }, [dragState, onUpdateComponent])
 
-  const components = slide?.components || []
+  const components =
+    passedComponents ?? (slide ? getSlideComponents(slide) : [])
 
   // Helper render hình khối
   const renderShapeElement = (comp: SlideComponent) => {

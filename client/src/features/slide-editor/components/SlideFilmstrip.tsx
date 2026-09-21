@@ -1,23 +1,24 @@
 import type { Slide } from '@/lib/types'
 import {
-  ArrowLeft,
-  ArrowRight,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  Copy,
-  Plus,
-  Trash2
+  Plus
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useEditorStore } from '../store/editor.store'
+import {
+  SlideContextMenu,
+  type SlideContextMenuState
+} from './SlideContextMenu'
+import { SlideThumbnail } from './SlideThumbnail'
 
 interface SlideFilmstripProps {
   slides: Slide[]
   activeSlideIndex: number
   onSelectSlide: (index: number) => void
-  onAddSlide: () => void
+  onAddSlide: (atIndex?: number) => void
   onDuplicateSlide: (slideId: string) => void
   onDeleteSlide: (slideId: string) => void
   onMoveSlide: (slideId: string, toIndex: number) => void
@@ -37,7 +38,18 @@ export const SlideFilmstrip = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
 
-  // Kiểm tra khả năng cuộn trái/phải để bật/tắt nút điều hướng
+  const [draggedSlideId, setDraggedSlideId] = useState<string | null>(null)
+  const [draggedSlideIndex, setDraggedSlideIndex] = useState<number | null>(
+    null
+  )
+  const [dropTarget, setDropTarget] = useState<{
+    index: number
+    position: 'before' | 'after'
+  } | null>(null)
+  const [contextMenu, setContextMenu] = useState<SlideContextMenuState | null>(
+    null
+  )
+
   const checkScrollability = () => {
     const el = stripRef.current
     if (!el) return
@@ -58,11 +70,9 @@ export const SlideFilmstrip = ({
     }
   }, [slides.length, isFilmstripOpen])
 
-  // Tự động cuộn đến slide đang kích hoạt
   useEffect(() => {
     const el = stripRef.current
-    if (!el) return
-    const activeEl = el.children[activeSlideIndex] as HTMLElement | undefined
+    const activeEl = el?.children[activeSlideIndex] as HTMLElement | undefined
     if (activeEl) {
       activeEl.scrollIntoView({
         behavior: 'smooth',
@@ -72,28 +82,95 @@ export const SlideFilmstrip = ({
     }
   }, [activeSlideIndex])
 
-  // Chuyển đổi con lăn chuột thông thường (deltaY) thành cuộn ngang (scrollLeft)
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (contextMenu) setContextMenu(null)
     const el = stripRef.current
-    if (!el) return
-
-    if (e.deltaY !== 0) {
+    if (el && e.deltaY !== 0) {
       el.scrollLeft += e.deltaY
       checkScrollability()
     }
   }
 
-  // Cuộn bằng nút bấm sang trái/phải
   const handleScrollBy = (offset: number) => {
-    const el = stripRef.current
-    if (!el) return
-    el.scrollBy({ left: offset, behavior: 'smooth' })
+    if (contextMenu) setContextMenu(null)
+    stripRef.current?.scrollBy({ left: offset, behavior: 'smooth' })
+  }
+
+  const handleOpenContextMenu = (
+    e: React.MouseEvent,
+    slide: Slide,
+    index: number
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      slide,
+      index
+    })
+  }
+
+  const handleDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    slideId: string,
+    index: number
+  ) => {
+    setContextMenu(null)
+    e.dataTransfer.setData('text/plain', slideId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedSlideId(slideId)
+    setDraggedSlideIndex(index)
+  }
+
+  const handleDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+
+    const target = e.currentTarget
+    const rect = target.getBoundingClientRect()
+    const position: 'before' | 'after' =
+      e.clientX - rect.left > rect.width / 2 ? 'after' : 'before'
+
+    if (dropTarget?.index !== index || dropTarget?.position !== position) {
+      setDropTarget({ index, position })
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    e.preventDefault()
+    if (draggedSlideIndex === null || !draggedSlideId) {
+      handleDragEnd()
+      return
+    }
+
+    const position = dropTarget?.position ?? 'before'
+    const rawTarget = position === 'before' ? index : index + 1
+    const toIndex = draggedSlideIndex < rawTarget ? rawTarget - 1 : rawTarget
+
+    if (
+      toIndex !== draggedSlideIndex &&
+      toIndex >= 0 &&
+      toIndex < slides.length
+    ) {
+      onMoveSlide(draggedSlideId, toIndex)
+    }
+
+    handleDragEnd()
+  }
+
+  const handleDragEnd = () => {
+    setDraggedSlideId(null)
+    setDraggedSlideIndex(null)
+    setDropTarget(null)
   }
 
   return (
     <footer className='w-full shrink-0 overflow-hidden border-t border-stone-300 bg-brand-paper/95 font-sans select-none'>
-      {/* Thanh điều khiển phụ của Filmstrip: Trang X/Y và nút Ẩn/Hiện */}
-      <div className='flex h-7 items-center justify-between px-4 text-[11px] text-stone-500'>
+      <div className='flex h-10 items-center justify-between px-4 text-[11px] text-stone-500'>
         <div className='flex items-center gap-3'>
           <button
             type='button'
@@ -109,15 +186,14 @@ export const SlideFilmstrip = ({
             <span>{isFilmstripOpen ? 'Ẩn dải slide' : 'Hiện dải slide'}</span>
           </button>
 
-          {/* Hướng dẫn cuộn chuột */}
           {isFilmstripOpen && (
             <span className='hidden text-[10px] text-stone-400 sm:inline'>
-              (Lăn chuột hoặc bấm ‹ › để cuộn)
+              (Kéo thả đổi thứ tự • Chuột phải để nhân bản / xóa • Lăn chuột để
+              cuộn)
             </span>
           )}
         </div>
 
-        {/* Nút trượt trái/phải và bộ đếm trang */}
         <div className='flex items-center gap-2'>
           {isFilmstripOpen && (
             <div className='flex items-center gap-1'>
@@ -156,99 +232,38 @@ export const SlideFilmstrip = ({
         </div>
       </div>
 
-      {/* Dải danh sách thumbnail cuộn ngang có xử lý con lăn chuột và thanh cuộn rõ ràng */}
       {isFilmstripOpen && (
         <div className='relative w-full overflow-hidden px-2 pb-2'>
           <div
             ref={stripRef}
             onWheel={handleWheel}
-            className='flex h-24 items-center gap-3 overflow-x-auto px-2 pb-2 scroll-smooth custom-scrollbar'
+            onDragLeave={() => setDropTarget(null)}
+            className='flex h-26 items-center gap-3 overflow-x-auto px-2 pb-2 scroll-smooth custom-scrollbar'
           >
-            {slides.map((slide, index) => {
-              const isActive = index === activeSlideIndex
+            {slides.map((slide, index) => (
+              <SlideThumbnail
+                key={slide.id}
+                slide={slide}
+                index={index}
+                isActive={index === activeSlideIndex}
+                isDragging={draggedSlideId === slide.id}
+                dropPosition={
+                  dropTarget?.index === index ? dropTarget.position : null
+                }
+                onSelect={() => onSelectSlide(index)}
+                onContextMenu={(e) => handleOpenContextMenu(e, slide, index)}
+                onDragStart={(e) => handleDragStart(e, slide.id, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+              />
+            ))}
 
-              return (
-                <div
-                  key={slide.id}
-                  onClick={() => onSelectSlide(index)}
-                  className={`group relative flex h-20 w-28 shrink-0 cursor-pointer flex-col justify-between rounded-md border bg-white p-2 shadow-xs transition hover:shadow-md ${
-                    isActive
-                      ? 'border-brand-rust ring-2 ring-brand-rust/30 font-bold'
-                      : 'border-stone-300 hover:border-stone-400'
-                  }`}
-                  title={`Trang ${index + 1}: ${slide.title || 'Slide trống'}`}
-                >
-                  {/* Header thẻ: Số thứ tự và menu thao tác nhanh */}
-                  <div className='flex items-center justify-between'>
-                    <span className='font-mono text-[10px] font-bold text-stone-400'>
-                      {index + 1}
-                    </span>
-
-                    {/* Menu thao tác nhanh khi hover */}
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      className='flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100'
-                    >
-                      {/* Di chuyển trước */}
-                      <button
-                        type='button'
-                        disabled={index === 0}
-                        onClick={() => onMoveSlide(slide.id, index - 1)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20 cursor-pointer'
-                        title='Di chuyển sang trái'
-                      >
-                        <ArrowLeft size={10} />
-                      </button>
-
-                      {/* Di chuyển sau */}
-                      <button
-                        type='button'
-                        disabled={index === slides.length - 1}
-                        onClick={() => onMoveSlide(slide.id, index + 1)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[10px] hover:bg-stone-200 disabled:opacity-20 cursor-pointer'
-                        title='Di chuyển sang phải'
-                      >
-                        <ArrowRight size={10} />
-                      </button>
-
-                      {/* Nhân bản */}
-                      <button
-                        type='button'
-                        onClick={() => onDuplicateSlide(slide.id)}
-                        className='flex h-4 w-4 items-center justify-center rounded text-[9px] hover:bg-stone-200 cursor-pointer'
-                        title='Nhân bản slide'
-                      >
-                        <Copy size={10} />
-                      </button>
-
-                      {/* Xóa */}
-                      {slides.length > 1 && (
-                        <button
-                          type='button'
-                          onClick={() => onDeleteSlide(slide.id)}
-                          className='flex h-4 w-4 items-center justify-center rounded text-[9px] text-red-600 hover:bg-red-50 cursor-pointer'
-                          title='Xóa slide'
-                        >
-                          <Trash2 size={10} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Tiêu đề tóm tắt slide */}
-                  <div className='truncate text-[11px] text-stone-800 font-serif'>
-                    {slide.title || 'Slide trống'}
-                  </div>
-                </div>
-              )
-            })}
-
-            {/* Nút + Thêm slide ở cuối dải */}
             <button
               type='button'
-              onClick={onAddSlide}
+              onClick={() => onAddSlide(slides.length)}
               className='flex h-20 w-28 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-stone-400 bg-stone-50 text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust cursor-pointer'
-              title='Thêm slide mới'
+              title='Thêm slide mới vào cuối bài giảng'
             >
               <Plus size={20} className='font-bold' />
               <span className='mt-1 text-[10px] font-semibold uppercase tracking-wider'>
@@ -257,6 +272,17 @@ export const SlideFilmstrip = ({
             </button>
           </div>
         </div>
+      )}
+
+      {contextMenu && (
+        <SlideContextMenu
+          menu={contextMenu}
+          canDelete={slides.length > 1}
+          onClose={() => setContextMenu(null)}
+          onAddRight={(idx) => onAddSlide(idx)}
+          onDuplicate={(id) => onDuplicateSlide(id)}
+          onDelete={(id) => onDeleteSlide(id)}
+        />
       )}
     </footer>
   )
