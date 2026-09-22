@@ -73,5 +73,6 @@ Giao diện mở tại: **`http://localhost:5173`**
 Xem thêm các tài liệu trong thư mục [`docs/`](docs/):
 - [Cấu trúc dự án](docs/project-structure.md)
 - [Quy trình GitHub & CI/CD](docs/github-workflow.md)
+- [Nhật ký thay đổi DevOps](docs/devops-change-log.md)
 - [Quy ước code Frontend](docs/conventions-fe.md)
 - [Quy ước code Backend](docs/conventions-be.md)

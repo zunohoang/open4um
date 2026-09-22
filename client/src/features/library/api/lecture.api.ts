@@ -42,6 +42,10 @@ export const lectureApi = {
   moveToTrash: async (id: string) => apiClient.delete(`/lectures/${id}`),
   remove: async (id: string) => apiClient.delete(`/lectures/${id}`),
 
+  // Xóa vĩnh viễn bài giảng khỏi database (hard delete)
+  permanentDelete: async (id: string) =>
+    apiClient.delete(`/lectures/${id}/permanent`),
+
   // Khôi phục bài giảng về trạng thái hoạt động bình thường
   restore: async (id: string) => apiClient.post(`/lectures/${id}/restore`),
 

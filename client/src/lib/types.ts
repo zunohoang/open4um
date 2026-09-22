@@ -8,6 +8,7 @@ export interface User {
   role: Role
   status?: UserStatus
   creditBalance: number
+  avatar?: string | null
 }
 
 export interface AdminUser {
@@ -32,25 +33,50 @@ export interface Outline {
   sections: OutlineSection[]
 }
 
+export type ShapeType =
+  | 'rectangle'
+  | 'circle'
+  | 'square'
+  | 'rounded-rect'
+  | 'triangle'
+  | 'star'
+  | 'line'
+
 export interface SlideComponent {
   id: string
-  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote'
+  type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image' | 'shape'
   content: string
+  imageUrl?: string
+  shapeType?: ShapeType
+  fillColor?: string
+  borderColor?: string
+  borderWidth?: number
+  borderRadius?: number
   x: number // % từ mép trái (0 - 100)
   y: number // % từ mép trên (0 - 100)
   width?: number // % chiều rộng
+  height?: number // % chiều cao
   fontSize?: number // px
   fontWeight?: 'normal' | 'bold'
   fontStyle?: 'normal' | 'italic'
   textDecoration?: 'none' | 'underline'
+  textCase?: 'normal' | 'uppercase'
   textAlign?: 'left' | 'center' | 'right'
   color?: string
-  fontFamily?: 'display' | 'sans' | 'mono'
+  fontFamily?:
+    | 'sans'
+    | 'display'
+    | 'playfair'
+    | 'montserrat'
+    | 'jakarta'
+    | 'merriweather'
+    | 'handwriting'
+    | 'mono'
+    | string
 }
 
 export interface Slide {
   id: string
-  pattern: string
   title: string
   bullets: string[]
   subtitle?: string
@@ -69,7 +95,7 @@ export interface Lecture {
   folderId: string | null
   title: string
   prompt: string
-  pattern: string
+  outline?: Outline | null
   slides: Slide[]
   deletedAt: string | null
   createdAt: string

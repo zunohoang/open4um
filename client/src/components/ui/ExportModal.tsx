@@ -42,7 +42,6 @@ export const ExportModal = ({
 
       await exportSlideToPng(
         slide,
-        lecture.pattern,
         selectedSlideIndex,
         lecture.slides.length,
         filename

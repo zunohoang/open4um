@@ -1,9 +1,5 @@
 import { z } from 'zod'
 
-export const generateOutlineSchema = z.object({
-  prompt: z.string().min(5, 'Yêu cầu prompt phải có ít nhất 5 ký tự')
-})
-
 const outlineSchema = z.object({
   title: z.string().min(1, 'Tiêu đề outline không được để trống'),
   sections: z.array(
@@ -14,10 +10,17 @@ const outlineSchema = z.object({
   )
 })
 
+export const generateOutlineSchema = z.object({
+  prompt: z.string().min(5, 'Yêu cầu prompt phải có ít nhất 5 ký tự'),
+  feedback: z.string().optional(),
+  currentOutline: outlineSchema.optional(),
+  lectureId: z.string().optional()
+})
+
 export const createLectureSchema = z.object({
+  lectureId: z.string().optional(),
   title: z.string().min(1, 'Tiêu đề bài giảng không được để trống'),
   prompt: z.string().optional(),
-  pattern: z.string().min(1, 'Mẫu bài giảng không được để trống'),
   folderId: z.string().nullable().optional(),
   outline: outlineSchema
 })
@@ -29,7 +32,6 @@ export const createBlankLectureSchema = z.object({
 
 export const updateLectureSchema = z.object({
   title: z.string().min(1, 'Tiêu đề bài giảng không được để trống').optional(),
-  pattern: z.string().optional(),
   slides: z.array(z.record(z.string(), z.unknown())).optional(),
   folderId: z.string().nullable().optional()
 })

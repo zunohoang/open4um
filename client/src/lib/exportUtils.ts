@@ -7,12 +7,10 @@ import type { Lecture, Slide } from '@/lib/types'
  */
 const createSlideElement = (
   slide: Slide,
-  defaultPattern: string,
   index: number,
   total: number
 ): HTMLElement => {
   const el = document.createElement('div')
-  const pattern = slide.pattern || defaultPattern || 'default'
 
   el.style.width = '1280px'
   el.style.height = '720px'
@@ -23,21 +21,9 @@ const createSlideElement = (
   el.style.display = 'flex'
   el.style.flexDirection = 'column'
   el.style.justifyContent = 'space-between'
-
-  // Màu sắc theo tông màu mẫu (slidePattern)
-  if (pattern === 'warm') {
-    el.style.backgroundColor = '#fff7ed' // orange-50
-    el.style.color = '#431407' // orange-950
-    el.style.borderTop = '12px solid #7c2d12' // orange-900
-  } else if (pattern === 'mono') {
-    el.style.backgroundColor = '#1c1917' // stone-900
-    el.style.color = '#f5f5f4' // stone-100
-    el.style.borderTop = '12px solid #e7e5e4' // stone-200
-  } else {
-    el.style.backgroundColor = '#ffffff'
-    el.style.color = '#064e3b' // emerald-950
-    el.style.borderTop = '12px solid #c2410c' // orange-700
-  }
+  el.style.backgroundColor = '#ffffff'
+  el.style.color = '#064e3b'
+  el.style.borderTop = '12px solid #c2410c'
 
   // Số thứ tự slide ở góc dưới phải
   const numberTag = document.createElement('div')
@@ -70,8 +56,7 @@ const createSlideElement = (
       compEl.style.fontStyle = comp.fontStyle ?? 'normal'
       compEl.style.textDecoration = comp.textDecoration ?? 'none'
       compEl.style.textAlign = comp.textAlign ?? 'left'
-      compEl.style.color =
-        comp.color || (pattern === 'mono' ? '#f5f5f4' : '#064e3b')
+      compEl.style.color = comp.color || '#064e3b'
       compEl.style.lineHeight = '1.35'
       compEl.style.whiteSpace = 'pre-wrap'
       compEl.style.wordBreak = 'break-word'
@@ -180,7 +165,6 @@ export const exportElementToPng = async (
  */
 export const exportSlideToPng = async (
   slide: Slide,
-  lecturePattern: string,
   slideIndex: number,
   totalSlides: number,
   filename: string
@@ -200,12 +184,7 @@ export const exportSlideToPng = async (
       await document.fonts.ready
     }
 
-    const slideEl = createSlideElement(
-      slide,
-      lecturePattern,
-      slideIndex,
-      totalSlides
-    )
+    const slideEl = createSlideElement(slide, slideIndex, totalSlides)
     container.appendChild(slideEl)
     await new Promise((resolve) => setTimeout(resolve, 60))
 
@@ -263,7 +242,7 @@ export const exportLectureToPdf = async (
 
       const slide = lecture.slides[i]
       container.innerHTML = ''
-      const slideEl = createSlideElement(slide, lecture.pattern, i, total)
+      const slideEl = createSlideElement(slide, i, total)
       container.appendChild(slideEl)
 
       // Chờ DOM cập nhật

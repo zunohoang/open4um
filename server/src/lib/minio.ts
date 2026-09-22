@@ -2,23 +2,41 @@ import { Client } from 'minio'
 import { env } from '@/config/env'
 import { logger } from '@/lib/logger'
 
-const parseMinioEndpoint = (endpoint: string) => {
-  const [host, port] = endpoint.split(':')
+const parseMinioEndpoint = (endpoint: string, useSSL: boolean) => {
+  const url = new URL(`${useSSL ? 'https' : 'http'}://${endpoint}`)
   return {
-    endPoint: host || 'localhost',
-    port: port ? parseInt(port, 10) : 9000
+    endPoint: url.hostname,
+    port: url.port ? Number(url.port) : useSSL ? 443 : 9000,
+    useSSL
   }
 }
 
-const { endPoint, port } = parseMinioEndpoint(env.MINIO_ENDPOINT)
+const internalEndpoint = parseMinioEndpoint(
+  env.MINIO_ENDPOINT,
+  env.MINIO_USE_SSL
+)
 
 export const minioClient = new Client({
-  endPoint,
-  port,
-  useSSL: false,
+  ...internalEndpoint,
   accessKey: env.MINIO_ACCESS_KEY,
-  secretKey: env.MINIO_SECRET_KEY
+  secretKey: env.MINIO_SECRET_KEY,
+  region: 'us-east-1'
 })
+
+const publicMinioUrl = env.MINIO_PUBLIC_ENDPOINT
+  ? new URL(env.MINIO_PUBLIC_ENDPOINT)
+  : null
+
+export const minioPresignClient = publicMinioUrl
+  ? new Client({
+      endPoint: publicMinioUrl.hostname,
+      port: publicMinioUrl.port ? Number(publicMinioUrl.port) : 443,
+      useSSL: publicMinioUrl.protocol === 'https:',
+      accessKey: env.MINIO_ACCESS_KEY,
+      secretKey: env.MINIO_SECRET_KEY,
+      region: 'us-east-1'
+    })
+  : minioClient
 
 export const BUCKET_MEDIA = 'media'
 

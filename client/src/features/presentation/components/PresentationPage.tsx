@@ -1,7 +1,8 @@
+import { editorApi } from '@/features/slide-editor/api/editor.api'
+import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
+import type { Lecture, SlideComponent } from '@/lib/types'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { editorApi } from '@/features/slide-editor/api/editor.api'
-import type { Lecture } from '@/lib/types'
 
 interface PresentationPageProps {
   lecture?: Lecture
@@ -158,8 +159,96 @@ export const PresentationPage = ({
     )
   }
 
+  const renderShape = (comp: SlideComponent) => {
+    const shapeType = comp.shapeType || 'rectangle'
+    const fill =
+      comp.fillColor === 'transparent'
+        ? 'transparent'
+        : comp.fillColor || '#c45b3f'
+    const stroke = comp.borderColor || '#173c39'
+    const strokeW = comp.borderWidth ?? 0
+    const radius = comp.borderRadius ?? 0
+
+    switch (shapeType) {
+      case 'circle':
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: '9999px'
+            }}
+          />
+        )
+      case 'triangle':
+        return (
+          <svg
+            viewBox='0 0 100 100'
+            preserveAspectRatio='none'
+            className='h-full w-full'
+          >
+            <polygon
+              points='50,5 98,95 2,95'
+              fill={fill}
+              stroke={strokeW > 0 ? stroke : 'none'}
+              strokeWidth={strokeW}
+            />
+          </svg>
+        )
+      case 'star':
+        return (
+          <svg
+            viewBox='0 0 100 100'
+            preserveAspectRatio='none'
+            className='h-full w-full'
+          >
+            <polygon
+              points='50,5 63,38 98,40 70,62 80,96 50,75 20,96 30,62 2,40 37,38'
+              fill={fill}
+              stroke={strokeW > 0 ? stroke : 'none'}
+              strokeWidth={strokeW}
+            />
+          </svg>
+        )
+      case 'line':
+        return (
+          <div
+            className='w-full'
+            style={{
+              height: `${Math.max(2, strokeW || 2)}px`,
+              backgroundColor: stroke || fill
+            }}
+          />
+        )
+      case 'rounded-rect':
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: `${radius || 16}px`
+            }}
+          />
+        )
+      case 'rectangle':
+      case 'square':
+      default:
+        return (
+          <div
+            className='h-full w-full'
+            style={{
+              backgroundColor: fill,
+              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              borderRadius: `${radius}px`
+            }}
+          />
+        )
+    }
+  }
+
   const slide = lecture.slides[index]
-  const slidePattern = slide?.pattern || lecture.pattern || 'default'
 
   return (
     <main
@@ -171,13 +260,7 @@ export const PresentationPage = ({
       {/* Khung Slide chuẩn tỷ lệ 16:9 tối đa kích thước màn hình */}
       <div
         ref={slideRef}
-        className={`relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150 ${
-          slidePattern === 'warm'
-            ? 'bg-orange-50 text-orange-950'
-            : slidePattern === 'mono'
-              ? 'bg-stone-900 text-stone-100'
-              : 'bg-stone-50 text-emerald-950'
-        }`}
+        className='relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150 bg-stone-50 text-emerald-950'
         style={{
           aspectRatio: '16 / 9',
           width: 'min(96vw, calc(96vh * 16 / 9))',
@@ -199,26 +282,37 @@ export const PresentationPage = ({
                   left: `${comp.x}%`,
                   top: `${comp.y}%`,
                   width: comp.width ? `${comp.width}%` : 'auto',
+                  height:
+                    comp.type === 'shape' &&
+                    comp.shapeType !== 'line' &&
+                    comp.height
+                      ? `${comp.height}%`
+                      : 'auto',
                   maxWidth: '94%',
                   fontSize: `${Math.round((comp.fontSize ?? 20) * 1.3)}px`,
                   fontWeight: comp.fontWeight ?? 'normal',
                   fontStyle: comp.fontStyle ?? 'normal',
                   textDecoration: comp.textDecoration ?? 'none',
                   textAlign: comp.textAlign ?? 'left',
-                  color:
-                    comp.color ||
-                    (slidePattern === 'mono' ? '#f5f5f4' : '#064e3b'),
-                  lineHeight: 1.3
+                  color: comp.color || '#064e3b',
+                  lineHeight: 1.3,
+                  fontFamily:
+                    FONT_MAP[comp.fontFamily || 'sans'] ||
+                    comp.fontFamily ||
+                    'inherit',
+                  textTransform:
+                    comp.textCase === 'uppercase' ? 'uppercase' : 'none'
                 }}
-                className={
-                  comp.fontFamily === 'display'
-                    ? 'font-display'
-                    : comp.fontFamily === 'mono'
-                      ? 'font-mono'
-                      : 'font-sans'
-                }
               >
-                {comp.type === 'bullets' ? (
+                {comp.type === 'shape' ? (
+                  renderShape(comp)
+                ) : comp.type === 'image' ? (
+                  <img
+                    src={comp.imageUrl || comp.content}
+                    alt='Slide visual'
+                    className='h-auto w-full object-contain'
+                  />
+                ) : comp.type === 'bullets' ? (
                   <ul className='space-y-2.5 list-disc pl-6'>
                     {comp.content
                       .split('\n')

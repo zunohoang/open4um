@@ -1,10 +1,14 @@
 process.env.NODE_ENV = 'test'
+delete process.env.RELEASE_SHA
+delete process.env.RELEASE_ENVIRONMENT
 process.env.PORT = '4000'
-process.env.MONGO_URI = 'mongodb://localhost:27017/test'
+process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173'
+process.env.MONGO_URI = 'mongodb://localhost:27017'
 process.env.REDIS_URL = 'redis://localhost:6379'
 process.env.JWT_SECRET = 'test-jwt-secret-key-at-least-16-chars'
 process.env.GEMINI_API_KEY = 'test-gemini-key'
 process.env.MINIO_ENDPOINT = 'localhost'
+process.env.MINIO_USE_SSL = 'false'
 process.env.MINIO_ACCESS_KEY = 'minioadmin'
 process.env.MINIO_SECRET_KEY = 'minioadmin'
 process.env.RESEND_API_KEY = 'test-resend-key'

@@ -4,7 +4,8 @@ import {
   loginSchema,
   refreshSchema,
   changePasswordSchema,
-  forgotPasswordSchema
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from '@/validators/auth.validator'
 
 describe('auth.validator', () => {
@@ -38,13 +39,13 @@ describe('auth.validator', () => {
       expect(result.success).toBe(true)
     })
 
-    it('báo lỗi khi thiếu otp hoặc otp không đúng 6 chữ số', () => {
+    it('cho phép không truyền otp ở tầng schema và báo lỗi khi otp sai định dạng 6 chữ số', () => {
       const noOtp = registerSchema.safeParse({
         name: 'Nguyen Van A',
         email: 'user@example.com',
         password: 'password123'
       })
-      expect(noOtp.success).toBe(false)
+      expect(noOtp.success).toBe(true)
 
       const shortOtp = registerSchema.safeParse({
         name: 'Nguyen Van A',
@@ -153,6 +154,26 @@ describe('auth.validator', () => {
           'Mật khẩu xác nhận không khớp'
         )
       }
+    })
+  })
+
+  describe('resetPasswordSchema', () => {
+    it('thành công khi đầy đủ email, otp 6 số và password ít nhất 6 ký tự', () => {
+      const result = resetPasswordSchema.safeParse({
+        email: 'user@example.com',
+        otp: '123456',
+        password: 'password123'
+      })
+      expect(result.success).toBe(true)
+    })
+
+    it('thất bại khi otp không đúng 6 số hoặc password < 6 ký tự', () => {
+      const result = resetPasswordSchema.safeParse({
+        email: 'user@example.com',
+        otp: '12345',
+        password: '123'
+      })
+      expect(result.success).toBe(false)
     })
   })
 })

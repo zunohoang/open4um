@@ -55,5 +55,6 @@ lectureRouter.post(
 )
 lectureRouter.post('/:id/duplicate', lectureController.duplicateLecture)
 lectureRouter.delete('/:id', lectureController.deleteLecture)
+lectureRouter.delete('/:id/permanent', lectureController.hardDeleteLecture)
 lectureRouter.post('/:id/restore', lectureController.restoreLecture)
 lectureRouter.post('/:id/export', lectureController.exportLecture)

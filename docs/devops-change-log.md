@@ -1,0 +1,1381 @@
+# Nhật ký thay đổi DevOps — ABSlider
+
+Tài liệu này là nguồn theo dõi các thay đổi do DevOps/Codex thực hiện trên repository. Mỗi thay đổi phải được ghi lại trong cùng lượt làm việc và, khi có thể, nằm trong cùng commit với thay đổi tương ứng.
+
+## Quy ước ghi nhận
+
+Mỗi mục phải nêu rõ:
+
+- Ngày thực hiện và nhánh làm việc.
+- Mục tiêu và lý do thay đổi.
+- File hoặc thành phần bị ảnh hưởng.
+- Cách xử lý và quyết định kỹ thuật quan trọng.
+- Bằng chứng kiểm tra: lệnh, kết quả PASS/FAIL và lỗi còn tồn tại.
+- Trạng thái `Implemented`, `Tested`, `Committed`, `Pushed`, `Deployed` phải được tách biệt.
+- Commit SHA, image digest hoặc deployment URL nếu đã có bằng chứng tương ứng.
+
+Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ hoàn thành trên máy local.
+
+## Trạng thái chuẩn
+
+| Trạng thái | Ý nghĩa |
+|---|---|
+| `PLANNED` | Mới đề xuất, chưa thay đổi repository |
+| `IMPLEMENTED_LOCAL` | Đã thay đổi trên local, chưa xác minh đầy đủ |
+| `TEST_PARTIAL` | Chỉ một phần kiểm tra thành công hoặc còn blocker |
+| `TEST_PASS` | Toàn bộ gate được xác định cho thay đổi đã thành công |
+| `COMMITTED_LOCAL` | Đã có commit local, chưa có bằng chứng push |
+| `PUSHED` | Đã xác minh commit tồn tại trên remote |
+| `DEPLOYED` | Đã triển khai và live-check trên môi trường đích |
+| `ROLLED_BACK` | Đã quay lại phiên bản trước và xác minh hoạt động |
+
+---
+
+## 2026-09-15 — Chuẩn bị chuyển toàn bộ CI/CD sang Jenkins
+
+### Mục tiêu và quyết định
+
+Loại GitHub Actions khỏi luồng CI/CD sau khi Jenkins thay thế đã vượt qua runtime gate. GitHub tiếp tục làm source host, Docker Hub giữ container image public; "Jenkins-only" ở đây nghĩa là mọi orchestration CI/CD do Jenkins thực hiện.
+
+- Ngày thực hiện: `2026-09-15`.
+- Nhánh làm việc: `develop` tại baseline `f8774e6df4ddcb71d704275e39c455d0f815afad`.
+
+### Thay đổi local
+
+- Thêm `Jenkinsfile.release` cho release Multibranch Pipeline riêng, chỉ chấp nhận direct branch `develop`/`main` và từ chối pull request.
+- Release job chạy lại clean install, lint, build và backend unit test trước khi build/push client/server image theo commit SHA.
+- Yêu cầu agent riêng `jenkins-builder` dùng rootless Docker, không ghi được host Docker socket và không đọc controller secrets.
+- Node builder/deploy bắt buộc dùng Job Restrictions Plugin với regex chỉ cho phép `abslider-release/develop` hoặc `abslider-release/main`; label riêng không được coi là security boundary.
+- Cài động Job Restrictions Plugin `242.v6edda_c9e4ca_f` trên controller; plugin yêu cầu Jenkins tối thiểu `2.479.3`, thấp hơn controller hiện tại `2.568.3`. Sau khi load, controller tiếp tục `active` và login endpoint loopback healthy; chưa cần restart.
+- Registry credential chỉ được cấp trong scope release; không dùng credential này trong `abslider-ci` chạy PR.
+- Thêm `deploy/bin/deploy-abslider`: wrapper root-owned nhưng chạy không đặc quyền bằng `abslider-deploy`, kiểm tra chặt environment/SHA/digest, dùng Compose rootless/project tách biệt, readiness/frontend health và rollback release trước khi candidate lỗi.
+- Tách deploy sang node `abslider-deploy-01`; node chỉ nhận manifest không chứa secret, không checkout source, không có sudo và không ghi được host Docker socket. Runtime secret nằm ngoài repository và chỉ user deploy đọc được.
+- Trên VPS, cài đúng các prerequisite rootless `uidmap`, `slirp4netns`, `fuse-overlayfs` mà không upgrade 28 package ngoài phạm vi; tạo system user/group `jenkins-builder` UID `995`, GID `985`, home `/var/lib/jenkins-builder`, shell `nologin` và password locked.
+- Cấp riêng subordinate UID/GID range `165536:65536`, không trùng range `deploy:100000:65536`; bật linger để user service tự chạy khi không có login session.
+- `dockerd-rootless-setuptool.sh install --force` tạo Docker daemon rootless riêng vì host rootful Docker vẫn cần cho workload hiện hữu. Daemon dùng Docker `29.7.2`, `overlayfs`, `slirp4netns`, có security option `rootless` và user builder không ghi được `/var/run/docker.sock`.
+- Đăng ký Jenkins permanent node `abslider-builder-01` với một executor, remote root `/var/lib/jenkins-builder`, labels `linux node24 docker-builder`, usage exclusive và inbound launch.
+- Cài `jenkins-builder-agent.service`: Remoting JAR `1406408` byte được tải từ controller và kiểm tra ZIP không lỗi; inbound secret nằm ngoài repository tại `/etc/jenkins-builder/secret`, owner `root:jenkins-builder`, mode `0640`, size `65` byte và được truyền qua cú pháp `@file`.
+- Kiểm tra ban đầu cho thấy service chạy bằng `jenkins-builder:jenkins-builder`, `NoNewPrivileges=yes`, đồng thời agent không đọc controller master key và không ghi host Docker socket. Kiểm tra tiếp theo phát hiện service rơi vào restart loop (`NRestarts=39`, `ActiveState=activating`, `SubState=auto-restart`) vì `-workDir` trỏ tới `/var/lib/jenkins-builder/remoting`, khiến Remoting yêu cầu thư mục lồng `/var/lib/jenkins-builder/remoting/remoting` chưa tồn tại.
+- Sửa có backup systemd unit để `-workDir` trỏ về remote root `/var/lib/jenkins-builder`, giữ `-failIfWorkDirIsMissing`, daemon-reload/reset-failed và khởi động lại. Service sau sửa đạt `active/running`, `MainPID=9793`, `NRestarts=0`, `ExecMainStatus=0`; backup unit là `/etc/systemd/system/jenkins-builder-agent.service.before-workdir-fix-20260914T183027Z`.
+- Log phía agent xác nhận Remoting dùng `/var/lib/jenkins-builder/remoting`, mở WebSocket và `Connected`. Log phía controller xác nhận kết nối inbound từ loopback, protocol WebSocket, Remoting `3355.3357.v931d3c992987` và `Agent successfully connected and online`.
+- Preflight dưới đúng identity `jenkins-builder` xác nhận không ghi được host Docker socket; rootless daemon dùng security options `seccomp`, `rootless`, `cgroupns` và storage driver `overlayfs`. Docker Buildx `v0.36.1` cùng Docker Compose `v5.4.0` hoạt động, đáp ứng contract trước khi chạy `Jenkinsfile.release`.
+- Tạo Multibranch Pipeline `abslider-release` ở trạng thái khóa bằng Script Path không tồn tại `Jenkinsfile.release.disabled`. Scan dùng GitHub App, xử lý 6 remote branch trong 3.9 giây nhưng chỉ kiểm tra `main` và `develop`; cả hai bị loại đúng contract vì thiếu file khóa. Không discover PR, không tạo branch job/build và queue trống; kết quả indexing `SUCCESS`.
+- Tạo credential username/password ID `ghcr-abslider-publisher` trong credential store scoped riêng cho `abslider-release`; giao diện xác nhận entry thuộc `abslider-release - Global`, trong khi GitHub App scan credential vẫn nằm ở parent `System - Global`. Token được che và không ghi vào repository hoặc nhật ký.
+- Kích hoạt Script Path `Jenkinsfile.release` với filter tạm thời chỉ gồm `develop`. Scan dùng GitHub App kết thúc `SUCCESS` trong 3.6 giây, chỉ `develop` tìm thấy release pipeline và schedule `abslider-release/develop`; `main`, các feature branch và PR không tạo build. Tại thời điểm ghi nhận, build còn trong queue nên chưa có runtime result.
+- Jenkins node config đã xác minh: remote root `/var/lib/jenkins-builder`, một executor, mode `EXCLUSIVE`, labels `linux node24 docker-builder`; Job Restrictions ban đầu dùng regex `^abslider-release/(develop|main)$` và `checkShortName=false`.
+- Build `abslider-release/develop #1` lấy đúng `Jenkinsfile.release` tại commit `d410544b5460e7025c68c8c04f8a19946e75ad5e` nhưng dừng ở `Still waiting to schedule task`. Builder vẫn connected, có đủ labels và một executor rảnh; console chỉ báo agent CI thường không có expression `linux&&node24&&docker-builder`. Đối chiếu source tag plugin `242.v6edda_c9e4ca_f` cho thấy Pipeline queue task được ghép dưới full job name, nên regex kết thúc ngay sau tên branch không nhận task con. Contract được thu hẹp đúng subtree thành `^abslider-release/(develop|main)(/.*)?$`; cần lưu trên node và xác minh build đang chờ được nhận trước khi đánh dấu PASS.
+- Sau khi lưu regex subtree, chính build `#1` đang chờ được scheduler nhận và chạy trên `abslider-builder-01`; không hủy/chạy lại. Checkout dùng GitHub App, lấy đúng remote `develop` SHA `d410544b5460e7025c68c8c04f8a19946e75ad5e`; isolated-builder gate xác nhận user, Node `24.21.0`, npm `11.19.0`, rootless Docker, Buildx và Compose đúng contract.
+- Client/server clean install PASS có cảnh báo deprecated/allowScripts; client/server lint và build PASS. Client vẫn có bundle chính `883.40 kB` vượt warning threshold `500 kB`. Backend unit tests đạt 18/18 suite, 142/142 test, 0 snapshot trong 5.651 giây.
+- Hai Docker image client/server theo đúng SHA `d410544b5460e7025c68c8c04f8a19946e75ad5e` build PASS trên rootless builder. GHCR login PASS nhưng cả hai push đều bị registry từ chối với `permission_denied: The token provided does not match expected scopes`; vì vậy không có immutable digest hoặc release manifest. Approval/deploy bị skip và build kết thúc `FAILURE`; post action vẫn ghi test/artifact, logout GHCR, xóa local SHA images, dọn workspace và gửi trạng thái về GitHub.
+- Phát hiện `docker push ... | tee` trong POSIX shell làm mất exit code của `docker push`, khiến pipeline tiếp tục push server sau khi client push đã lỗi. Sửa publish script để lưu log bằng redirect, in lại log và thoát ngay tại image push đầu tiên thất bại; không dùng `pipefail` vì Jenkins shell trên Ubuntu có thể là `dash`. Docker client config chứa login tạm thời cũng được chuyển sang thư mục `mktemp` riêng và xóa khi stage kết thúc, thay vì dùng config lâu dài trong home của builder.
+- Chốt chuyển release registry từ GHCR sang Docker Hub vì repository owner không chia sẻ PAT classic. Tạo hai public repository `ducchert87/open4um-client` và `ducchert87/open4um-server`; tạo Docker Hub access token `Read & Write` có thời hạn dưới chính tài khoản `ducchert87` và lưu thành credential `dockerhub-abslider-publisher` trong store scoped riêng cho `abslider-release`. Secret được che; credential GitHub App vẫn tách biệt tại `System - Global`.
+- Đổi image contract trong `Jenkinsfile.release` và deploy wrapper sang `docker.io/ducchert87`; đổi biến credential sang `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`. Deploy wrapper so khớp registry/repository prefix bằng literal string rồi xác minh riêng digest 64 ký tự hex, tránh dấu chấm trong hostname bị hiểu như wildcard regex. GHCR workflow và credential cũ được giữ tạm làm rollback cho tới khi Docker Hub publish theo digest PASS.
+- Commit `18cc4a984063ab77599980971e3f9040bc954abc` đã được push lên `origin/develop`. Do repository scan báo `No changes detected` và không tự schedule build mới, lượt xác minh Docker Hub được khởi chạy thủ công bằng `Build with Parameters`, giữ `DEPLOY_ENABLED=false`; automatic trigger của release pipeline vì vậy vẫn chưa PASS.
+- Build `abslider-release/develop #2` chạy đúng trên `abslider-builder-01`, checkout đúng SHA `18cc4a984063ab77599980971e3f9040bc954abc`; isolated-builder gate, client/server clean install, lint/build và backend unit test đều PASS. Backend đạt 18/18 suite, 142/142 test; client còn cảnh báo bundle `883.40 kB` vượt ngưỡng `500 kB` nhưng không làm fail build.
+- Jenkins đăng nhập Docker Hub bằng credential scoped `dockerhub-abslider-publisher`, secret được mask, rồi push thành công SHA tag và `develop` tag của cả hai image. Release manifest được archive/fingerprint; approval và deploy được skip đúng contract vì `DEPLOY_ENABLED=false`. Post action logout registry, xóa local SHA tag, dọn workspace, publish test/coverage và thông báo GitHub; Pipeline kết thúc `SUCCESS`.
+- Image immutable đã được kiểm tra pull-manifest ẩn danh trực tiếp qua Docker Registry API; digest quan sát được khớp chính xác với Jenkins: client `docker.io/ducchert87/open4um-client@sha256:f4f1d404bd902fd1f095a13c71cb874c600db116e44f814ce35216df4318881c`, server `docker.io/ducchert87/open4um-server@sha256:7a5bba898f7f2b77c3cd15921b225801dead63637406f979b833a593aa37bfcc`.
+- Production vẫn yêu cầu Jenkins `input` approval trước deploy. Tham số `DEPLOY_ENABLED` mặc định `false` để lần runtime gate đầu chỉ build/publish, chưa tác động application trên VPS.
+- Chưa xóa `.github/workflows/publish-images.yml`; workflow cũ chỉ được gỡ sau khi Jenkins publish và deploy runtime PASS, tránh tạo khoảng trống artifact pipeline.
+
+### Bằng chứng và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Repository implementation | `PUSHED` | Commit `18cc4a984063ab77599980971e3f9040bc954abc` đã xác minh trên `origin/develop` |
+| Shell syntax/static checks | `TEST_PASS` | Wrapper qua `bash -n`, Jenkins shell blocks qua `dash -n`, `git diff --check` PASS; Docker Hub digest contract được nhận tới identity gate và legacy GHCR reference bị từ chối |
+| Isolated rootless builder daemon | `TEST_PASS` — VPS | `jenkins-builder` UID 995; rootless Docker active, linger enabled, host socket không writable |
+| Jenkins builder service | `TEST_PASS` — VPS | Workdir đã sửa về `/var/lib/jenkins-builder`; service `active/running`, `NRestarts=0`, `ExecMainStatus=0` |
+| Jenkins builder connection | `TEST_PASS` — VPS | Agent-side `WebSocket connection open`/`Connected`; controller-side xác nhận node online |
+| Jenkins builder toolchain | `TEST_PASS` — VPS | Rootless Docker/overlayfs, Buildx `v0.36.1`, Compose `v5.4.0`; host socket không writable |
+| Release Multibranch bootstrap | `TEST_PASS` — Jenkins | `abslider-release` scan chỉ `develop/main`; disabled Script Path ngăn mọi build trước credential gate |
+| First Jenkins release run | `TEST_PARTIAL` | Builder/checkout/install/lint/build/unit test và hai image build PASS; GHCR push FAIL do token thiếu scope/quyền, deploy bị skip |
+| Job Restrictions plugin | `TEST_PASS` — VPS | Version `242.v6edda_c9e4ca_f` đã load; Jenkins vẫn healthy |
+| Privileged-node job restriction | `TEST_PASS` — builder | Regex subtree `^abslider-release/(develop|main)(/.*)?$` cho phép release Pipeline task; build `#1` chạy đúng builder |
+| Prior GHCR Jenkins credential | `TEST_PARTIAL` | ID `ghcr-abslider-publisher` đúng release scope và secret được mask; registry từ chối push vì token không có expected scopes/quyền package |
+| Prior GHCR image publishing | `TEST_FAIL` | Login PASS nhưng client/server push đều bị `permission_denied`; chưa có digest/manifest mới |
+| Docker Hub public repositories | `TEST_PASS` — external | `ducchert87/open4um-client` và `ducchert87/open4um-server` tồn tại, visibility Public |
+| Docker Hub Jenkins credential | `TEST_PASS` — scope | ID `dockerhub-abslider-publisher`, username `ducchert87`, nằm trong `abslider-release - Global`; token được mask |
+| Docker Hub image publishing | `TEST_PASS` | Build `abslider-release/develop #2` push SHA/`develop` tags thành công; hai immutable digest được kiểm tra ẩn danh và khớp registry |
+| Automatic release trigger | `TEST_PARTIAL` | Scan nhận đúng SHA `18cc4a9` nhưng báo `No changes detected`; build `#2` phải khởi chạy thủ công |
+| Development deploy | `NOT_STARTED` | Chưa có secret env/Nginx runtime gate |
+| Production deploy | `NOT_STARTED` | Yêu cầu Development PASS và manual approval |
+| GitHub Actions removal | `PLANNED` | Chỉ xóa sau Jenkins replacement proof |
+| Existing Jenkins CI after push | `TEST_PASS` | Commit `d410544` có context `continuous-integration/jenkins/pr-merge=success`, build `PR-13 #14` |
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile.release`
+- `deploy/bin/deploy-abslider`
+- `deploy/README.md`
+- `docs/github-workflow.md`
+- `docs/devops-change-log.md`
+
+---
+
+## 2026-09-15 — Chuyển Jenkins CI lên VPS và xác minh hoạt động 24/7
+
+### Mục tiêu và phạm vi
+
+Chuyển nguyên trạng Jenkins controller cùng build agent từ workstation lên VPS `life-os-prod-01`, công bố giao diện qua HTTPS và xác minh CI vẫn tự hoạt động sau reboot. Jenkins tiếp tục chỉ làm quality gate; GitHub Actions vẫn build/publish image GHCR và chưa deploy ứng dụng ABSlider.
+
+### Migration controller và agent
+
+- Dừng controller local để tạo snapshot nhất quán của `JENKINS_HOME`, sau đó khởi động lại tạm thời làm rollback trong lúc chuyển dữ liệu.
+- Chuyển archive `abslider-jenkins-home-20260914T161422Z.tar.gz`, kích thước `212180267` byte, SHA-256 `0073a1c346327e4b041161dbad2c5607cfd62106486d1bfa9179660f9d63810a` lên VPS và xác minh checksum hai đầu trùng nhau.
+- Restore controller bằng đúng Jenkins `2.568.3`/Java 21, giữ job `abslider-ci`, node `abslider-agent-01`, GitHub App credential `github-app-abslider-ci`, lịch sử build và cấu hình plugin.
+- Controller chạy bằng system user `jenkins`, Built-In Node có 0 executor và chỉ bind `127.0.0.1:8080`.
+- Tạo lại system user `jenkins-agent`, cài root-owned Remoting binary và inbound secret ngoài repository; systemd service chạy bằng `jenkins-agent:jenkins-agent`, `NoNewPrivileges=yes`, `Restart=always` và phụ thuộc `jenkins.service`/`network-online.target`.
+- Agent không thuộc group `docker`, không ghi được Docker socket và không đọc được controller master key. Việc build/publish image tiếp tục do GitHub Actions đảm nhiệm.
+- Sau khi VPS vượt qua runtime gate, disable controller và agent trên workstation. Cả hai service local hiện `disabled/inactive`, port local `8080` không còn listen; dữ liệu local vẫn được giữ làm rollback ngắn hạn.
+
+### DNS, Nginx, TLS và quyền truy cập
+
+- Tạo DNS A `ci.sbltcup.dev -> 163.128.42.78`, TTL 300; chưa tạo AAAA.
+- Thêm Nginx reverse proxy riêng cho Jenkins, gồm WebSocket/forwarded headers; không thay đổi hai virtual host Life-OS.
+- Let's Encrypt cấp certificate ECDSA riêng cho `ci.sbltcup.dev`, hết hạn `2026-12-13`; Certbot đã deploy vào Nginx và renewal timer `enabled/active`.
+- Kiểm tra từ workstation: `https://ci.sbltcup.dev/login` trả HTTP `200`, TLS verification code `0`; HTTP chuyển hướng `301` sang HTTPS.
+- Port public `80`, `443`, `8686` tiếp tục truy cập được; `8080` bị chặn từ Internet và Jenkins backend chỉ listen loopback.
+- Jenkins Location URL được đổi thành `https://ci.sbltcup.dev/`, nên commit status mới trên GitHub mở được từ xa.
+- Chuyển authorization từ `FullControlOnceLoggedIn` sang Global Matrix Authorization, tắt signup, không cấp quyền cho `anonymous` hoặc nhóm `authenticated`; probe ẩn danh vào dashboard/job trả `403`.
+- Nhóm quyết định dùng chung tài khoản `duckcy` có `Overall/Administer`. Đây là rủi ro đã chấp nhận: không có attribution theo từng người và mọi người dùng chung đều có quyền quản trị Jenkins; không ghi password vào repository hoặc nhật ký.
+
+### Runtime và reboot evidence
+
+- Lần chạy đầu trên VPS (`PR-13 #8`) thất bại ở client build vì clean install lạnh không có native optional package `lightningcss-linux-x64-gnu`. Log npm xác nhận optional dependency bị loại trong lần đó.
+- Hai clean-install chẩn đoán độc lập sau đó, gồm default và explicit glibc, đều cài đúng GNU/musl packages và load `lightningcss` thành công; không sửa source hoặc lockfile chỉ dựa trên lỗi transient.
+- `PR-13 #9` chạy lại trên VPS và PASS toàn bộ: client/server clean install, lint/build, 18/18 unit-test suite và 142/142 test; JUnit/coverage được publish và GitHub được thông báo.
+- Sau khi đổi Jenkins Location URL, `PR-13 #10` tiếp tục PASS và GitHub status của commit `a76713147e6f995301ae7e12628832aac1861e2e` trỏ tới HTTPS public.
+- Reboot VPS lúc `2026-09-14 17:16 UTC`: boot ID đổi từ `7b02b04f-e4d8-40f0-909d-023c131329ee` sang `ca2869b6-1e8b-40ed-87af-2c5cb2af9540`; kernel đổi từ `6.8.0-138-generic` sang `6.8.0-139-generic`.
+- Sau reboot, Jenkins controller, agent và Nginx đều `enabled/active`; HTTPS vẫn trả `200`, TLS hợp lệ và port `8080` vẫn không public.
+- `PR-13 #11` là workload proof sau reboot: chạy trên `abslider-agent-01` bằng Node `24.21.0`/npm `11.19.0`; client/backend lint/build PASS, 18/18 suite và 142/142 test PASS, JUnit/coverage được lưu, GitHub notification thành công và Pipeline kết thúc `SUCCESS`.
+- GitHub Commit Status API xác nhận context `continuous-integration/jenkins/pr-merge=success` với target URL `https://ci.sbltcup.dev/job/abslider-ci/job/PR-13/11/display/redirect`.
+- Periodic scan sau reboot tự chạy lúc `2026-09-14 17:18 UTC` với cause `Started by timer`, hoàn tất branch indexing trong 10 giây và kết thúc `SUCCESS`. Đây là bằng chứng timer vẫn hoạt động mà không cần workstation.
+
+### Life-OS và tài nguyên rollback
+
+- Trước reboot, disable `pm2-deploy.service`, `postgresql.service`, cluster `postgresql@16-main` và hai backup timers; đổi `/etc/postgresql/16/main/start.conf` từ `auto` sang `manual` sau khi tạo bản backup có timestamp.
+- Sau reboot, các unit Life-OS trên vẫn `disabled/inactive`, PostgreSQL cluster down, hai container staging vẫn exited và không có listener `3001`, `3002`, `5432`.
+- Sau khi post-reboot workload và timer gate PASS, xóa theo phê duyệt đúng ba target tạm: archive migration trên VPS, fresh-controller backup trên VPS và archive migration local. Kiểm tra độc lập xác nhận cả ba path không còn; active `/var/lib/jenkins` trên VPS vẫn healthy và `/var/lib/jenkins` local vẫn được giữ làm rollback ngắn hạn. Các target được xóa trực tiếp, không chuyển vào Trash.
+- Jenkins System Admin email vẫn là placeholder `nobody@nowhere`; cần đặt địa chỉ vận hành thật trước khi bật notification email.
+
+### Gate và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Controller migration | `DEPLOYED` | Jenkins `2.568.3` chạy trên VPS, job/credential/history được restore |
+| Isolated build agent | `DEPLOYED` | systemd agent active; không có Docker/controller-secret privilege |
+| Public Jenkins URL | `DEPLOYED` | `https://ci.sbltcup.dev/`, TLS hợp lệ, HTTP redirect |
+| Network isolation | `TEST_PASS` | Backend `8080` chỉ loopback và không truy cập được từ Internet |
+| Post-reboot workload | `TEST_PASS` | `PR-13 #11`, 18/18 suite, 142/142 test PASS |
+| Automatic periodic scan | `TEST_PASS` | `Started by timer` sau reboot, indexing `SUCCESS` |
+| GitHub status link | `TEST_PASS` | Context success và target URL HTTPS public |
+| Local Jenkins retirement | `TEST_PASS` | Controller/agent local `disabled/inactive`, port 8080 đóng |
+| Life-OS persistent pause | `TEST_PASS` | Vẫn disabled/inactive sau reboot; dữ liệu chưa bị xóa |
+| Access control | `RISK_ACCEPTED` | Chỉ `duckcy` có Administer nhưng nhóm dùng chung tài khoản này |
+| Migration artifact cleanup | `TEST_PASS` | Ba target tạm đã xóa và xác minh absent; giữ local `JENKINS_HOME` làm rollback |
+| Jenkins admin email | `NOT_CONFIGURED` | Vẫn là `nobody@nowhere` |
+| GitHub webhook | `NOT_CONFIGURED` | Dùng periodic scan 15 phút đã runtime PASS |
+| ABSlider Development/Production deploy | `NOT_STARTED` | CI hoàn tất; CD/VPS application runtime chưa triển khai |
+
+### File repository bị ảnh hưởng
+
+- `docs/github-workflow.md`
+- `docs/devops-change-log.md`
+
+---
+
+## 2026-09-14 — Chốt Jenkins CI và GitHub Actions publish image GHCR
+
+### Mục tiêu và quyết định
+
+Giữ Jenkins làm quality gate duy nhất, còn GitHub Actions chỉ nhận nhiệm vụ build/publish artifact sau khi Jenkins PASS đúng commit SHA. Lượt này chưa cấp SSH credential, chưa thay đổi VPS và chưa deploy Development/Production.
+
+Luồng đã chốt:
+
+```text
+PR/push -> Jenkins CI -> GitHub commit status
+
+develop + Jenkins PASS -> build/push image theo SHA -> Development (giai đoạn sau)
+main + Jenkins PASS -> build/push image theo SHA -> approval -> Production (giai đoạn sau)
+```
+
+### Thay đổi repository
+
+- Thêm `.github/workflows/publish-images.yml`, chỉ trigger trên push vào `develop`/`main` hoặc dispatch thủ công trên đúng hai nhánh.
+- Workflow gọi GitHub Commit Status API và chỉ chấp nhận context bắt đầu bằng `continuous-integration/jenkins/` của đúng `github.sha`:
+  - `success`: tiếp tục build/publish.
+  - `failure` hoặc `error`: dừng ngay.
+  - `missing` hoặc `pending`: poll mỗi 15 giây, tối đa 25 phút.
+- Checkout action được khóa theo commit `d23441a48e516b6c34aea4fa41551a30e30af803` (`actions/checkout` v6).
+- Build client/server cho `linux/amd64`, gắn OCI source/revision/ref labels và tag chính xác bằng commit SHA.
+- Client `develop` compile với API Development; client `main` compile với API Production.
+- Publish hai package `ghcr.io/zunohoang/open4um-client` và `ghcr.io/zunohoang/open4um-server` bằng `GITHUB_TOKEN`. Quyền workflow giới hạn ở `contents: read`, `statuses: read`, `packages: write`.
+- Sau push, workflow kiểm tra digest registry có dạng `sha256:<64 hex>`, ghi reference theo digest vào job summary và mới cập nhật tag tiện lợi `develop`/`main`. Deploy sau này bắt buộc dùng digest, không dùng tag động.
+- Không chạy workflow từ `pull_request`, không thêm PAT, registry password hoặc SSH key.
+- Cập nhật `docs/github-workflow.md`, loại mô tả cũ về GitHub Actions làm CI, deploy server bằng tag `latest` và host client trên Vercel.
+
+### Runtime đầu tiên và sửa digest parser
+
+- Commit `fb8763cec2fd13f91edc68cf2ec52a30599c5eb6` đã được push lên `origin/develop`; GitHub Actions tạo run `34855287962` từ push event.
+- Workflow chờ đúng Jenkins SHA: 16 lần đầu chưa có context, lần 17-18 nhận `continuous-integration/jenkins/pr-merge=pending`, lần 19 nhận `success` rồi mới checkout/build.
+- Checkout, client/server Docker build và GHCR login đều PASS. Hai image theo SHA đã thực sự được publish và pull manifest ẩn danh thành công:
+  - Client: `ghcr.io/zunohoang/open4um-client@sha256:2f3f087ed23fa557ed62d8169c8988180829d2b9c49cfea47ad072f8fd404645`.
+  - Server: `ghcr.io/zunohoang/open4um-server@sha256:ed99158d0d09eed2d8fd8c71fa503d29e6f2efcf6a80e5b347c8dddb4cc6d8ca`.
+- Run vẫn kết thúc `failure` tại bước `Push images and capture digests`. Nguyên nhân là Docker in dòng `<tag>: digest: sha256:... size: ...`, trong khi parser cũ chỉ chấp nhận `digest:` ở field đầu nên trả chuỗi rỗng dù push đã thành công.
+- Sửa parser để tìm token `digest:` ở bất kỳ field nào và lấy field ngay sau nó; giữ nguyên regex xác minh digest `sha256:<64 hex>` trước khi tạo output/tag nhánh.
+- Regression dùng nguyên dòng client push trong run thất bại đã lấy đúng digest `sha256:2f3f087e...`; YAML parse, toàn bộ `run` block qua `bash -n`, Prettier và `actionlint v1.7.12` đều PASS sau sửa.
+- Commit sửa `1124006fdfe5f31e67d5cd80773d3dc692cd1af5` đã được push lên `origin/develop`. Jenkins `PR-13 #6` publish `continuous-integration/jenkins/pr-merge=success` cho đúng SHA này.
+- GitHub Actions run `34856425200` chờ Jenkins khoảng 5 phút 22 giây, sau đó checkout, build, login, push/capture digest, logout và post-checkout cleanup đều PASS; run hoàn tất `success` trong 6 phút 25 giây.
+- Artifact Development đã xác minh bằng manifest pull không cần login:
+  - Client: `ghcr.io/zunohoang/open4um-client@sha256:6bc0343fcdd8c086e8cb0a930bb0a7cebf7d4d4f9495de3a254ac922d271f88f`.
+  - Server: `ghcr.io/zunohoang/open4um-server@sha256:606608145b04ff97eddb3c304b4143792e0e532e13a43e7c1e2b3761d71ba377`.
+- Hai tag tiện lợi `open4um-client:develop` và `open4um-server:develop` cùng resolve chính xác về hai digest trên. Đây là registry proof; chưa phải VPS deployment proof.
+- Sau runtime PASS, giới hạn push trigger bằng path filter `client/**`, `server/**` và chính `publish-images.yml`. Commit chỉ sửa tài liệu hoặc deployment metadata sẽ không build/push image mới; `workflow_dispatch` vẫn cho phép publish thủ công khi cần.
+
+### Gate và trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| YAML và shell syntax | `TEST_PASS` | `js-yaml` parse PASS; toàn bộ `run` block qua `bash -n` |
+| GitHub Actions validator | `TEST_PASS` | `actionlint v1.7.12` chính chủ, archive checksum PASS và workflow không có diagnostic |
+| Workflow formatting | `TEST_PASS` | Prettier không báo lỗi cho `publish-images.yml` |
+| Jenkins exact-SHA filter | `TEST_PASS` — static/API | Mock `success`/`missing` PASS; Status API của `6bc11aa` trả `continuous-integration/jenkins/pr-merge=success` |
+| Whitespace/error markers | `TEST_PASS` | `git diff --check` không trả lỗi |
+| Workflow và parser commit/push | `PUSHED` | Workflow `fb8763c`; parser correction `1124006` trên `origin/develop` |
+| Runtime evidence documentation | `IMPLEMENTED_LOCAL` | Cập nhật kết quả run #2 chưa commit/push |
+| GitHub Actions runtime | `TEST_PASS` | Run `34856425200`, đúng SHA `1124006`, toàn bộ step PASS |
+| GHCR client/server package | `TEST_PASS` | Hai image `1124006` tồn tại; SHA tag và `develop` tag cùng digest |
+| Package visibility/anonymous pull | `TEST_PASS` | `docker manifest inspect` không cần login PASS cho cả client/server |
+| Digest parser correction | `TEST_PASS` — runtime | `Push images and capture digests` PASS trong run #2 |
+| Image publish path filter | `TEST_PASS` — static | Exact YAML paths, bash syntax, Prettier và actionlint PASS; chờ Actions runtime |
+| Development deploy | `NOT_STARTED` | Chưa có deploy wrapper/GitHub Environment/SSH credential |
+| Production deploy/approval/rollback | `NOT_STARTED` | Chỉ làm sau Development live gate |
+| VPS/DNS/Nginx/TLS | `UNCHANGED` | Ngoài phạm vi lượt này |
+
+---
+
+## 2026-09-14 — Tạo runtime contract tách biệt cho ABSlider Production/Development
+
+### Mục tiêu
+
+Chuẩn bị một artifact/runtime contract có thể dùng chung cho hai môi trường trên cùng VPS mà không dùng chung container, network hoặc volume. Chưa triển khai VPS, chưa publish registry và chưa thay đổi DNS/Nginx/TLS trong bước này.
+
+### Thay đổi repository
+
+- Khóa CORS backend theo danh sách `CORS_ALLOWED_ORIGINS` phân tách bằng dấu phẩy. Request không có `Origin` vẫn được phép cho health check/server-to-server; origin browser không nằm trong allowlist không nhận header CORS.
+- Production chỉ chấp nhận origin HTTPS, không chấp nhận localhost hoặc URL có credential/path/query/fragment.
+- Tách MinIO client nội bộ khỏi client ký URL public:
+  - `MINIO_ENDPOINT` và `MINIO_USE_SSL` dùng cho kết nối container nội bộ.
+  - `MINIO_PUBLIC_ENDPOINT` bắt buộc là HTTPS origin trên production và được dùng để tạo presigned download URL.
+  - Hai client đặt region cố định `us-east-1` để ký URL không cần dò region qua endpoint public.
+- Thêm frontend multi-stage image:
+  - Build bằng Node `24.21.0` đã khóa digest.
+  - Compile `VITE_API_BASE_URL` và email-verification flag bằng build arguments.
+  - Runtime dùng Nginx `1.28.0-alpine` đã khóa digest, chạy bằng user `nginx`, listen port `8080`, có SPA fallback và `/health`.
+- Tối ưu backend Dockerfile để chỉ chạy một `npm ci`; build và production prune dùng chung dependencies layer. Thay đổi này được thực hiện sau khi hai lượt build riêng biệt lần lượt timeout ở một trong hai lệnh `npm ci` trùng lặp.
+- Thêm `deploy/compose.yml` dùng chung cho hai môi trường:
+  - Không dùng `container_name` hoặc volume `name` cố định.
+  - Bắt buộc dùng project name khác nhau, dự kiến `abslider-production` và `abslider-develop`; Compose tự prefix network/volume theo project.
+  - MongoDB/Redis không publish port. Frontend, backend và MinIO API chỉ bind vào `127.0.0.1`; MinIO console không publish.
+  - MongoDB `8.0.30`, Redis 7 Alpine và MinIO release được khóa theo digest; có dependency health checks và log rotation.
+  - Image client/server được nhận từ env để sau này điền image digest bất biến, không hard-code mutable deployment tag.
+- Thêm `deploy/.env.example` chỉ chứa placeholder và port/domain mẫu; production/development phải dùng hai secret file bên ngoài repository và không tái sử dụng database, MinIO, JWT, admin hoặc email credential.
+- Mở rộng Jenkinsfile: clean-install client/server song song, chạy lint/build cho cả hai và tiếp tục backend unit-test/JUnit/coverage. Chưa cấp Docker hoặc SSH/production secret cho CI agent và chưa thêm deploy stage.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server lint/build | PASS | ESLint và TypeScript/alias build đều exit `0` |
+| Server focused tests | PASS | 3/3 suite, 19/19 test |
+| Server full tests | PASS | 21/21 suite, 180/180 test, 0 snapshot; 22.642 giây |
+| Jenkins backend unit command | PASS | 18/18 suite, 142/142 test; JUnit và coverage được sinh |
+| Client lint | PASS | ESLint exit `0` |
+| Client build/typecheck | PASS có cảnh báo | 427 module; bundle chính 883.40 kB vượt warning 500 kB |
+| Compose render | PASS | `docker compose ... config --quiet` với env placeholder và project name riêng |
+| Frontend image build | PASS có cảnh báo | Image local `sha256:0696da09...`, 21,406,141 byte; còn 2 moderate dependency advisories và install-script warnings |
+| Backend image build | PASS có cảnh báo | Image local cuối `sha256:5078010e...`, 60,790,613 byte; còn 4 moderate dependency advisories và install-script warnings |
+| Initial backend image builds | FAIL do network | Hai lượt đầu gặp npm registry `ETIMEDOUT` ở hai stage `npm ci` khác nhau; không phải source/dependency resolution failure |
+| Backend Docker dependency flow | PASS | Sau khi dùng một clean-install layer, build và `npm prune --omit=dev` hoàn tất |
+| Compose runtime smoke | PASS | Project tạm cuối `abslider-gate1-final`; MongoDB, Redis, MinIO, server và client đều `healthy` |
+| Dependency readiness | PASS | `/api/v1/health/ready` trả MongoDB/Redis/MinIO đều `up` |
+| Frontend/MinIO health | PASS | Frontend `/health` trả `ok`; MinIO live check exit `0` |
+| CORS allowlist | PASS | `slides.sbltcup.dev` nhận đúng `Access-Control-Allow-Origin`; origin không tin cậy không nhận header này |
+| Frontend API build contract | PASS | Runtime asset chứa `https://slides-api.sbltcup.dev/api/v1` |
+| MinIO public URL contract | PASS | Presign smoke trả origin `https://slides-media.sbltcup.dev` và có signature; không in giá trị signature |
+| Runtime identity | PASS | Client UID/GID `101`; server UID/GID `10001`; cả hai non-root |
+| Loopback exposure | PASS | Client `4100`, server `4101`, MinIO `4102` chỉ bind `127.0.0.1`; MongoDB/Redis không publish |
+| Native bcrypt runtime | PASS | Hash/compare chạy thành công trong backend final image |
+| Temporary smoke cleanup | PASS | Xóa đúng hai project smoke, network và các volume tạm; xác minh không còn resource `abslider-gate1-20260914*` hoặc `abslider-gate1-final*` |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+### Bằng chứng Jenkins runtime sau push
+
+- Commit Gate 1 `b5fd3f16d79c3b59e5caeb2fda25e3caf3d7cb3c` được push lên `origin/develop` và trở thành head của PR #13 hướng vào `main` tại `74ccef913168259aad9f920c0016f7b96a5730c6`.
+- Branch indexing lúc 19:33:24 kết nối GitHub bằng App ID `4932639`, lấy Jenkinsfile từ tổ hợp PR head/target và schedule build `abslider-ci/PR-13 #3`.
+- Merge strategy đưa `main` vào PR head thành công; vì `main` là ancestor, revision checkout vẫn đúng `b5fd3f1`. Jenkins log ghi đúng commit message `feat(devops): add isolated deployment runtime`.
+- Pipeline chạy trên `abslider-agent-01` tại workspace `/var/lib/jenkins-agent/workspace/abslider-ci_PR-13`, bằng user `jenkins-agent`; không đọc được controller master key và dùng đúng Node `24.21.0`, npm `11.19.0`.
+- Client/server clean-install chạy song song, lần lượt cài 254 và 852 package. Install-script/deprecation warning còn được ghi nhận nhưng hai lệnh đều exit `0`.
+- Client lint/build và backend lint/build chạy song song đều PASS. Client build 427 module trong 1.98 giây; bundle 883.40 kB tiếp tục là warning, không phải failure.
+- Backend unit test đạt 18/18 suite, 142/142 test, 0 snapshot trong 1.619 giây. Coverage tổng: statements 78.65%, branches 62.42%, functions 80.70%, lines 80.52%.
+- Post Actions ghi JUnit, archive coverage và dọn workspace. Checks API chưa có publisher phù hợp nhưng Jenkins vẫn thông báo kết quả commit qua GitHub status; Pipeline kết thúc `Finished: SUCCESS` sau khoảng 31 giây.
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile`
+- `client/.dockerignore`
+- `client/Dockerfile`
+- `client/nginx.conf`
+- `deploy/.env.example`
+- `deploy/README.md`
+- `deploy/compose.yml`
+- `server/.env.example`
+- `server/Dockerfile`
+- `server/src/app.ts`
+- `server/src/config/cors.ts`
+- `server/src/config/env.ts`
+- `server/src/lib/minio.ts`
+- `server/src/services/lecture.service.ts`
+- `server/tests/setup.ts`
+- `server/tests/unit/config/cors.test.ts`
+- `server/tests/unit/config/env.test.ts`
+- `docs/devops-change-log.md`
+
+### Trạng thái và bước còn lại
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Production env/CORS/MinIO contract | `TEST_PASS` | Đã test tĩnh và runtime local |
+| Frontend/backend images | `TEST_PASS` | Chỉ là local images; chưa publish registry |
+| Dual-environment Compose | `TEST_PASS` | Render và isolated runtime smoke local PASS; chưa chạy trên VPS |
+| Jenkins quality gate mở rộng | `TEST_PASS` | Jenkins `PR-13 #3`; parallel client/server install + lint/build và 142 unit tests PASS |
+| DNS/Nginx/TLS | `NOT_STARTED` | Các domain `slides*`/`ci` chưa trỏ VPS |
+| Registry/deploy/rollback | `NOT_STARTED` | Chưa có GHCR package, digest release manifest hoặc VPS deploy credential |
+| Production release từ `main` | `BLOCKED` | `main` còn cũ; chỉ merge `develop → main` sau CI/development live gate |
+| Repository commit/push | `PUSHED` | `b5fd3f16d79c3b59e5caeb2fda25e3caf3d7cb3c` đã xác minh trên `origin/develop` và Jenkins checkout |
+| VPS deployment | `NOT_STARTED` | Không ghi nhận `DEPLOYED` trước khi có live-check qua HTTPS |
+
+---
+
+## 2026-09-14 — Audit VPS dùng chung và tạo service account ABSlider
+
+### Mục tiêu và phạm vi
+
+Rà soát VPS `life-os-prod-01` trước khi tạm dừng Life-OS và triển khai ABSlider/Jenkins trên cùng host. Audit chỉ đọc metadata cần thiết, không đọc hoặc ghi giá trị secret. Sau audit, tạo riêng system account `abslider-deploy` để sở hữu runtime ABSlider; tài khoản này không dành cho PM hoặc đăng nhập tương tác.
+
+### Baseline VPS trước thay đổi
+
+- Ubuntu `24.04.4 LTS`, kernel `6.8.0-138-generic`, 2 vCPU.
+- RAM 3.8 GiB, khoảng 2.9 GiB available; swap 2 GiB chưa sử dụng.
+- Root filesystem 38 GiB, đã dùng 15 GiB, còn 24 GiB; inode sử dụng 9%.
+- Host báo cần reboot và có 26 package có thể nâng cấp; chưa update, autoremove hoặc reboot trong lượt này.
+- Nginx, Docker, PostgreSQL, PM2, Fail2ban và Certbot timer đang active.
+- Life-OS production API chạy bằng PM2 tại port `3001`; staging API/PostgreSQL chạy trong Compose project `life-os-staging`.
+- Bốn health check production/staging qua loopback và HTTPS đều trả HTTP `200` trước khi có thay đổi.
+
+### Kết quả audit dữ liệu và khả năng khôi phục
+
+- Bản dump mới nhất của Life-OS production và staging đều tồn tại, có permission `0600 deploy:deploy`.
+- Kiểm tra checksum của cả hai dump: PASS.
+- `pg_restore --list` cho cả hai dump: PASS; đây là bằng chứng archive đọc được, chưa phải full restore drill.
+- Docker volume staging `life-os-postgres-staging` và bind mount Knowledge vẫn còn nguyên.
+- Các file env Life-OS production/staging có permission `0600 deploy:deploy`; audit không đọc giá trị bên trong.
+- `life-os-staging-backup.service` gần nhất thành công.
+- `life-os-production-backup.service` gần nhất exit code `1` và đang ở trạng thái `failed`, dù local dump production hợp lệ. Journal xác nhận tiến trình Restic dừng với `Fatal: Please specify repository location (-r or --repository-file)`; service chạy bằng `deploy` qua `/usr/bin/timeout --foreground 2h /home/deploy/bin/life-os-backup-production`.
+- Đối chiếu production/staging cho thấy production chỉ source `restic.env` và `production.env`, trong khi staging có contract auto-export và validate biến bắt buộc. Kiểm tra không in giá trị xác nhận `RESTIC_REPOSITORY=SHELL_ONLY`, `RESTIC_PASSWORD_FILE=SHELL_ONLY`, `RESTIC_PASSWORD=UNSET`. Vì hai biến cần thiết không được export sang process con, Restic không nhận repository/password-file. Đây là nguyên nhân gốc đã xác minh; chưa sửa hoặc chạy lại backup ở thời điểm ghi nhận này.
+- Sao lưu script thành `/home/deploy/bin/life-os-backup-production.before-export-fix-20260914T083618+0000`, sau đó bọc hai lệnh source bằng `set -a`/`set +a`. `bash -n` PASS; script và bản backup đều giữ owner `deploy:deploy`, mode `0700`.
+- Probe chẩn đoán sau sửa xác nhận `RESTIC_REPOSITORY` và `RESTIC_PASSWORD_FILE` đều đã export. `timeout 60s restic cat config` PASS khi chạy bằng đúng identity/home `deploy`; repository và password file truy cập được mà không in giá trị. Chưa chạy backup service thật ở thời điểm ghi nhận này.
+- Chạy lại `life-os-production-backup.service` lúc 08:55 UTC sau khi production API health PASS. Restic xử lý hai file, ghi khoảng 97 KiB vào repository và lưu snapshot `973167d3` thành công. Bước `forget --prune` sau đó thất bại vì repository còn lock mang PID `2528351`, tạo lúc 08:36 UTC trên cùng host/user; service kết thúc exit `1`. Chưa unlock cho tới khi xác minh PID không còn sống và không có backup production/staging nào đang chạy.
+- Xác minh lock `f9f2455c...` là stale: `/proc/2528351` không tồn tại; production service ở `failed`, staging service `inactive/dead` với kết quả success; `pgrep` không tìm thấy process Restic/backup của user `deploy`. `restic list locks` chỉ liệt kê lock này. Đủ điều kiện chạy `restic unlock` mặc định; không dùng `--remove-all`.
+- Chạy `restic unlock` mặc định bằng user `deploy`; Restic báo xóa đúng một lock. `restic list locks` ngay sau đó trả danh sách trống và kiểm tra ID mục tiêu xác nhận lock không còn. Chưa dùng `--remove-all` và chưa xóa snapshot/dữ liệu backup.
+- Chạy lại service lần cuối lúc 09:15 UTC. Google Drive API trả `403 RATE_LIMIT_EXCEEDED` tạm thời cho một object nhưng Restic tự retry và ghi thành công sau một lần thử lại. Snapshot production mới `2946938d` được lưu; `forget --prune` thoát thành công, script in `Production backup completed`, systemd trả `Result=success`, `ExecMainStatus=0`, `inactive/dead`; production API vẫn healthy. `ExecMainCode=1` là systemd `CLD_EXITED`, không phải exit status lỗi.
+- Log retention cho thấy production `forget` đang xét cả snapshot staging/cutover và chia nhiều nhóm theo đường dẫn dump có timestamp; mỗi nhóm chỉ có một snapshot và đều được giữ. Chưa thấy snapshot bị xóa trong lần chạy này, nhưng policy hiện tại vừa thiếu giới hạn tag production vừa có dấu hiệu không gom các lần backup cùng môi trường, nên cần sửa contract retention sau restore drill.
+- Restore drill đúng snapshot `2946938d` vào thư mục tạm riêng thành công: khôi phục dump 97,008 byte và checksum 96 byte; `sha256sum --check` trả `OK`, `pg_restore --list` PASS. Thư mục restore tạm được cleanup theo path guard và `restic list locks` sau restore trống. Đây là archive-level restore proof; chưa restore vào một PostgreSQL database tạm và chưa khởi động ứng dụng trên dữ liệu phục hồi.
+- Retention dry-run dùng `--tag production --group-by host,tags` chỉ xét production: giữ `16a23a7b`, `2946938d` và dự kiến bỏ snapshot trùng cùng ngày `973167d3`. Dry-run tương ứng cho staging chỉ xét tag staging: giữ 17 snapshot thế hệ có `knowledge-files` cùng một snapshot staging cũ không có tag này, dự kiến bỏ 6 snapshot cũ `2208a570`, `fa64d48e`, `e8c46d5f`, `0987a4dd`, `b0d49973`, `79d476e6`. Snapshot cutover không bị chọn; dry-run không để lại lock. Chưa patch script vì thay đổi sẽ kích hoạt xóa thật ở lần timer/service kế tiếp và cần xác nhận phạm vi xóa.
+
+### Phát hiện mạng và bảo mật
+
+- Nginx config syntax PASS qua `sudo nginx -t`.
+- Fail2ban active với jail `sshd`.
+- Baseline từ ngoài VPS cho thấy các port `80`, `443`, `8686` và `3001` truy cập được; `3002`, `5432`, `8080`, `9000`, `9001` đóng hoặc bị lọc.
+- Baseline SSH cho phép root/password/X11 vì dòng `Include /etc/ssh/sshd_config.d/*.conf` trong file chính bị comment, làm drop-in `60-life-os.conf` không có hiệu lực.
+- Sao lưu cả file chính và drop-in với hậu tố thời gian trước khi sửa. Kích hoạt `Include`, giữ port `8686` ở drop-in và loại khai báo port trùng khỏi file chính.
+- `sshd -t` PASS trước và sau khi chuẩn hóa. Effective config sau sửa: `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`, `X11Forwarding no`, `AllowUsers deploy`.
+- Reload `ssh.service` thành công; service vẫn `active/running`, `ExecMainStatus=0`. Một kết nối mới từ ngoài host dùng `BatchMode=yes`, chỉ cho phép public key và tắt password fallback đã đăng nhập thành công bằng user `deploy`.
+- Bật UFW cho cả IPv4/IPv6 với logging `low`; policy là deny incoming, allow outgoing và deny routed. Chỉ allow inbound TCP `8686`, `80`, `443`.
+- Kiểm tra từ ngoài sau khi bật UFW: `80`, `443`, `8686` kết nối được; `3001` timeout và không còn bypass Nginx từ Internet. Life-OS production API vẫn bind `*:3001`, nên vẫn cần cân nhắc đổi về loopback khi bảo trì cấu hình runtime.
+- Sau firewall, `https://api.sbltcup.dev/health/db` và `https://staging-api.sbltcup.dev/health/db` đều tiếp tục trả HTTP `200`.
+- DNS `ci.sbltcup.dev` và các domain `slides*` chưa resolve tại thời điểm audit.
+- TLS hiện tại của `api.sbltcup.dev` và `staging-api.sbltcup.dev` hợp lệ; Certbot timer active.
+
+### Tạo service account ABSlider
+
+- Tạo system group/user `abslider-deploy`, UID `999`, GID `987`.
+- Home `/var/lib/abslider-deploy`, mode `0750`, owner `abslider-deploy:abslider-deploy`.
+- Shell `/usr/sbin/nologin`; password ở trạng thái locked.
+- Không thêm user vào group `sudo` hoặc `docker`; user không ghi được `/var/run/docker.sock`.
+- Xác minh user không đọc được env của Life-OS production hoặc staging.
+- Tạo layout quyền tối thiểu:
+  - `/opt/abslider` và `/opt/abslider/bin`: `root:root`, mode `0755`.
+  - `/opt/abslider/releases`: `abslider-deploy:abslider-deploy`, mode `0750`.
+  - `/opt/abslider/shared`: `root:abslider-deploy`, mode `0750`.
+- PM không dùng chung system account này. Khi Jenkins trên VPS hoạt động, PM sẽ cần Jenkins account riêng chỉ có quyền đọc build/view/job, không có quyền Credentials, Configure hoặc Deploy.
+
+### Đánh giá tài nguyên trước khi tạm dừng Life-OS
+
+- Source tree Life-OS khoảng 1.1 GiB; local backup 3.5 MiB; PostgreSQL production data 65 MiB; active Docker volume 67.69 MiB. Root filesystem vẫn còn khoảng 24 GiB nên không có áp lực phải chuyển rồi xóa dữ liệu local.
+- `docker system df` ghi nhận 19 image dùng tổng cộng 7.01 GiB, trong đó 3.328 GiB được đánh dấu reclaimable. Đây là kho image dùng chung, không quy toàn bộ cho Life-OS; chưa chạy `docker system prune`, image prune hoặc volume prune.
+- RAM toàn host đang dùng khoảng 922 MiB và còn 2.9 GiB available; swap chưa dùng. Hai container staging dùng khoảng 180.6 MiB và 63.87 MiB; PM2 production API dùng khoảng 120.8 MiB.
+- Kết luận: không archive/xóa raw source, env, database hoặc Docker volume lên Google Drive. Tạm dừng service là đủ để giải phóng RAM/CPU và vẫn giữ rollback nhanh; Restic tiếp tục là kênh backup mã hóa đã restore-test.
+
+### Tạm dừng Life-OS có khả năng khôi phục
+
+- Disable và stop hai timer `life-os-production-backup.timer`, `life-os-staging-backup.timer`; cả hai xác minh `disabled/inactive`, tránh backup chạy khi database đã dừng.
+- Chạy `pm2 save` khi process definition production còn đầy đủ, sau đó `pm2 stop life-os-api`; PM2 giữ process ID `0` ở trạng thái `stopped`, không dùng `pm2 delete`.
+- Chạy `docker compose stop` cho project `life-os-staging`; API container dừng bằng SIGTERM với exit `143`, PostgreSQL container exit `0`. Container, image, bind mount và volume vẫn được giữ; không chạy `down` hoặc `down -v`.
+- Stop `postgresql@16-main.service`; `pg_lsclusters` xác nhận cluster `16/main` ở trạng thái `down`, data directory vẫn tại `/var/lib/postgresql/16/main`.
+- Không còn listener TCP `3001`, `3002`, `5432`. Nginx, Docker, SSH, UFW, Fail2ban và dữ liệu backup không bị dừng/xóa.
+- Sau pause, RAM host giảm từ khoảng 922 MiB xuống 620 MiB và available tăng từ 2.9 GiB lên 3.2 GiB; swap vẫn chưa sử dụng.
+- Rollback dự kiến: start PostgreSQL production, start Compose staging, `pm2 start life-os-api`, rồi enable/start lại hai backup timer sau khi health check PASS. Chưa thực hiện rollback vì Life-OS đang chủ động được tạm dừng.
+
+### Readiness triển khai ABSlider sau khi giải phóng VPS
+
+- Fetch remote sau khi merge PR #14: `origin/develop=0fb2f5b`, `origin/main=74ccef9`; `main` không có commit riêng và đang chậm 41 commit so với `develop`. Không deploy source `main` cũ. Cần hoàn thiện hạ tầng trên `develop`, qua CI/preview gate, sau đó merge `develop → main` mới phát hành production.
+- Repository mới có backend `server/Dockerfile` và `docker-compose.dev.yml` cho MongoDB/Redis/MinIO local. Chưa có frontend Dockerfile, Compose runtime production/develop, host Nginx assets, deploy/rollback script hoặc image-publish contract.
+- `docker-compose.dev.yml` dùng tên container/volume cố định nên không thể dùng nguyên trạng cho hai môi trường trên cùng VPS; compose runtime cần bỏ `container_name`, tách project/volume/network và chỉ bind application ports về loopback.
+- `Jenkinsfile` hiện chỉ clean-install và chạy backend unit tests. Chưa lint/build client, lint/build server, build/publish immutable image, deploy theo branch hoặc rollback.
+- Backend đang dùng `cors()` không giới hạn origin. MinIO client chỉ có một endpoint với `useSSL=false`; URL presigned tạo từ endpoint nội bộ sẽ không dùng được an toàn qua domain HTTPS công khai. Hai contract này phải được sửa và test trước public deployment.
+- DNS `slides.sbltcup.dev`, `slides-cup.sbltcup.dev`, `slides-api.sbltcup.dev`, các domain develop và `ci.sbltcup.dev` chưa resolve; TLS/Nginx chỉ cấu hình sau khi DNS trỏ đúng VPS.
+
+### Trạng thái
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| VPS read-only inventory | `TEST_PASS` | OS, resource, service, port, Docker, PM2, PostgreSQL, Nginx, TLS và DNS đã kiểm tra |
+| Local backup readability | `TEST_PASS` | Production/staging checksum và `pg_restore --list` PASS |
+| Archive restore drill | `TEST_PASS` | Snapshot `2946938d` restore PASS; checksum OK; `pg_restore --list` PASS; không để lại lock |
+| Full PostgreSQL restore drill | `NOT_RUN` | Chưa restore vào database tạm hoặc chạy ứng dụng trên dữ liệu phục hồi |
+| Production off-site backup | `TEST_PASS` | Service cuối `Result=success`, snapshot `2946938d`; archive restore proof PASS |
+| Backup retention contract | `TEST_PARTIAL` | Contract `tag + group-by host,tags` dry-run PASS và chỉ chọn đúng môi trường; chưa patch vì sẽ làm 7 snapshot cũ bị xóa ở lần chạy thật |
+| SSH hardening | `TEST_PASS` | Syntax PASS; root/password/KbdInteractive/X11 bị tắt; public-key session mới qua port `8686` PASS sau reload |
+| Firewall | `TEST_PASS` | UFW active cho IPv4/IPv6; chỉ mở `80/443/8686`; external `3001` timeout; hai HTTPS health check vẫn `200` |
+| ABSlider service account | `TEST_PASS` | Locked/nologin, không Docker/sudo và không đọc env Life-OS |
+| Life-OS storage pressure | `TEST_PASS` | Còn khoảng 24 GiB; không cần archive/xóa local và không chạy Docker prune |
+| Life-OS shutdown | `TEST_PASS` | Timers disabled; PM2 stopped; containers preserved/stopped; PostgreSQL down; không còn port `3001/3002/5432` |
+| ABSlider deployment readiness | `BLOCKED` | Main chậm 41 commit; thiếu frontend image, prod/dev Compose, CORS/MinIO public contract và deploy/rollback assets |
+| Jenkins VPS deployment | `NOT_STARTED` | Jenkins hiện chỉ có controller local loopback; chưa cài/public TLS/read-only PM account trên VPS |
+| Repository documentation | `PUSHED` | Commit `5ceecdd` đã được push lên `origin/develop` |
+
+---
+
+## 2026-09-14 — Hợp nhất `developer` về `develop` và đổi contract CI
+
+### Mục tiêu
+
+Giữ `develop` làm nhánh tích hợp dài hạn cùng với `main`, thay cho quyết định tạm thời dùng `developer`. Không dùng staging, không rebase/force-push và không làm mất các commit profile mới đã có trên `develop`.
+
+### Baseline và cách hợp nhất
+
+- Fetch remote trước khi merge: `origin/developer=1132083`, `origin/develop=ea9a852`, merge-base `4d60dea`.
+- Tại baseline này, `develop` có 4 commit riêng và `developer` có 29 commit riêng.
+- Từ local `developer`, chạy `git merge --no-ff --no-commit origin/develop` để đưa thay đổi mới của nhóm vào source branch trước khi mở pull request `developer → develop`.
+- Các thay đổi profile/auth từ `develop` đã tự merge cùng các thay đổi readiness, security và CI từ `developer`.
+- Git chỉ báo một file conflict trực tiếp: `server/package-lock.json`. Không ghép conflict thủ công từng dòng; dùng lockfile của nhánh đích `develop` làm nền rồi tái tạo từ `server/package.json` đã auto-merge bằng Node `24.21.0` và npm `11.19.0`.
+- `server/package.json` sau auto-merge giữ cả Babel 7 từ `develop` và các contract DevOps từ `developer`: Node/npm engines, bcrypt 6, Jest CI scripts, `jest-junit` và không còn `ts-jest`.
+- Đổi allowlist trong `Jenkinsfile` từ `developer/main` thành `develop/main`. Các mục lịch sử bên dưới vẫn giữ nguyên tên nhánh tại thời điểm chúng xảy ra; không sửa lại lịch sử.
+- Tái tạo `server/package-lock.json` bằng `npm install --package-lock-only --ignore-scripts --no-audit --no-fund`, sau đó `npm ci` xác minh lockfile hợp lệ. Không còn unmerged index entry hoặc conflict marker.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Client clean install | PASS có cảnh báo | 254 package; npm cảnh báo 2 install script chưa allowlist |
+| Server clean install | PASS có cảnh báo | 852 package trên lockfile cuối; npm cảnh báo deprecated package và 8 install script chưa allowlist |
+| Client lint | PASS | `npm --prefix client run lint` |
+| Client build/typecheck | PASS có cảnh báo | 427 module; bundle chính 883.40 kB vượt warning threshold 500 kB |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | TypeScript build và alias rewrite thành công |
+| Toàn bộ server tests | PASS | 20/20 suite, 175/175 test, 0 snapshot; 23.845 giây trên lockfile cuối |
+| Unmerged entries | PASS | `git diff --name-only --diff-filter=U` và `git ls-files -u` không trả kết quả |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+### Bằng chứng GitHub/Jenkins trong giai đoạn chuyển nhánh
+
+- Tạo merge commit `86afff70924c77375b8d84b2f7f096da64cd5717` với hai parent `1132083` và `ea9a852`, sau đó push fast-forward lên `origin/developer`.
+- Mở pull request GitHub #14 với base `develop`, compare `developer`; GitHub xác nhận không còn conflict với base branch.
+- Jenkins direct-branch build `developer #12` checkout merge commit nhưng dừng đúng tại `Validate CI Context` với thông báo `CI is restricted to develop/main; received developer`. Install/test stages không chạy. Đây là failure chuyển tiếp do branch scan xảy ra trước khi Jenkins index PR, không phải test regression.
+- Cấu hình GitHub Branch Source filter thành `develop main PR-*`, giữ origin PR strategy `Merging the pull request with the current target branch revision` và bỏ fork discovery trong phạm vi repository nội bộ hiện tại.
+- Scan thủ công lúc 11:45:52 dùng GitHub App, tìm thấy PR #14 cùng `Jenkinsfile`, schedule job `PR-14` và kết thúc `SUCCESS` trong 7.2 giây.
+- Log `Will remove developer` chỉ xóa orphaned Jenkins child job do direct branch không còn thuộc allowlist; không xóa Git branch `developer` trên GitHub.
+- Jenkins `PR-14` lấy Pipeline definition từ tổ hợp source `86afff7` và target `ea9a852`, chạy trên `abslider-agent-01` với credential `github-app-abslider-ci`; `Validate CI Context` PASS cho target `develop`.
+- PR build checkout revision `86afff7`, chạy 17/17 unit-test suite và 137/137 test PASS, publish commit status lên GitHub rồi kết thúc `Finished: SUCCESS`.
+
+### Trạng thái kiểm tra
+
+| Gate | Trạng thái | Ghi chú |
+|---|---|---|
+| Merge commit | `PUSHED` | `86afff7` đã có trên `origin/developer` |
+| Conflict resolution | `TEST_PASS` | Lockfile đã tái tạo; không còn unmerged entry |
+| Jenkins branch contract | `TEST_PASS` | Filter `develop main PR-*` và PR target contract đã được xác minh bằng Jenkins `PR-14` |
+| Client/server quality gates | `TEST_PASS` | Client lint/build và server lint/build/full test đều PASS |
+| Pull request `developer → develop` | `MERGED` | GitHub PR #14 được merge vào `develop` tại `0fb2f5b`; Jenkins PR build trước merge đạt 17/17 suite, 137/137 test PASS |
+| Jenkins post-merge `develop` | `NOT_VERIFIED` | Chưa có bằng chứng runtime của child job `develop` sau merge |
+| Remote branch deletion | `NOT_STARTED` | Chỉ xóa `developer` sau khi retarget PR và xác minh Jenkins trên `develop` |
+
+---
+
+## 2026-09-13 — Bootstrap Jenkins controller local trên Ubuntu
+
+### Mục tiêu
+
+Cài Jenkins LTS phục vụ học tập và xây CI cho hai nhánh `developer`/`main`, đồng thời giới hạn giao diện controller về loopback trước khi mở khóa hoặc cấu hình credential.
+
+### Thay đổi trên host
+
+- Host: Ubuntu 24.04.4 LTS, kernel `7.0.0-31-generic`, kiến trúc amd64.
+- Cài `fontconfig` và OpenJDK 21 từ Ubuntu repository:
+  - `openjdk-21-jre 21.0.12+8-1~24.04`.
+  - `openjdk-21-jre-headless 21.0.12+8-1~24.04`.
+- Thêm Jenkins Debian stable repository bằng signing key `jenkins.io-2026.key`.
+- Cài Jenkins LTS `2.568.3` bằng APT.
+- Jenkins chạy dưới system user/group riêng `jenkins:jenkins`, UID `125`, GID `127`.
+- Tạo systemd drop-in `/etc/systemd/system/jenkins.service.d/override.conf`:
+
+```ini
+[Service]
+Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
+```
+
+- Không sửa trực tiếp unit `/usr/lib/systemd/system/jenkins.service` do package quản lý.
+- Chưa thêm user `jenkins` vào group `docker`; quyền Docker sẽ được xử lý ở gate riêng vì có mức quyền tương đương root trên host.
+- Không chạy `apt autoremove` và không nâng đồng loạt 66 package ngoài phạm vi.
+- Hoàn tất setup wizard trên `http://127.0.0.1:8080`, tạo tài khoản quản trị riêng và vào được Dashboard; không ghi username/password vào repository hoặc nhật ký.
+- Các plugin cốt lõi đã cài:
+  - Pipeline, Pipeline Graph View.
+  - Git, GitHub Branch Source.
+  - Credentials Binding.
+  - NodeJS.
+  - Matrix Authorization Strategy.
+  - SSH Build Agents.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Java runtime | PASS | OpenJDK `21.0.12` |
+| Jenkins package | PASS | `jenkins 2.568.3 install ok installed` |
+| systemd enable | PASS | `UnitFileState=enabled` |
+| systemd runtime | PASS | `ActiveState=active`, `SubState=running` |
+| systemd override | PASS | `DropInPaths=/etc/systemd/system/jenkins.service.d/override.conf` |
+| Bind address | PASS | `[::ffff:127.0.0.1]:8080`; loopback only, không còn `*:8080` |
+| Docker privilege | NOT_CONFIGURED | Group `docker` hiện chỉ có user `duckcy`; user `jenkins` chưa được cấp quyền |
+| Jenkins setup wizard | PASS | Đã mở khóa, tạo admin riêng và vào Dashboard |
+| Core plugins | PASS | Các file `.jpi` cốt lõi tồn tại; không phát hiện file `.failed` |
+| Pipeline/job | NOT_CONFIGURED | Chưa tạo Jenkinsfile hoặc Multibranch Pipeline |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Jenkins package/service | `TEST_PASS` — host local |
+| Network exposure | `TEST_PASS` — loopback only |
+| Setup wizard/plugins | `TEST_PASS` — host local |
+| Docker agent capability | `PLANNED` |
+| Initial bootstrap documentation | `PUSHED` — `4c02db4a70d7f3c8ea4c96da79914ecfebe43708` |
+| Wizard documentation update | `PUSHED` — `a1f39223cd7545ca531ac6ec5f9121e525b08c4d` |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Tạo danh tính hệ điều hành riêng cho Jenkins build agent
+
+### Mục tiêu
+
+Chuẩn bị build agent tách biệt khỏi tiến trình Jenkins controller trên cùng host. Agent dùng tài khoản hệ điều hành riêng, không có login shell, chưa được cấp Docker và không được đọc secret của controller.
+
+### Thay đổi trên host
+
+- Tạo system group `jenkins-agent`.
+- Tạo system user `jenkins-agent`, UID `997`, primary GID `983`.
+- Đặt home/workspace tại `/var/lib/jenkins-agent` với owner `jenkins-agent:jenkins-agent` và mode `0750`.
+- Đặt shell `/usr/sbin/nologin` để tài khoản không dùng cho đăng nhập tương tác.
+- Chưa thêm `jenkins-agent` vào group `docker`; quyền này chỉ cấp sau khi node kết nối và gate cách ly đạt.
+- Đăng ký permanent node `abslider-agent-01` trên Jenkins:
+  - Remote root `/var/lib/jenkins-agent`.
+  - Một executor.
+  - Labels `linux node24`.
+  - Usage chỉ nhận job có label khớp.
+  - Launch method inbound: agent chủ động kết nối tới controller.
+- Tải Jenkins Remoting `agent.jar` từ chính controller và chạy bằng user `jenkins-agent`.
+- Lưu inbound-agent secret ngoài repository tại `/etc/jenkins-agent/secret`, owner `root:jenkins-agent`, mode `0640`; agent nhận secret qua đối số `-secret @file` thay vì để giá trị xuất hiện trong process arguments.
+- Tạo `/var/lib/jenkins-agent/remoting`, owner `jenkins-agent:jenkins-agent`, mode `0700` làm Remoting work directory.
+- Cài bản `agent.jar` dùng cho service tại `/usr/local/lib/jenkins-agent/agent.jar`, owner `root:root`, mode `0644`, để build user không thể tự thay thế executable của service.
+- Tạo và enable `/etc/systemd/system/jenkins-agent.service`:
+  - Chạy trực tiếp Java process bằng `jenkins-agent:jenkins-agent`, không qua shell wrapper.
+  - Tự khởi động cùng host và tự restart khi process lỗi.
+  - Chỉ cho phép ghi vào `/var/lib/jenkins-agent`.
+  - Bật `NoNewPrivileges`, private `/tmp` và các bảo vệ kernel/control-group của systemd.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| System identity | PASS | `jenkins-agent`, UID `997`, primary group `jenkins-agent` GID `983` |
+| Home permission | PASS | `drwxr-x--- jenkins-agent:jenkins-agent /var/lib/jenkins-agent` |
+| Login shell | PASS | `/usr/sbin/nologin` |
+| Java runtime của agent | PASS | OpenJDK `21.0.12` |
+| Controller secret isolation | PASS | Agent không đọc được `/var/lib/jenkins/secrets/master.key` |
+| Docker privilege | NOT_CONFIGURED | Agent chưa thuộc group `docker` |
+| Jenkins node registration | PASS | Node `abslider-agent-01` xuất hiện trên Dashboard |
+| Secret provisioning lần đầu | FAIL | File secret có `size=1`, chỉ chứa newline nên chưa có credential thực |
+| Remoting work directory lần đầu | FAIL | `-failIfWorkDirIsMissing` dừng tiến trình vì thiếu `/var/lib/jenkins-agent/remoting` |
+| Secret provisioning sau sửa | PASS | Nhập đủ 64 ký tự; file có `size=65`, quyền `-rw-r----- root:jenkins-agent` |
+| Remoting work directory sau sửa | PASS | Agent đọc được secret và ghi được vào thư mục `remoting` |
+| Jenkins node connection | PASS | Remoting `3355.3357.v931d3c992987`; `WebSocket connection open`; `Connected` |
+| systemd unit validation | PASS | `systemd-analyze verify` không báo lỗi |
+| Persistent service | PASS | `enabled`, `active/running`, PID `102398`, `NRestarts=0` tại thời điểm kiểm tra |
+| Service identity/hardening | PASS | `User=jenkins-agent`, `Group=jenkins-agent`, `NoNewPrivileges=yes` |
+| Root-owned Remoting binary | PASS | `-rw-r--r-- root:root`, kích thước `1406408` byte |
+| Persistent controller connection | PASS | Có TCP session `ESTABLISHED` giữa agent và controller qua loopback port `8080` |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Host account | `TEST_PASS` — host local |
+| Controller secret isolation | `TEST_PASS` — host local |
+| Jenkins agent foreground smoke | `TEST_PASS` — kết nối WebSocket thành công |
+| Persistent systemd service | `TEST_PASS` — host local |
+| Agent job execution | `TEST_PASS` — Jenkins CI build `abslider-ci/developer #1` |
+| Repository documentation | `PUSHED` — `41bec707dbf1d342e50dadea0c0730a4e57fe66f` |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Khởi tạo Jenkins CI cho backend unit test
+
+### Mục tiêu và phạm vi
+
+Tạo Pipeline-as-Code để Jenkins tự động clean-install và chạy backend unit test cho hai nhánh `developer`, `main` cùng pull request hướng vào hai nhánh này.
+
+Phạm vi của bước này chỉ là CI:
+
+- Không có stage deploy, publish image hoặc thay đổi môi trường chạy ứng dụng.
+- Không chạy Docker/Testcontainers hay backend integration test.
+- Chưa chạy frontend unit test vì `client/package.json` hiện chưa có test script.
+- Coverage được thu thập và lưu làm artifact nhưng chưa đặt ngưỡng fail do dự án chưa có coverage contract được nhóm phê duyệt.
+
+### Thay đổi
+
+- Cấu hình Jenkins NodeJS Tool `nodejs-24`, auto-install chính xác Node.js `24.21.0`; Jenkins đã cài tool này trên agent ở lần chạy Pipeline đầu tiên.
+- Thêm `server/package.json` scripts:
+  - `test:unit`: chạy riêng `tests/unit` tuần tự.
+  - `test:unit:ci`: chạy unit test ở CI mode, thu coverage và xuất JUnit XML.
+- Thêm dev dependency cố định `jest-junit@17.0.0` và cập nhật `server/package-lock.json`.
+- Ignore `server/reports/` vì đây là test output sinh tự động.
+- Tạo `Jenkinsfile` tại repository root với các đặc tính:
+  - Chỉ nhận agent có labels `linux && node24` và dùng tool `nodejs-24`.
+  - Giới hạn context vào `developer`, `main` hoặc pull request có target là một trong hai nhánh này.
+  - Xác minh agent chạy bằng `jenkins-agent`, không đọc được controller master key, và dùng đúng Node `24.21.0`/npm `11.19.0`.
+  - Chạy `npm ci --no-audit --no-fund` trong `server` rồi chạy `npm run test:unit:ci`.
+  - Publish `server/reports/junit/server-unit.xml`, archive coverage, giới hạn lịch sử build/artifact, chặn build trùng, timeout 20 phút và dọn workspace.
+
+### Bằng chứng kiểm tra local
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Backend clean install | PASS có cảnh báo | 866 package; còn cảnh báo Babel peer/deprecation và npm install-script policy đã ghi nhận từ trước |
+| Unit test selection | PASS | 17 file dưới `server/tests/unit`; không chọn 4 integration test |
+| Backend unit tests | PASS | 17/17 suites, 128/128 tests, 0 snapshot |
+| JUnit report | PASS | XML ghi `tests=128`, `failures=0`, `errors=0` |
+| Coverage collection | PASS | Statements `76.96%`, branches `57.08%`, functions `79.24%`, lines `78.34%` |
+| Backend lint | PASS | `npm run lint` |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Jenkins runtime trước push | NOT_RUN | Đây là trạng thái trước khi commit `1ee139c` được push và Jenkins chạy build đầu tiên |
+
+### Bằng chứng Jenkins runtime ngày 2026-09-14
+
+- Multibranch Pipeline: `abslider-ci` / display name `ABSlider CI`.
+- Jenkins lấy `Jenkinsfile` từ đúng commit `1ee139c232aad32850f13b38f28a2a0172fcff93` trên nhánh `developer`.
+- Build chạy trên `abslider-agent-01` tại `/var/lib/jenkins-agent/workspace/abslider-ci_developer`.
+- NodeJS Plugin tự giải nén Node.js `24.21.0` vào tool directory của agent.
+- Pipeline xác minh đúng Node `v24.21.0`, npm `11.19.0`, node `abslider-agent-01`, user `jenkins-agent` và controller master key không đọc được.
+- `npm ci --no-audit --no-fund` cài 866 package trong khoảng 13 giây.
+- Unit test hoàn tất trong 1.662 giây: 17/17 suites và 128/128 tests PASS.
+- Jenkins ghi nhận JUnit result, archive coverage, dọn workspace và kết thúc `Finished: SUCCESS`.
+- Sau khi Built-In Node được đặt về `0` executor, chạy lại Pipeline `abslider-ci/developer #2` trên commit `5c034693fe875d471efab0de82e99cadb8c5776c`.
+- Build #2 tiếp tục được Jenkins giao cho `abslider-agent-01`, chạy bằng `jenkins-agent` và không đọc được controller master key; đây là bằng chứng workload CI vẫn hoạt động khi controller không nhận build.
+- Build #2 tái sử dụng NodeJS Tool đã cache, hoàn tất `npm ci` trong khoảng 5 giây và unit test trong 1.156 giây; tổng thời gian từ lúc bắt đầu đến `Finished: SUCCESS` khoảng 11 giây.
+- Tạo Jenkins credential ID `github-abslider-readonly` theo loại `Username with password`; password là fine-grained GitHub PAT chỉ có quyền đọc tài nguyên public và không được ghi vào repository.
+- Gắn credential này vào GitHub Branch Source để controller xác thực các API request phục vụ branch/PR indexing. Theo hành vi thực tế của GitHub Branch Source, cùng credential cũng được dùng qua `GIT_ASKPASS` cho HTTPS checkout.
+- Lần scan có xác thực bắt đầu lúc 00:52:22, xử lý 6 branch và 1 pull request trong 8.1 giây, không còn thời gian chờ do anonymous API limiter.
+- Scan phát hiện `developer` đổi từ `1ee139c232aad32850f13b38f28a2a0172fcff93` sang `45ec9a9416d2f25e3a88c228c4079a17913edb87`, tìm thấy `Jenkinsfile` và tự lên lịch build cho branch.
+- Build #3 lấy `Jenkinsfile` và checkout đúng commit `45ec9a9416d2f25e3a88c228c4079a17913edb87`, chạy trên `abslider-agent-01` bằng user `jenkins-agent` với Node `24.21.0` và npm `11.19.0`.
+- Build #3 hoàn tất `npm ci` trong khoảng 5 giây và unit test trong 1.292 giây: 17/17 suites, 128/128 tests PASS; JUnit/coverage được lưu và Pipeline kết thúc `Finished: SUCCESS`.
+- GitHub từ chối hai lần cập nhật commit status với HTTP `403 Resource not accessible by personal access token`. Đây không làm Jenkins build thất bại nhưng GitHub chưa nhận được trạng thái CI, nên chưa thể dùng Jenkins làm required status check.
+- Tạo GitHub App `abslider-jenkins-duckcy`, App ID `4932639`, với quyền tối thiểu: `Contents: Read-only`, `Metadata: Read-only`, `Pull requests: Read-only`, `Commit statuses: Read and write`; webhook đang tắt vì Jenkins chỉ nghe trên loopback.
+- Repository owner đã cài App và giới hạn installation vào repository `zunohoang/open4um`.
+- GitHub private key được đặt quyền `0600`, chuyển sang PKCS#8 và kiểm tra `Key is valid`; key không được ghi vào repository hay log terminal.
+- Tạo Jenkins GitHub App credential ID `github-app-abslider-ci`, sau đó thay GitHub Branch Source credential từ PAT sang credential này; PAT cũ tạm giữ làm rollback cho tới khi xác minh xong.
+- Lần scan bằng GitHub App bắt đầu lúc 10:23:01, xử lý 6 branch và 1 pull request trong 5.1 giây, xác nhận `developer` vẫn ở `0a6b798173edb7307349dd11a470f0e2adc1551b` và kết thúc `Finished: SUCCESS`.
+- Scan không tạo build mới vì không phát hiện thay đổi, nên chạy thủ công build `abslider-ci/developer #6` để kiểm tra quyền publish commit status.
+- Build #6 kết nối bằng GitHub App, checkout đúng commit `0a6b798173edb7307349dd11a470f0e2adc1551b`, chạy trên `abslider-agent-01`, hoàn tất `npm ci` trong khoảng 6 giây và unit test trong 1.254 giây: 17/17 suites, 128/128 tests PASS.
+- Build #6 ghi JUnit/coverage, kết thúc `Finished: SUCCESS` và log xác nhận `GitHub has been notified of this commit’s build result`; không còn HTTP `403`.
+- GitHub Commit Status API được kiểm tra độc lập: aggregate state `success`, một context `continuous-integration/jenkins/branch`, description `This commit looks good` cho commit `0a6b798`.
+- Status `target_url` hiện trỏ tới Jenkins loopback `127.0.0.1`, nên chỉ mở được trên host này; publish status đã hoạt động nhưng chia sẻ build log cho thành viên từ xa vẫn chưa khả dụng.
+- Sau khi GitHub App vượt qua scan, checkout, test và commit-status gate, xóa hai bản private key cục bộ dùng khi bootstrap: `/home/duckcy/Downloads/abslider-jenkins-duckcy.2026-09-13.private-key.pem` và `/home/duckcy/Downloads/abslider-jenkins-duckcy.pkcs8.pem`.
+- Kiểm tra lại cả hai đường dẫn bằng `test -e` đều trả kết quả `PASS: đã xóa`; private key dùng vận hành CI vẫn nằm trong Jenkins credential `github-app-abslider-ci`, không nằm trong repository.
+- Danh sách Jenkins Global Credentials sau cleanup chỉ còn `github-app-abslider-ci`; credential cũ `github-abslider-readonly` đã được xóa.
+- Fine-grained PAT `jenkins-abslider-scan` đã được xóa; GitHub hiển thị banner `Deleted personal access token` và danh sách `No fine-grained tokens created`.
+- Sau khi bỏ PAT và credential Jenkins cũ, chạy lại repository scan. Jenkins kết nối GitHub API bằng App ID `4932639`, dùng duy nhất credential `github-app-abslider-ci` để checkout commit `3e2e7fece5d150c3f52104b15ef2d341ed669d86`, chạy 17/17 suite và 128/128 test PASS, thông báo kết quả commit lên GitHub và kết thúc `Finished: SUCCESS`.
+- Đây là bằng chứng CI không còn phụ thuộc PAT cũ. Lần chạy được khởi tạo từ scan thủ công nên chưa phải bằng chứng webhook hoặc periodic scan tự kích hoạt.
+- Ngày 2026-09-14, bật `Scan Repository Triggers > Periodically if not otherwise run` cho Multibranch Pipeline `ABSlider CI` với interval `15 minutes`. Đây là cơ chế polling fallback vì controller hiện chỉ nghe trên `127.0.0.1` và chưa thể nhận webhook từ GitHub qua Internet.
+- Lần scan ngay sau thao tác cấu hình bắt đầu bằng `Started by user`, kết nối qua GitHub App, phát hiện `developer` đổi từ `3e2e7fe` sang `2efcb5d` và lên lịch build. Scan hoàn tất `SUCCESS` trong 7.4 giây, nhưng chưa phải bằng chứng periodic timer vì cause vẫn là người dùng.
+- Commit tài liệu kế tiếp sẽ được dùng làm mẫu thử: không chạy scan thủ công, chờ Jenkins timer tự phát hiện commit và lên lịch CI.
+- Commit mẫu thử `dc9def2c9948f49f491c1665fafe427af9b90fa0` đã bị scan thủ công lúc 10:53 phát hiện và schedule trước khi timer 15 phút đến hạn. Build dùng credential `github-app-abslider-ci`, chạy trên `abslider-agent-01`, đạt 17/17 suite và 128/128 test, publish commit status lên GitHub và kết thúc `Finished: SUCCESS`.
+- Kết quả này xác minh Pipeline sau thay đổi vẫn ổn định, nhưng không được dùng làm bằng chứng periodic trigger. Cần chờ scan có timer cause; vì manual scan vừa chạy lúc 10:53 nên mốc chờ 15 phút được tính lại từ lần scan này.
+- Periodic scan tự khởi động lúc 11:08:08 với cause `Started by timer`, kết nối bằng GitHub App, phát hiện `developer` đổi từ `dc9def2` sang `127d25d` và tự lên lịch build. Scan xử lý 6 branch cùng 1 pull request trong 8.1 giây và kết thúc `Finished: SUCCESS`.
+- Build được timer scan schedule lấy `Jenkinsfile` và checkout đúng commit `127d25da0ff84f4f20aa15840fc5d9df095ee292`, dùng credential `github-app-abslider-ci`, chạy trên `abslider-agent-01`, đạt 17/17 suite và 128/128 test, thông báo kết quả commit lên GitHub và kết thúc `Finished: SUCCESS`.
+- Chuỗi timer → change detection → auto-schedule → unit test → GitHub commit status đã được xác minh end-to-end mà không cần người dùng bấm scan. Webhook vẫn chưa cấu hình vì Jenkins chỉ nghe trên loopback; periodic scan 15 phút là trigger CI hiện tại.
+
+| Kiểm tra runtime | Kết quả | Ghi chú |
+|---|---|---|
+| Multibranch indexing anonymous | PASS có cảnh báo | Lần đầu tìm thấy `Jenkinsfile` trên `developer`; indexing mất khoảng 15 phút do GitHub API anonymous rate limiter |
+| GitHub scan credential | PASS | Dùng `github-abslider-readonly`; log xác nhận kết nối GitHub API bằng credential mô tả `GitHub public-read credential for ABSlider CI scan` |
+| Authenticated indexing | PASS | 6 branch và 1 pull request trong 8.1 giây; không còn Jenkins-imposed API limiter |
+| Change detection | PASS | Phát hiện `developer` đổi từ `1ee139c` sang `45ec9a9` và lên lịch build |
+| Authenticated checkout | PASS | Build #3 checkout đúng `45ec9a9`; GitHub Branch Source dùng `github-abslider-readonly` qua `GIT_ASKPASS` |
+| GitHub commit status qua PAT | BLOCKED | GitHub trả HTTP `403` vì public-read PAT không có quyền tạo commit status |
+| GitHub App installation | PASS | App ID `4932639` được owner cài và giới hạn vào `zunohoang/open4um` |
+| Jenkins GitHub App credential | PASS | Credential ID `github-app-abslider-ci`; private key PKCS#8 hợp lệ và lưu trong Jenkins Credentials |
+| Local GitHub App key cleanup | PASS | Hai file PEM/PKCS#8 trong `/home/duckcy/Downloads` đã bị xóa; `test -e` xác nhận cả hai không còn tồn tại |
+| Legacy Jenkins credential cleanup | PASS | Global Credentials chỉ còn `github-app-abslider-ci`; không còn `github-abslider-readonly` |
+| Legacy PAT cleanup | PASS | GitHub xác nhận đã xóa token và danh sách fine-grained PAT hiện trống |
+| Post-cleanup GitHub App CI | PASS | Scan/build dùng `github-app-abslider-ci`, checkout `3e2e7fe`, 17/17 suite và 128/128 test PASS, publish commit status thành công |
+| Periodic scan configuration | IMPLEMENTED | Bật `Periodically if not otherwise run`, interval `15 minutes` trên `ABSlider CI` |
+| Initial scan after configuration | PASS có giới hạn | GitHub App scan phát hiện `2efcb5d` và schedule build; cause là `Started by user`, chưa chứng minh timer |
+| Manual-scan build for periodic test commit | PASS có giới hạn | Build commit `dc9def2`: 17/17 suite, 128/128 test, GitHub status PASS; nguồn kích hoạt vẫn là scan thủ công |
+| Periodic timer scan | PASS | `Started by timer`; tự phát hiện `127d25d`, schedule build và kết thúc scan `SUCCESS` |
+| Timer-triggered Pipeline | PASS | Checkout `127d25d`, 17/17 suite và 128/128 test PASS, publish GitHub status, `Finished: SUCCESS` |
+| GitHub App indexing | PASS | Kết nối bằng App credential; scan 6 branch và 1 pull request trong 5.1 giây |
+| GitHub commit status qua App | PASS | Build #6 thông báo GitHub thành công; public Status API trả context `continuous-integration/jenkins/branch` ở state `success` |
+| GitHub status target URL | LIMITATION | Link build trỏ tới `http://127.0.0.1:8080/...`; chỉ truy cập được trên Jenkins host |
+| Git checkout | PASS | Build #1 checkout `1ee139c`, #2 `5c03469`, #3 `45ec9a9`, #6 `0a6b798`; system Git `2.43.0`; chưa cấu hình named Git tool |
+| NodeJS auto-install | PASS | Node `24.21.0`, npm `11.19.0` trên agent |
+| Agent identity/isolation | PASS | `jenkins-agent`; không đọc được controller master key |
+| Backend clean install | PASS có cảnh báo | Peer/deprecation và npm install-script warnings vẫn hiện nhưng lệnh exit `0` |
+| Backend unit tests | PASS | 17/17 suites, 128/128 tests |
+| JUnit publish | PASS | Jenkins hiển thị 128 tests, không failure |
+| Coverage artifact | PASS | Coverage được archive trước khi workspace bị xóa |
+| GitHub Checks publish | NOT_CONFIGURED | `[Checks API] No suitable checks publisher found`; không làm build thất bại |
+| Controller workload isolation | PASS | Sau khi Built-In Node được đặt `0` executor, build #2 vẫn được giao cho `abslider-agent-01` |
+| Repeat CI build | PASS | `abslider-ci/developer #2`, commit `5c034693fe875d471efab0de82e99cadb8c5776c` |
+| NodeJS Tool cache reuse | PASS | Build #2 dùng đúng Node `24.21.0`/npm `11.19.0` mà không phải giải nén lại tool |
+| Pipeline result | PASS | Các build có bằng chứng `abslider-ci/developer #1`, `#2`, `#3` và `#6` đều kết thúc `Finished: SUCCESS` |
+
+### File bị ảnh hưởng
+
+- `Jenkinsfile`
+- `server/package.json`
+- `server/package-lock.json`
+- `server/.gitignore`
+- `docs/devops-change-log.md`
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Backend unit-test command | `TEST_PASS` — local |
+| JUnit/coverage output | `TEST_PASS` — local |
+| Jenkinsfile | `TEST_PASS` — Jenkins runtime trên agent |
+| Commit/push | `PUSHED` — `1ee139c232aad32850f13b38f28a2a0172fcff93` |
+| CI runtime | `TEST_PASS` — `abslider-ci/developer #1`, `#2`, `#3` và `#6` |
+| GitHub API authentication | `TEST_PASS` — GitHub App credential, authenticated scan |
+| GitHub status publishing | `TEST_PASS` — Jenkins log và public GitHub Status API |
+| Temporary credential cleanup | `TEST_PASS` — local private-key files, Jenkins credential cũ và PAT đã xóa; post-cleanup CI bằng GitHub App đã PASS |
+| Automatic GitHub trigger | `TEST_PASS` — periodic scan 15 phút tự phát hiện `127d25d`, schedule và hoàn tất Pipeline/GitHub status; webhook chưa cấu hình |
+| CD/deployment | Ngoài phạm vi task |
+
+---
+
+## 2026-09-13 — Nâng bcrypt 6 và loại security gate high/critical
+
+### Mục tiêu
+
+Loại chuỗi dependency production có lỗ hổng high/critical đã phát hiện trong CI rehearsal, nhưng không dùng `npm audit fix --force` và không thay đổi các dependency ngoài phạm vi.
+
+### Thay đổi
+
+- Nâng dependency trực tiếp `bcrypt` từ `^5.1.1` lên `^6.0.0`.
+- Cập nhật `server/package-lock.json` bằng Node `24.21.0`, npm `11.19.0`.
+- Lockfile loại bỏ 35 package, trong đó có chuỗi dễ tổn thương:
+  - `@mapbox/node-pre-gyp@1.0.11`.
+  - `tar@6.2.1`.
+- Bcrypt 6 dùng `node-gyp-build` và vẫn giữ API `hash`, `compare`, `getRounds` tương thích với code hiện tại.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server clean install | PASS có cảnh báo | `npm ci`; 863 package sau audit, còn Babel peer/deprecation và install-script warnings |
+| Dependency tree | PASS | Chỉ còn `bcrypt@6.0.0`; không còn `@mapbox/node-pre-gyp` hoặc `tar` trong cây server |
+| Local native bcrypt smoke | PASS | Hash/compare đúng, cost rounds `10` |
+| Production security gate | PASS | `npm audit --omit=dev --audit-level=high` exit `0`; không còn high/critical |
+| Remaining advisories | TRACKED | 4 moderate thuộc `minio@8.0.7` và dependency con; audit chỉ đề xuất downgrade breaking về MinIO 7.1.3 |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | `npm --prefix server run build` |
+| Server full tests | PASS | 20/20 suite, 166/166 test |
+| Docker build | PASS | Image local `abslider-server:bcrypt6-gate`, ID `sha256:c5d57174a79af879b843ef416a7bd2ddb2d0c419389b10e4cd57090271af015c` |
+| Docker native bcrypt | PASS | Runtime image load và thực thi `bcrypt@6.0.0` thành công |
+| Docker runtime readiness | PASS | Container chạy user `abslider` và chuyển sang `healthy` |
+| Authentication smoke | PASS | Đăng nhập admin đã seed trả HTTP `200`, `success=true` |
+| SIGTERM shutdown | PASS | Container exit code `0` |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-bcrypt*` sau smoke test |
+
+### File bị ảnh hưởng
+
+- `server/package.json`
+- `server/package-lock.json`
+- `docs/devops-change-log.md`
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Bcrypt upgrade | `TEST_PASS` — local only |
+| High/critical production dependency gate | `TEST_PASS` |
+| Moderate advisories | `TEST_PARTIAL` — đã ghi backlog, chưa có upgrade an toàn |
+| Commit | `COMMITTED_LOCAL` — `5ed9b23f8e83a84f64a104b6d7826281bf26992b` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `5ed9b23f8e83a84f64a104b6d7826281bf26992b` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — CI rehearsal trước khi tạo Jenkins pipeline
+
+### Mục tiêu
+
+Chạy thủ công đúng nhóm lệnh dự kiến đưa vào Jenkins từ một clean install, phân biệt quality gate chức năng với security gate và chỉ tạo pipeline khi các blocker mức cao đã được xử lý.
+
+### Phạm vi kiểm tra
+
+- Nhánh `developer` tại commit `e49d813d6b3638bafdd283b1bfa07bf0f06f99d8`.
+- Client và server được chạy `npm ci` riêng bằng Node `24.21.0`, npm `11.19.0` theo `.nvmrc`.
+- Chạy client lint/build; repository hiện chưa có client test script.
+- Chạy server lint/build và toàn bộ Jest test, bao gồm Testcontainers integration test.
+- Chạy production dependency audit ở ngưỡng `high`.
+- Build backend Docker image và validate Docker Compose.
+
+Shell tự động ban đầu dùng Node `24.18.0`, npm `11.16.0`, không khớp contract repository. Sau khi nạp `/home/duckcy/.nvm/nvm.sh` và chạy `nvm use`, toolchain đã khớp chính xác Node `24.21.0`, npm `11.19.0`. Jenkins agent sau này phải chủ động chọn toolchain, không dựa vào Node mặc định của shell.
+
+### Bằng chứng kiểm tra
+
+| Gate | Kết quả | Ghi chú |
+|---|---|---|
+| Git baseline | PASS | `HEAD` và `origin/developer` cùng ở `e49d813d6b3638bafdd283b1bfa07bf0f06f99d8` |
+| Client clean install | PASS có cảnh báo | 252 package; 2 moderate vulnerabilities; npm 11 cảnh báo 2 install script chưa allowlist |
+| Server clean install | PASS có cảnh báo | 897 package; Babel 8/Babel 7 peer warnings; 6 vulnerabilities; npm 11 cảnh báo 8 install script chưa allowlist |
+| Client lint | PASS | `npm --prefix client run lint` |
+| Client build/typecheck | PASS có cảnh báo | `tsc -b && vite build`; bundle chính 865.74 kB vượt ngưỡng cảnh báo 500 kB |
+| Client tests | NOT_AVAILABLE | `client/package.json` chưa có test script |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server build | PASS | `npm --prefix server run build` |
+| Server tests | PASS | 20/20 suite, 166/166 test |
+| Client production audit, threshold high | PASS | Exit `0`; còn 2 moderate qua `react-router-dom@6.30.6` / `react-router@6.30.6` |
+| Server production audit, threshold high | FAIL | Exit `1`; 4 moderate, 1 high, 1 critical |
+| `npm audit fix --dry-run` | NO_CHANGE | Không có bản sửa tự động không-force cho client hoặc server |
+| Backend Docker build | PASS | `abslider-server:ci-rehearsal`, image ID `sha256:4edcb6526a840c494c954a231352805ee2a83159e5cf6bf45d20591ab7a761fd` |
+| Docker runtime metadata | PASS | User `abslider`; healthcheck gọi `/api/v1/health/ready` |
+| Docker Compose config | PASS | `docker compose -f docker-compose.dev.yml config --quiet` với biến CI giả lập |
+| Worktree after commands | PASS | `npm ci`, audit, build và test không thay đổi file tracked |
+
+### Phân loại security findings
+
+- Critical/high của server:
+  - `bcrypt@5.1.1` → `@mapbox/node-pre-gyp@1.0.11` → `tar@6.2.1`.
+  - Registry hiện có `bcrypt@6.0.0`, hỗ trợ Node `>=18` và thay `node-pre-gyp` bằng `node-gyp-build`; cần nâng riêng và chạy lại toàn bộ test/smoke.
+- Moderate của server:
+  - `minio@8.0.7` → `query-string@7.1.3` / `decode-uri-component@0.2.2` và `stream-json@1.9.1`.
+  - `minio@8.0.7` đang là phiên bản mới nhất trên registry ở thời điểm kiểm tra; audit chỉ đề xuất downgrade major về `7.1.3`, nên không tự động áp dụng.
+- Moderate của client:
+  - `react-router-dom@6.30.6` → `react-router@6.30.6`.
+  - Bản vá được audit đề xuất là `react-router-dom@7.18.3`, một major upgrade; cần migration/test riêng.
+
+Không chạy `npm audit fix --force` và không downgrade MinIO chỉ để làm sạch báo cáo.
+
+### Blocker và bước tiếp theo
+
+1. Nâng `bcrypt` từ 5.1.1 lên 6.0.0 trong một commit riêng.
+2. Chạy clean install, full backend tests, Docker build/runtime smoke và audit lại.
+3. Chỉ khi server không còn high/critical mới tạo Jenkinsfile.
+4. Lập backlog riêng cho client test, React Router major migration, MinIO advisory, bundle splitting và npm install-script policy.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Functional CI rehearsal | `TEST_PASS` |
+| Security gate | `TEST_PARTIAL` — server high/critical còn tồn tại |
+| Jenkins pipeline | `PLANNED` — chưa tạo |
+| Commit | Chưa commit |
+| Push | Chưa push |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Khóa credential admin mặc định trên production
+
+### Mục tiêu
+
+Ngăn backend production tự tạo tài khoản quản trị bằng email/mật khẩu mặc định và buộc cấu hình sai phải fail-fast trước khi mở kết nối tới hạ tầng.
+
+### Thay đổi
+
+- Đưa toàn bộ cấu hình seed admin vào schema tập trung tại `server/src/config/env.ts`; `seed.ts` không còn đọc trực tiếp `process.env`.
+- Chuẩn hóa email admin về chữ thường sau khi trim.
+- `NODE_ENV=production` bắt buộc khai báo:
+  - `ADMIN_EMAIL`, đồng thời cấm `admin@abslider.com`.
+  - `ADMIN_PASSWORD`, đồng thời cấm `admin123456`.
+- Mật khẩu admin production phải có ít nhất 12 ký tự và đủ chữ thường, chữ hoa, chữ số, ký tự đặc biệt.
+- `ADMIN_NAME` mặc định là `Admin ABSlider`; `ADMIN_CREDIT_BALANCE` phải là số nguyên không âm và mặc định là `1000`.
+- Development/test vẫn giữ fallback seed cũ khi email hoặc mật khẩu để trống, nhằm không phá vỡ môi trường local và integration test hiện tại.
+- Sửa `.env.example` để không còn phát hành credential mặc định dưới dạng giá trị cấu hình sẵn; bổ sung `ADMIN_CREDIT_BALANCE`.
+- Thêm unit test cho credential thiếu, credential mặc định, mật khẩu yếu, cấu hình hợp lệ và fallback development.
+
+Validation được thực thi khi module cấu hình được nạp. Vì `server.ts` import cấu hình trước khi gọi `connectMongo()`, cấu hình production không hợp lệ dừng process trước khi kết nối MongoDB, Redis hoặc MinIO.
+
+### File bị ảnh hưởng
+
+- `server/.env.example`
+- `server/src/config/env.ts`
+- `server/src/lib/seed.ts`
+- `server/tests/unit/config/env.test.ts`
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Focused environment tests | PASS | 1/1 suite, 5/5 test |
+| Backend full tests | PASS | 20/20 suite, 166/166 test |
+| Backend lint | PASS | `npm --prefix server run lint` |
+| Backend build | PASS | `npm --prefix server run build` |
+| Production missing credentials | PASS | Process thoát mã `1`, báo thiếu cả `ADMIN_EMAIL` và `ADMIN_PASSWORD` |
+| Fail-fast ordering | PASS | Không có log kết nối MongoDB trước khi process từ chối cấu hình |
+| Docker build | PASS | Image local `abslider-server:admin-hardening-gate`, ID `sha256:6e122fddb6fd7e4af7314c9fd8652eef6bea0605a549696dc6a1372cb54b1641` |
+| Valid production runtime | PASS | Container non-root báo `healthy`, readiness trả `200` và graceful shutdown exit `0` |
+| Admin seed runtime | PASS | Email được chuẩn hóa thành `owner@example.com`; role `admin` và password được lưu dưới dạng hash |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-admin*` sau smoke test |
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Production admin hardening | `TEST_PASS` — local only |
+| Commit | `COMMITTED_LOCAL` — `cf9c5af901a66503bf1e01700bc933b1a6b6bb5d` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `cf9c5af901a66503bf1e01700bc933b1a6b6bb5d` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Readiness probe và graceful shutdown cho backend
+
+### Mục tiêu
+
+Tách liveness khỏi dependency readiness để Docker/Jenkins có thể nhận biết đúng trạng thái phục vụ của backend, đồng thời đóng HTTP server, cron job, MongoDB và Redis có kiểm soát khi container nhận tín hiệu dừng.
+
+### Thay đổi
+
+- Giữ nguyên `GET /api/v1/health` để tương thích với smoke check hiện có.
+- Thêm `GET /api/v1/health/live`:
+  - Chỉ chứng minh tiến trình Express còn sống.
+  - Không gọi MongoDB, Redis hoặc MinIO.
+- Thêm `GET /api/v1/health/ready`:
+  - Ping MongoDB và Redis, đồng thời kiểm tra bucket `media` trên MinIO.
+  - Trả `200` và `status: ready` khi cả ba dependency đều hoạt động.
+  - Trả `503` và `status: not_ready` khi có dependency lỗi hoặc server đang shutdown.
+  - Chỉ công bố trạng thái `up/down`, không trả chi tiết exception hoặc thông tin kết nối.
+- Thêm timeout cấu hình được cho từng dependency check qua `HEALTH_CHECK_TIMEOUT_MS`, mặc định 3 giây.
+- Backend giữ HTTP server handle và đăng ký một lần cho `SIGTERM`, `SIGINT`.
+- Khi shutdown:
+  - Đánh dấu server là not-ready và chống xử lý tín hiệu lặp.
+  - Dừng hai cron job.
+  - Chờ HTTP server đóng trong `SHUTDOWN_TIMEOUT_MS`, mặc định 10 giây; ép đóng connection nếu quá hạn.
+  - Ngắt MongoDB và Redis; đặt exit code `1` nếu có bước cleanup lỗi.
+- Hai hàm khởi tạo cron trả lại task handle để lifecycle có thể dừng lịch chạy.
+- Thêm Docker `HEALTHCHECK` gọi readiness bằng Node runtime sẵn có, không cài thêm `curl` hoặc `wget`.
+- Bổ sung unit test cho contract route, tổng hợp dependency readiness, trạng thái shutdown, tính idempotent và timeout cưỡng bức đóng HTTP connection.
+
+### File bị ảnh hưởng
+
+- `server/.env.example`
+- `server/Dockerfile`
+- `server/src/config/env.ts`
+- `server/src/cron/index.ts`
+- `server/src/cron/lockedUserCleanup.cron.ts`
+- `server/src/cron/trashCleanup.cron.ts`
+- `server/src/lib/gracefulShutdown.ts`
+- `server/src/routes/health.routes.ts`
+- `server/src/server.ts`
+- `server/src/services/health.service.ts`
+- `server/tests/unit/lib/gracefulShutdown.test.ts`
+- `server/tests/unit/routes/health.routes.test.ts`
+- `server/tests/unit/services/health.service.test.ts`
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Focused tests | PASS | 3/3 suite, 9/9 test |
+| Backend full tests | PASS | 19/19 suite, 161/161 test |
+| Backend lint | PASS | `npm --prefix server run lint` |
+| Backend build | PASS | `npm --prefix server run build` |
+| Docker build | PASS | Image local `abslider-server:readiness-gate`, ID `sha256:fed212b33f4f40f9d27237248c969b719fce2ba1b8666c2d9494af8e7d00e201` |
+| Docker health metadata | PASS | Interval 30 giây, timeout 5 giây, start period 30 giây, 3 retries |
+| Runtime identity | PASS | Container chạy bằng user `abslider` |
+| Runtime readiness | PASS | Docker báo `healthy`; MongoDB, Redis, MinIO đều `up` |
+| Endpoint compatibility | PASS | `/api/v1/health`, `/health/live`, `/health/ready` đều trả `200` trong smoke environment khỏe mạnh |
+| Dependency failure/recovery | PASS | Dừng Redis làm readiness trả `503` với riêng Redis `down`; khởi động lại Redis làm readiness phục hồi `200` |
+| SIGTERM shutdown | PASS | Log có bắt đầu/kết thúc graceful shutdown, container exit code `0` |
+| Temporary resource cleanup | PASS | Không còn container hoặc network `abslider-readiness*` sau smoke test |
+
+### Vấn đề còn lại
+
+- Fallback admin `admin@abslider.com` / `admin123456` vẫn còn trong seed; sẽ harden ở bước kế tiếp trước khi dựng Jenkins.
+- Image chỉ được build và kiểm tra local, chưa push registry hoặc deploy.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Readiness và graceful shutdown | `TEST_PASS` — local only |
+| Commit | `COMMITTED_LOCAL` — `54f511907d48a27acdf8cceae33686d88bca5593` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `54f511907d48a27acdf8cceae33686d88bca5593` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Hardening backend Docker image và sửa MinIO registry
+
+### Mục tiêu
+
+Giảm build context và runtime attack surface của backend image, chạy ứng dụng bằng user không phải `root`, khóa base image theo digest và xác minh container khởi động thật với MongoDB, Redis, MinIO.
+
+### Thay đổi
+
+- Tạo `server/.dockerignore` để loại khỏi build context:
+  - `node_modules`, `dist`, `coverage`, `tests`.
+  - Toàn bộ `.env`/`.env.*`, log, npm debug log và metadata Git.
+- Tái cấu trúc `server/Dockerfile` thành ba stage:
+  - `build`: clean install đầy đủ và biên dịch TypeScript.
+  - `production-dependencies`: clean install chỉ production dependencies và xóa npm cache.
+  - `runtime`: Alpine thuần, chỉ chứa Node binary, CA certificates, `libstdc++`, `dist` và production `node_modules`.
+- Khóa Node base image bằng cả tag và manifest digest:
+  - `node:24.21.0-alpine3.24@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2`.
+- Khóa Alpine runtime image bằng digest:
+  - `alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b`.
+- Tạo user/group `abslider` cố định UID/GID `10001`, chuyển quyền `dist` và `node_modules`, sau đó đặt `USER abslider`.
+- Runtime không chứa npm/yarn và chạy trực tiếp `/usr/local/bin/node dist/server.js`.
+- Sửa `docker-compose.dev.yml`:
+  - Thay image không pull được `minio/minio:latest` bằng release đã khóa `quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z`.
+  - Digest MinIO đã xác minh: `sha256:064117214caceaa8d8a90ef7caa58f2b2aeb316b5156afe9ee8da5b4d83e12c8`.
+
+Registry `quay.io/minio/minio` và release trên được đối chiếu từ tài liệu container chính thức của MinIO: `https://min.io/docs/minio/container/index.html`.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Dockerfile build | PASS | `docker build`; final local image `abslider-server:docker-hardening-gate` |
+| Final local image ID | PASS | `sha256:21dd4586cdd8f623d54b2cc41c36d4cd4dbf1bbd35792f6708145d46d3e33c82` |
+| Build context archive | PASS | Giảm từ 272,752,640 byte xuống 624,640 byte, khoảng 99.77% |
+| Runtime image size | PASS | Giảm từ 75,174,510 byte xuống 60,813,220 byte, khoảng 19.1% |
+| Runtime Node | PASS | Node `v24.21.0` |
+| Runtime identity | PASS | `abslider`, UID/GID `10001`; Node process PID 1 cũng chạy UID/GID `10001` |
+| Runtime package managers | PASS | Không có npm hoặc yarn |
+| Native dependency | PASS | `require('bcrypt')` load thành công trong final image |
+| Docker Compose config | PASS | `docker compose ... config --quiet` với biến kiểm tra |
+| MinIO pinned pull | PASS | Pull từ Quay theo release tag và digest đã ghi nhận |
+| Dependency readiness | PASS | MongoDB ping, Redis `PONG`, MinIO live endpoint thành công trên network smoke tạm |
+| Backend runtime smoke | PASS | Kết nối MongoDB, Redis, MinIO; migration/seed hoàn tất; `GET /api/v1/health` trả `{"success":true,"data":{"status":"ok"}}` |
+| Temporary resource cleanup | PASS | Hai lượt container/network smoke đều dùng container `--rm`; tất cả container và network tạm đã được xóa |
+| Whitespace/error markers | PASS | `git diff --check` |
+
+Lần chạy smoke đầu tiên phát hiện `minio/minio:latest` trả `pull access denied`. Đây là lỗi cấu hình Compose thực tế, không phải lỗi backend; đã chuyển sang registry Quay theo hướng dẫn chính thức và smoke test lại thành công.
+
+### Vấn đề chưa xử lý trong bước này
+
+- `/api/v1/health` vẫn là liveness tĩnh, chưa chứng minh dependency readiness; sẽ tách liveness/readiness ở bước tiếp theo.
+- `server/src/server.ts` chưa giữ HTTP server handle và chưa graceful shutdown MongoDB/Redis khi nhận `SIGTERM`/`SIGINT`.
+- `server/src/lib/seed.ts` còn fallback admin email/password mặc định; chưa an toàn cho production.
+- Image mới chỉ tồn tại local, chưa push registry và chưa triển khai.
+- Dependency vulnerabilities và Babel peer warnings vẫn cần lượt audit riêng; không chạy `npm audit fix --force`.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Docker build hardening | `TEST_PASS` |
+| Non-root runtime | `TEST_PASS` |
+| Runtime smoke với dependency thật | `TEST_PASS` — local only |
+| Commit | `COMMITTED_LOCAL` — `c6658118649a070e616011d61782752a6e45f9c4` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `c6658118649a070e616011d61782752a6e45f9c4` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Chuẩn hóa Node.js 24 cho repository và backend image
+
+### Mục tiêu
+
+Loại bỏ độ lệch phiên bản Node.js giữa môi trường phát triển, client, server và backend Docker image; tạo một contract phiên bản có thể tái sử dụng cho Jenkins agent sau này.
+
+### Phiên bản chuẩn
+
+| Thành phần | Phiên bản |
+|---|---|
+| Node.js | `24.21.0` LTS |
+| npm | `11.19.0` |
+| Alpine Linux trong backend image | `3.24` |
+| `@types/node` | Major 24; lockfile hiện resolve `24.13.4` |
+| Base image | `node:24.21.0-alpine3.24` |
+| Base image digest đã kiểm tra | `sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2` |
+
+Node 24 được chọn vì là nhánh LTS còn được hỗ trợ; Node 20 trong Dockerfile cũ đã EOL. Nguồn kiểm tra: `https://nodejs.org/en/about/previous-releases` và Docker Official Image `node`.
+
+### Thay đổi
+
+- Tạo `.nvmrc` với giá trị `24.21.0` để NVM trên workstation và Jenkins agent có một nguồn phiên bản chung.
+- `client/package.json` và `server/package.json`:
+  - Thêm `packageManager: npm@11.19.0`.
+  - Thêm `engines.node: >=24.21.0 <25` và `engines.npm: >=11.19.0 <12`.
+  - Nâng `@types/node` từ major 22 lên major 24.
+- Tạo lại metadata tương ứng trong `client/package-lock.json` và `server/package-lock.json` bằng npm `11.19.0` chạy trong image Node mục tiêu.
+- Chuyển cả build stage và runtime stage của `server/Dockerfile` từ tag động `node:20-alpine` sang `node:24.21.0-alpine3.24`.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Official Node image | PASS | `node:24.21.0-alpine3.24` trả Node `v24.21.0`, npm `11.19.0` |
+| Workstation NVM install | PASS | Tải Node `v24.21.0`, checksum SHA-256 khớp; npm `11.19.0` |
+| Client lockfile update | PASS | Chạy bằng npm `11.19.0`; `@types/node` resolve `24.13.4` |
+| Server lockfile update | PASS có cảnh báo | Chạy bằng npm `11.19.0`; còn Babel peer warnings |
+| Client clean install | PASS có cảnh báo | 251 package; còn 2 lỗ hổng moderate và cảnh báo install scripts |
+| Client lint | PASS | Chạy trong Node `24.21.0` image |
+| Client build | PASS có cảnh báo | Vite build thành công; bundle chính khoảng 865.74 kB vượt cảnh báo 500 kB |
+| Server clean install | PASS có cảnh báo | 895 package; còn 6 lỗ hổng: 4 moderate, 1 high, 1 critical |
+| Server lint | PASS | Chạy trong Node `24.21.0` image |
+| Server build | PASS | Chạy trong Node `24.21.0` image |
+| Server tests | PASS | Node `24.21.0`, npm `11.19.0`; 16/16 suites và 152/152 tests; 24.152 giây |
+| Backend Docker build | PASS | Local image `abslider-server:node24-gate`, image ID `sha256:f290da071ec09ff0748ea1ba1791f1498281568eba4d93f34455bd5ae4d714d2`, khoảng 75.17 MB |
+| Backend runtime version | PASS | Container trả Node `v24.21.0`, npm `11.19.0` |
+| Temporary test volume cleanup | PASS | Đã xóa `abslider_node24_server_test_20260913` sau khi test |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Workstation client gate | PASS có cảnh báo | Clean install, lint và build PASS bằng Node `24.21.0`; còn bundle-size warning |
+| Workstation server gate | PASS có cảnh báo | Clean install, lint, build PASS; 16/16 suites và 152/152 tests PASS trong 24.657 giây |
+
+Hai lần kiểm tra ban đầu trong container thất bại do harness kiểm tra, không phải source:
+
+- Anonymous `/workspace/node_modules` volume do Docker tạo thuộc `root`, nên UID 1000 không thể chạy `npm ci`. Đã sửa bằng cách chuẩn bị quyền volume trước khi chạy dưới user không phải root.
+- Lần chạy Testcontainers đầu tiên dùng `su node`, làm mất supplementary Docker group và báo `Could not find a working container runtime strategy`. Đã chạy lại trực tiếp với UID/GID 1000 và Docker socket group 984; toàn bộ 152 tests PASS.
+
+### Vấn đề chưa xử lý trong bước này
+
+- Không chạy `npm audit fix --force`; các lỗ hổng và Babel peer warnings cần một lượt dependency audit riêng.
+- Backend Docker build context khoảng 256 MB vì chưa có `server/.dockerignore`.
+- Backend runtime vẫn chạy bằng `root` và vẫn chứa npm; sẽ xử lý trong bước Docker hardening.
+- Jenkins agent chưa được tạo nên mới có contract phiên bản, chưa có bằng chứng runtime Jenkins.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Repository Node/npm contract | `TEST_PASS` |
+| Client install/lint/build trên Node mục tiêu | `TEST_PASS` |
+| Server install/lint/build/test trên Node mục tiêu | `TEST_PASS` |
+| Backend Docker build | `TEST_PASS` — local only |
+| Workstation Node/npm | `TEST_PASS` — Node `24.21.0`, npm `11.19.0` |
+| Commit | `COMMITTED_LOCAL` — `69fc5c1270e7a42396d07f4d7f3e982de1924c32` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `69fc5c1270e7a42396d07f4d7f3e982de1924c32` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Ổn định clean install và integration test backend
+
+### Mục tiêu
+
+Loại bỏ dependency Jest không được sử dụng, sửa lỗi MongoDB Testcontainers không thể khởi động trên kernel Linux hiện tại và bảo đảm Jest tự giải phóng MongoDB/Redis mà không cần `--forceExit`.
+
+### Nguyên nhân đã xác minh
+
+- Jest biến đổi TypeScript bằng `@swc/jest`; repository không có code hoặc cấu hình sử dụng `ts-jest`.
+- `ts-jest@29.4.12` yêu cầu TypeScript `<7`, trong khi backend dùng TypeScript `7.0.2`, làm `npm ci` thất bại do peer dependency conflict.
+- Integration test dùng image động `mongo:8`. Image này không thể khởi động trên kernel local `7.0.0-31` và báo `Health check failed: unhealthy`.
+- Khi setup MongoDB thất bại, `afterEach` vẫn xóa database và `afterAll` gọi `.stop()` trên container chưa được tạo, sinh thêm timeout và `TypeError` không phải lỗi nghiệp vụ.
+- Test tự đặt biến môi trường trong `server/tests/setup.ts`; thiếu file `.env` không phải nguyên nhân của lỗi integration test này.
+
+### Thay đổi
+
+- `server/package.json`, `server/package-lock.json`:
+  - Gỡ `ts-jest`; tiếp tục dùng `@swc/jest` theo cấu hình hiện có.
+  - Bỏ `--forceExit` khỏi script `npm test` sau khi đã xác minh toàn bộ test tự kết thúc bình thường.
+- `server/tests/integration/testDb.ts`:
+  - Khóa image Testcontainers thành `mongo:8.0.30` thay cho tag động `mongo:8`.
+  - Truyền `GLIBC_TUNABLES=glibc.pthread.rseq=1` để MongoDB chạy được trên kernel bị ảnh hưởng.
+  - Cho phép biến container ở trạng thái chưa khởi tạo và chỉ dọn database sau khi setup hoàn tất.
+  - Chỉ ngắt kết nối/dừng resource đã thực sự được tạo, tránh lỗi dây chuyền khi `beforeAll` thất bại.
+  - Tăng timeout setup lên 180 giây cho lần tải image đầu tiên trên CI; timeout cleanup là 60 giây và cleanup giữa test là 30 giây.
+- `docker-compose.dev.yml`:
+  - Đồng bộ MongoDB sang `mongo:8.0.30` và cùng biến `GLIBC_TUNABLES`.
+
+`GLIBC_TUNABLES` là workaround tương thích cho các máy dùng kernel bị ảnh hưởng. Có thể đánh giá gỡ workaround sau khi toàn bộ máy developer và Jenkins agent dùng kernel đã sửa lỗi.
+
+### Bằng chứng kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Server clean install | PASS | `npm --prefix server ci`; cài 896 package và không còn peer conflict `ts-jest`/TypeScript |
+| Server lint | PASS | `npm --prefix server run lint` |
+| Server TypeScript build | PASS | `npm --prefix server run build` |
+| Docker Compose config | PASS | Render `docker-compose.dev.yml` bằng biến môi trường kiểm tra và `docker compose ... config --quiet` |
+| Whitespace/error markers | PASS | `git diff --check` |
+| Gọi Jest từ sai working directory | FAIL do lệnh kiểm tra | `npm --prefix server exec -- jest ...` đứng ở repository root nên không tìm thấy `jest.config.js`; không phải lỗi source |
+| Integration tests không `--forceExit` | PASS | 3/3 suites, 38/38 tests; 95.559 giây |
+| Toàn bộ server tests qua script chuẩn | PASS | `npm --prefix server test`; 16/16 suites, 152/152 tests; 21.382 giây; Jest tự thoát bình thường |
+
+### Vấn đề chưa xử lý trong bước này
+
+- Các cảnh báo dependency và 6 lỗ hổng từ `npm audit` chưa được tự động sửa; không chạy `npm audit fix --force` vì có thể gây breaking change.
+- Gate 0 của toàn dự án chưa hoàn tất: còn chuẩn hóa Node.js, bổ sung frontend typecheck/test, harden Docker image và readiness check trước khi tạo Jenkins pipeline.
+
+### Trạng thái
+
+| Mức | Trạng thái |
+|---|---|
+| Backend clean install và test gate | `TEST_PASS` |
+| Commit | `COMMITTED_LOCAL` — `703b7efec308e846de110b4dd55c4f0f47d16627` |
+| Push | `PUSHED` — local `HEAD` và `origin/developer` cùng trỏ tới `703b7efec308e846de110b4dd55c4f0f47d16627` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Hợp nhất lịch sử `main` vào `developer`
+
+### Mục tiêu
+
+Tạo nhánh làm việc dài hạn `developer` từ `origin/develop`, sau đó hợp nhất lịch sử riêng của `main` để chuẩn bị mô hình hai nhánh `developer` và `main`, không sử dụng staging.
+
+### Phạm vi và quyết định
+
+- Nhánh local `developer` được tạo từ `origin/develop` tại commit `4d60dea`.
+- Trước merge, `main` có 4 commit riêng và `develop` có 5 commit riêng.
+- Thực hiện merge `origin/main` vào `developer` bằng `--no-ff --no-commit`.
+- Có 9 file conflict thuộc luồng đăng ký, OTP và quên/đặt lại mật khẩu.
+- Giữ phiên bản `developer` cho các file conflict vì đây là contract hoàn chỉnh hơn: có UI nhập OTP/mật khẩu mới và đủ validator, route, controller, service cùng test cho `/reset-password`.
+- Bản `main` chỉ gửi OTP quên mật khẩu nhưng không hoàn tất thao tác đặt lại mật khẩu.
+- Cây nội dung sau resolve có hash `b3f0269742e4a163cc8824fe0dad4572db41632e`, giống cây `developer` trước merge. Merge commit chỉ thống nhất lịch sử, không thay đổi nội dung chức năng.
+
+### File conflict đã xử lý
+
+- `client/src/features/auth/api/auth.api.ts`
+- `client/src/features/auth/components/AuthPage.tsx`
+- `server/src/controllers/auth.controller.ts`
+- `server/src/routes/auth.routes.ts`
+- `server/src/services/auth.service.ts`
+- `server/src/validators/auth.validator.ts`
+- `server/tests/integration/auth/auth.test.ts`
+- `server/tests/unit/services/auth.service.test.ts`
+- `server/tests/unit/validators/auth.validator.test.ts`
+
+### Commit
+
+```text
+67a08e870ef6a1ef028a9ef03fc514f181c18c37
+chore: reconcile main into developer
+```
+
+Parents:
+
+```text
+4d60deaa365fc5b6298bfc05905e0be136a6ee2e
+74ccef913168259aad9f920c0016f7b96a5730c6
+```
+
+### Kết quả kiểm tra
+
+| Kiểm tra | Kết quả | Ghi chú |
+|---|---|---|
+| Conflict markers | PASS | Không còn `<<<<<<<`, `=======`, `>>>>>>>` |
+| Unmerged index entries | PASS | `git ls-files -u` không trả kết quả |
+| Client lint | PASS | `npm run lint` |
+| Client build | PASS có cảnh báo | Bundle chính khoảng 865.74 kB, vượt ngưỡng cảnh báo 500 kB của Vite |
+| Server lint | PASS | `npm run lint` |
+| Server build | PASS | `npm run build` |
+| Server test | FAIL/BLOCKED | 114 test đã chạy PASS; 3 suite không khởi động vì local `node_modules` thiếu `@testcontainers/mongodb` |
+| Server clean install | FAIL/BLOCKED | `ts-jest@29.4.12` yêu cầu TypeScript `<7`, trong khi dự án dùng TypeScript `7.0.2` |
+
+### Blocker tiếp theo
+
+1. Gỡ `ts-jest` nếu xác minh không có code/config sử dụng; Jest hiện transform TypeScript bằng `@swc/jest`.
+2. Cập nhật lockfile và chạy lại `npm ci` từ trạng thái sạch.
+3. Chạy đủ 16 server test suite với Testcontainers.
+4. Chỉ xây Jenkins CI sau khi clean install và test gate ổn định.
+
+### Trạng thái tại thời điểm ghi nhận
+
+| Mức | Trạng thái |
+|---|---|
+| Conflict resolution | `TEST_PARTIAL` |
+| Merge commit | `PUSHED` — `67a08e8` |
+| Remote branch `developer` | `PUSHED` — xác minh tại `c46a1a9` |
+| CI/CD | Chưa triển khai |
+| Production | Chưa deploy |
+
+---
+
+## 2026-09-13 — Thiết lập nhật ký thay đổi DevOps
+
+### Thay đổi
+
+- Tạo `docs/devops-change-log.md`.
+- Thêm liên kết tới nhật ký trong `README.md`.
+- Áp dụng quy tắc: mọi thay đổi DevOps/Codex sau này phải cập nhật tài liệu này và ghi rõ mức xác minh.
+
+### Trạng thái
+
+`PUSHED` — commit `c46a1a9` đã được xác minh trên `refs/heads/developer`.
+
+---
+
+## 2026-09-13 — Xuất bản nhánh `developer`
+
+### Thay đổi
+
+- Push nhánh local `developer` lên `origin/developer`.
+- Đổi upstream của local branch từ `origin/develop` sang `origin/developer`.
+- Chưa xóa nhánh cũ `origin/develop`; việc xóa chỉ thực hiện sau khi retarget pull request, cập nhật tài liệu/cấu hình và có xác nhận của nhóm.
+
+### Bằng chứng
+
+```text
+local:    c46a1a9c98da6f28ba819d6148f2c1f745f10137
+upstream: c46a1a9c98da6f28ba819d6148f2c1f745f10137
+remote:   c46a1a9c98da6f28ba819d6148f2c1f745f10137 refs/heads/developer
+```
+
+`git status --short --branch`:
+
+```text
+## developer...origin/developer
+```
+
+### Trạng thái
+
+`PUSHED` — nhánh `developer` và hai commit `67a08e8`, `c46a1a9` đã có trên remote.

@@ -187,6 +187,47 @@ export const AuthPage = () => {
     }
   }
 
+  const handleResetPassword = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!forgotForm.otp || forgotForm.otp.length !== 6) {
+      setError('Mã OTP phải gồm 6 chữ số')
+      return
+    }
+    if (forgotForm.newPassword.length < 6) {
+      setError('Mật khẩu mới phải có ít nhất 6 ký tự')
+      return
+    }
+    if (forgotForm.newPassword !== forgotForm.confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp')
+      return
+    }
+
+    resetErrors()
+    setLoading(true)
+    try {
+      const res = await authApi.resetPassword({
+        email: forgotForm.email,
+        otp: forgotForm.otp,
+        password: forgotForm.newPassword
+      })
+      showToast(res.message || 'Đặt lại mật khẩu thành công!', 'success')
+      setForgotForm({
+        email: '',
+        otp: '',
+        newPassword: '',
+        confirmPassword: ''
+      })
+      setForgotStep('email')
+      setMode('login')
+    } catch (err) {
+      const msg = getErrorMessage(err)
+      setError(msg)
+      showToast(msg, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // --- LOGIN FLOW ---
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -502,28 +543,103 @@ export const AuthPage = () => {
                 </button>
               </form>
             ) : (
-              <div className='mt-6 space-y-4'>
-                <div className='rounded-md border border-emerald-200 bg-emerald-50 p-4'>
-                  <p className='font-sans text-sm font-semibold text-emerald-900'>
-                    ✅ Yêu cầu đã được gửi thành công!
-                  </p>
-                  <p className='mt-1 font-sans text-xs text-emerald-700'>
+              <form onSubmit={handleResetPassword} className='mt-6 space-y-4'>
+                <div className='rounded-md border border-emerald-200 bg-emerald-50 p-3.5'>
+                  <p className='font-sans text-xs text-emerald-800'>
                     Mã xác thực đã được gửi đến email{' '}
                     <strong>{forgotForm.email}</strong>. Vui lòng kiểm tra hộp
-                    thư đến của bạn.
+                    thư đến.
                   </p>
                 </div>
+
+                <label className='block font-sans text-sm font-semibold text-stone-600'>
+                  Mã xác nhận (OTP)
+                  <input
+                    className='mt-2 w-full border border-stone-300 bg-stone-50 p-3 font-mono tracking-widest outline-orange-600'
+                    type='text'
+                    maxLength={6}
+                    value={forgotForm.otp}
+                    onChange={(e) =>
+                      setForgotForm({
+                        ...forgotForm,
+                        otp: e.target.value.replace(/\D/g, '')
+                      })
+                    }
+                    placeholder='123456'
+                    required
+                  />
+                </label>
+
+                <label className='block font-sans text-sm font-semibold text-stone-600'>
+                  Mật khẩu mới
+                  <PasswordInput
+                    value={forgotForm.newPassword}
+                    onChange={(e) =>
+                      setForgotForm({
+                        ...forgotForm,
+                        newPassword: e.target.value
+                      })
+                    }
+                    placeholder='Ít nhất 6 ký tự'
+                    required
+                    minLength={6}
+                  />
+                </label>
+
+                <label className='block font-sans text-sm font-semibold text-stone-600'>
+                  Xác nhận mật khẩu mới
+                  <PasswordInput
+                    value={forgotForm.confirmPassword}
+                    onChange={(e) =>
+                      setForgotForm({
+                        ...forgotForm,
+                        confirmPassword: e.target.value
+                      })
+                    }
+                    placeholder='Nhập lại mật khẩu mới'
+                    required
+                    minLength={6}
+                  />
+                </label>
+
+                {error && (
+                  <div className='border border-red-200 bg-red-50 p-3.5 text-xs font-semibold leading-relaxed text-red-800'>
+                    ⚠️ {error}
+                  </div>
+                )}
+
                 <button
-                  type='button'
-                  className='w-full font-sans text-xs font-semibold text-orange-700 hover:underline disabled:opacity-50'
-                  onClick={() => handleRequestForgotOtp()}
-                  disabled={loading || forgotCooldown > 0}
+                  className='w-full bg-orange-700 px-4 py-3 font-sans text-sm font-bold text-white hover:bg-orange-800 disabled:opacity-50'
+                  type='submit'
+                  disabled={loading}
                 >
-                  {forgotCooldown > 0
-                    ? `Gửi lại mã (${forgotCooldown}s)`
-                    : 'Gửi lại mã xác nhận'}
+                  {loading ? 'Đang cập nhật...' : 'Đặt lại mật khẩu'}
                 </button>
-              </div>
+
+                <div className='flex items-center justify-between pt-1'>
+                  <button
+                    type='button'
+                    className='font-sans text-xs font-semibold text-orange-700 hover:underline disabled:opacity-50'
+                    onClick={() => handleRequestForgotOtp()}
+                    disabled={loading || forgotCooldown > 0}
+                  >
+                    {forgotCooldown > 0
+                      ? `Gửi lại mã (${forgotCooldown}s)`
+                      : 'Gửi lại mã xác nhận'}
+                  </button>
+
+                  <button
+                    type='button'
+                    className='font-sans text-xs text-stone-500 hover:underline'
+                    onClick={() => {
+                      resetErrors()
+                      setForgotStep('email')
+                    }}
+                  >
+                    Thay đổi email
+                  </button>
+                </div>
+              </form>
             )}
 
             <button
