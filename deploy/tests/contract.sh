@@ -47,8 +47,10 @@ grep -Fx 'set -Eeuo pipefail' "$deploy_script" >/dev/null ||
 
 normalizer_source="$(extract_function normalize_registry_reference)"
 verifier_source="$(extract_function verify_pulled_digest)"
+port_guard_source="$(extract_function assert_unpublished_port)"
 [[ -n "$normalizer_source" ]] || fail 'normalize_registry_reference function was not found'
 [[ -n "$verifier_source" ]] || fail 'verify_pulled_digest function was not found'
+[[ -n "$port_guard_source" ]] || fail 'assert_unpublished_port function was not found'
 
 (
   eval "$normalizer_source"
@@ -84,6 +86,39 @@ verifier_source="$(extract_function verify_pulled_digest)"
     fail 'digest verification accepted a different digest'
   fi
 )
+
+(
+  eval "$port_guard_source"
+
+  mock_container_id='0123456789abcdef'
+  mock_port_bindings='null'
+
+  compose_with_manifest() {
+    printf '%s\n' "$mock_container_id"
+  }
+
+  docker() {
+    printf '%s\n' "$mock_port_bindings"
+  }
+
+  assert_unpublished_port manifest.env mongo 27017 ||
+    fail 'unpublished Docker port was rejected'
+
+  mock_port_bindings='[{"HostIp":"127.0.0.1","HostPort":"4203"}]'
+  if assert_unpublished_port manifest.env mongo 27017 2>/dev/null; then
+    fail 'published Docker port was accepted'
+  fi
+
+  mock_container_id=''
+  mock_port_bindings='null'
+  if assert_unpublished_port manifest.env mongo 27017 2>/dev/null; then
+    fail 'missing service container was accepted'
+  fi
+)
+
+if grep -Eq 'port (mongo 27017|redis 6379|minio 9001)' "$deploy_script"; then
+  fail 'private-port checks must not depend on Docker Compose port output'
+fi
 
 expect_failure 'usage: deploy-abslider' "$deploy_script"
 expect_failure \

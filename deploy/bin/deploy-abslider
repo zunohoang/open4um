@@ -165,6 +165,39 @@ verify_pulled_digest() {
   fail "pulled image digest does not match ${image}"
 }
 
+assert_unpublished_port() {
+  local manifest="$1"
+  local service="$2"
+  local private_port="$3"
+  local container_id
+  local port_bindings
+
+  if ! container_id="$(compose_with_manifest "$manifest" ps --quiet "$service")"; then
+    printf 'ERROR: could not resolve container for service %s\n' "$service" >&2
+    return 1
+  fi
+  if [[ -z "$container_id" || "$container_id" == *$'\n'* ]]; then
+    printf 'ERROR: expected exactly one container for service %s\n' "$service" >&2
+    return 1
+  fi
+
+  if ! port_bindings="$(
+    docker inspect \
+      --format "{{json (index .HostConfig.PortBindings \"${private_port}/tcp\")}}" \
+      "$container_id"
+  )"; then
+    printf 'ERROR: could not inspect port %s/tcp for service %s\n' \
+      "$private_port" "$service" >&2
+    return 1
+  fi
+
+  if [[ "$port_bindings" != 'null' ]]; then
+    printf 'ERROR: service %s unexpectedly publishes port %s/tcp: %s\n' \
+      "$service" "$private_port" "$port_bindings" >&2
+    return 1
+  fi
+}
+
 internal_checks() {
   local manifest="$1"
   local backend_address
@@ -175,13 +208,24 @@ internal_checks() {
   frontend_address="$(compose_with_manifest "$manifest" port client 8080)"
   media_address="$(compose_with_manifest "$manifest" port minio 9000)"
 
-  [[ "$backend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
-  [[ "$frontend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
-  [[ "$media_address" =~ ^127\.0\.0\.1:[0-9]+$ ]] || return 1
+  if [[ ! "$backend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
+    printf 'ERROR: unexpected server port binding: %q\n' "$backend_address" >&2
+    return 1
+  fi
+  if [[ ! "$frontend_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
+    printf 'ERROR: unexpected client port binding: %q\n' "$frontend_address" >&2
+    return 1
+  fi
+  if [[ ! "$media_address" =~ ^127\.0\.0\.1:[0-9]+$ ]]; then
+    printf 'ERROR: unexpected MinIO API port binding: %q\n' "$media_address" >&2
+    return 1
+  fi
 
-  [[ -z "$(compose_with_manifest "$manifest" port mongo 27017 2>/dev/null || true)" ]] || return 1
-  [[ -z "$(compose_with_manifest "$manifest" port redis 6379 2>/dev/null || true)" ]] || return 1
-  [[ -z "$(compose_with_manifest "$manifest" port minio 9001 2>/dev/null || true)" ]] || return 1
+  # Docker Compose v5 can print "invalid IP:0" for an exposed but
+  # unpublished port. Inspect Docker's effective host bindings instead.
+  assert_unpublished_port "$manifest" mongo 27017 || return 1
+  assert_unpublished_port "$manifest" redis 6379 || return 1
+  assert_unpublished_port "$manifest" minio 9001 || return 1
 
   curl --fail --silent --show-error "http://${backend_address}/api/v1/health/ready" >/dev/null
   curl --fail --silent --show-error "http://${frontend_address}/health" >/dev/null
