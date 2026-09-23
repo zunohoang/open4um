@@ -1,6 +1,7 @@
 import {
   Check,
   Cloud,
+  CloudOff,
   FileDown,
   Home,
   Loader2,
@@ -11,6 +12,8 @@ import {
 } from 'lucide-react'
 import { useEditorStore } from '../store/editor.store'
 
+export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
+
 interface EditorHeaderProps {
   title: string
   onTitleChange: (newTitle: string) => void
@@ -20,8 +23,10 @@ interface EditorHeaderProps {
   onManualSave: () => void
   onOpenExport: () => void
   onPresent: () => void
-  saveStatus: 'saved' | 'saving' | 'unsaved'
+  saveStatus: SaveStatus
   countdown: number | null
+  isAutoSave: boolean
+  onToggleAutoSave: () => void
 }
 
 export const EditorHeader = ({
@@ -34,7 +39,9 @@ export const EditorHeader = ({
   onOpenExport,
   onPresent,
   saveStatus,
-  countdown
+  countdown,
+  isAutoSave,
+  onToggleAutoSave
 }: EditorHeaderProps) => {
   const { undoStack, redoStack, isAiPanelOpen, toggleAiPanel } =
     useEditorStore()
@@ -43,7 +50,7 @@ export const EditorHeader = ({
 
   return (
     <header className='flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
-      {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Cloud Autosave Status */}
+      {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Autosave Toggle, Save Status */}
       <div className='flex items-center gap-2'>
         <button
           type='button'
@@ -89,53 +96,86 @@ export const EditorHeader = ({
 
         <span className='text-emerald-800'>|</span>
 
-        {/* Trạng thái lưu đám mây */}
+        {/* Công tắc Bật / Tắt Tự động lưu (Autosave) */}
         <div
-          onClick={saveStatus === 'unsaved' ? onManualSave : undefined}
-          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition ${
-            saveStatus === 'unsaved'
-              ? 'cursor-pointer text-amber-300 hover:bg-emerald-900/60'
-              : 'text-stone-400'
-          }`}
+          className='flex items-center gap-1.5 rounded-md px-1 py-1 text-xs'
           title={
-            saveStatus === 'saving'
-              ? 'Đang đồng bộ thay đổi lên máy chủ...'
-              : saveStatus === 'unsaved'
-                ? 'Có thay đổi chưa lưu. Bấm để lưu hoặc dùng Ctrl+S'
-                : 'Mọi thay đổi đã được tự động lưu an toàn'
+            isAutoSave
+              ? 'Tự động lưu đang BẬT (tự lưu sau khi sửa). Bấm để TẮT'
+              : 'Tự động lưu đang TẮT (cần ấn Lưu hoặc Ctrl+S). Bấm để BẬT'
           }
         >
+          <span className='hidden text-[11px] font-medium text-stone-300 lg:inline'>
+            Autosave
+          </span>
+          <button
+            type='button'
+            role='switch'
+            aria-checked={isAutoSave}
+            onClick={onToggleAutoSave}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              isAutoSave ? 'bg-emerald-600' : 'bg-stone-600'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                isAutoSave ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Trạng thái lưu (Đang lưu / Đã lưu / Đã lưu offline / Chưa lưu) */}
+        <div className='flex items-center'>
           {saveStatus === 'saving' ? (
-            <>
+            <div className='flex items-center gap-1.5 px-2 py-1 text-xs text-amber-300'>
               <Loader2 size={14} className='animate-spin text-amber-300' />
               <span className='hidden text-[11px] font-medium sm:inline'>
                 Đang lưu...
               </span>
-            </>
-          ) : countdown !== null ? (
-            <>
+            </div>
+          ) : isAutoSave && countdown !== null ? (
+            <div className='flex items-center gap-1.5 px-2 py-1 text-xs text-amber-300'>
               <Cloud size={14} className='animate-pulse text-amber-300' />
               <span className='hidden text-[11px] font-medium sm:inline'>
                 Lưu sau {countdown}s
               </span>
-            </>
+            </div>
+          ) : saveStatus === 'offline_saved' ? (
+            <button
+              type='button'
+              onClick={onManualSave}
+              className='flex items-center gap-1.5 rounded-md border border-orange-500/50 bg-orange-950/60 px-2 py-1 text-xs text-orange-300 shadow-2xs transition hover:bg-orange-900/70 cursor-pointer'
+              title='Đang offline. Thay đổi đã được lưu an toàn vào trình duyệt. Bấm để thử đồng bộ lại lên máy chủ.'
+            >
+              <CloudOff size={14} className='text-orange-400' />
+              <span className='text-[11px] font-bold'>Đã lưu offline</span>
+            </button>
           ) : saveStatus === 'unsaved' ? (
-            <>
-              <Cloud size={14} className='text-amber-300' />
-              <span className='hidden text-[11px] font-bold text-amber-300 sm:inline'>
-                Chưa lưu (Bấm lưu)
+            <button
+              type='button'
+              onClick={onManualSave}
+              className='flex items-center gap-1.5 rounded-md border border-amber-400/50 bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-300 shadow-2xs transition hover:bg-amber-900/70 active:scale-95 cursor-pointer'
+              title='Có thay đổi chưa lưu. Bấm để lưu hoặc nhấn Ctrl+S'
+            >
+              <Cloud size={14} />
+              <span className='text-[11px]'>
+                {isAutoSave ? 'Lưu ngay' : 'Lưu (Ctrl+S)'}
               </span>
-            </>
+            </button>
           ) : (
-            <>
+            <div
+              className='flex items-center gap-1.5 px-2 py-1 text-xs text-stone-300'
+              title='Mọi thay đổi đã được lưu an toàn lên máy chủ'
+            >
               <div className='flex items-center text-emerald-400'>
                 <Cloud size={14} />
                 <Check size={11} className='-ml-1' />
               </div>
-              <span className='hidden text-[11px] font-medium text-stone-300 sm:inline'>
+              <span className='hidden text-[11px] font-medium sm:inline'>
                 Đã lưu
               </span>
-            </>
+            </div>
           )}
         </div>
       </div>

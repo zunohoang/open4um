@@ -56,7 +56,7 @@ export const LibraryPage = ({
     if (onOpen) {
       onOpen(lecture)
     } else {
-      navigate(`/editor/${lecture._id}`, { state: { lecture } })
+      navigate(`/editor/${lecture._id}`)
     }
   }
 
@@ -64,7 +64,7 @@ export const LibraryPage = ({
     if (onPresent) {
       onPresent(lecture)
     } else {
-      navigate(`/presentation/${lecture._id}`, { state: { lecture } })
+      navigate(`/presentation/${lecture._id}`)
     }
   }
 
