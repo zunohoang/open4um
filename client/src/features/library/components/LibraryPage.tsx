@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { MoreVertical } from 'lucide-react'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ExportModal, useToast } from '@/components/ui'
+import { SlidePreview } from './SlidePreview'
 import type { Folder, Lecture } from '@/lib/types'
 
 interface LibraryPageProps {
@@ -175,6 +177,32 @@ export const LibraryPage = ({
     })
   }
 
+  // Xử lý mở/đóng menu khi nhấp chuột trái vào nút Kebab ba chấm (...)
+  const handleKebabMenuClick = (e: React.MouseEvent, lecture: Lecture) => {
+    e.stopPropagation()
+    // Nếu menu của chính bài giảng này đang mở, click lại sẽ đóng menu (toggle)
+    if (contextMenu?.lecture._id === lecture._id) {
+      setContextMenu(null)
+      return
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    // Canh lề phải của menu khớp với cạnh phải nút (chiều rộng menu w-56 là 224px)
+    const menuWidth = 224
+    const idealX = rect.right - menuWidth
+    const clampedX = Math.max(
+      12,
+      Math.min(idealX, window.innerWidth - menuWidth - 12)
+    )
+    const clampedY = Math.min(rect.bottom + 6, window.innerHeight - 280)
+
+    setContextMenu({
+      x: clampedX,
+      y: clampedY,
+      lecture
+    })
+  }
+
   // Thao tác Thư mục
   const openCreateFolderModal = () => {
     setFolderToEdit(null)
@@ -324,42 +352,51 @@ export const LibraryPage = ({
           handleOpen(lecture)
         }
       }}
-      className='group flex cursor-pointer flex-col justify-between border border-stone-300 bg-white p-6 transition hover:border-emerald-950 hover:shadow-xs'
+      className='group relative flex cursor-pointer flex-col justify-between border border-stone-300 bg-white p-5 transition hover:border-emerald-950 hover:shadow-md'
     >
-      {/* Khung thumbnail bài giảng tỷ lệ 4:3 kinh điển */}
-      <div className='flex aspect-4/3 flex-col justify-between bg-stone-100 p-5'>
-        {activeViewMode === 'trash' ? (
-          <div className='flex items-center justify-between'>
-            <span className='border border-red-300 bg-red-50 px-2 py-0.5 font-mono text-[11px] font-bold text-red-700'>
+      {/* Khung thumbnail bài giảng tỷ lệ 16:9 sắc nét */}
+      <div className='relative aspect-video w-full overflow-hidden rounded-xs border border-stone-200 bg-stone-100 shadow-2xs'>
+        {/* Kết xuất trực quan Slide đầu tiên của bài giảng */}
+        <div className='h-full w-full transition-transform duration-300 group-hover:scale-[1.02]'>
+          <SlidePreview
+            slide={lecture.slides?.[0]}
+            lectureTitle={lecture.title}
+          />
+        </div>
+
+        {/* Lớp overlay chứa Badge trạng thái (góc trái) & Nút Kebab ba chấm (góc phải) */}
+        <div className='absolute inset-x-0 top-0 flex items-center justify-between p-2.5 pointer-events-none'>
+          {/* Badge góc trái */}
+          {activeViewMode === 'trash' ? (
+            <span className='rounded-xs border border-red-300 bg-red-50/95 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 shadow-2xs backdrop-blur-xs'>
               ⏳ Còn {getDaysRemaining(lecture.deletedAt)} ngày
             </span>
-            <span className='font-mono text-[10px] text-stone-400'>
-              Đã xóa:{' '}
-              {new Date(lecture.deletedAt || '').toLocaleDateString('vi-VN')}
-            </span>
-          </div>
-        ) : (
-          <div className='flex items-center justify-between'>
-            <span className='font-sans text-[10px] font-bold tracking-widest text-stone-600 uppercase opacity-80'>
+          ) : (
+            <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
               {lecture.slides.length} SLIDES
             </span>
-            <span className='font-mono text-[10px] text-stone-400'>
-              {new Date(
-                lecture.createdAt || lecture.updatedAt
-              ).toLocaleDateString('vi-VN')}
-            </span>
-          </div>
-        )}
+          )}
 
-        <strong className='max-w-[85%] text-2xl font-medium leading-none text-emerald-950 font-display line-clamp-3'>
-          {lecture.slides[0]?.title || lecture.title || 'Bản nháp'}
-        </strong>
+          {/* Nút menu ba chấm (...) rõ ràng ở góc thẻ bài giảng để nhấp chuột trái */}
+          <button
+            type='button'
+            aria-label='Tùy chọn thao tác bài giảng'
+            onClick={(e) => handleKebabMenuClick(e, lecture)}
+            className='pointer-events-auto flex h-7 w-7 items-center justify-center rounded-xs border border-stone-300 bg-white/95 text-stone-700 shadow-2xs backdrop-blur-xs transition hover:border-emerald-950 hover:bg-emerald-950 hover:text-white active:scale-95'
+            title='Tùy chọn thao tác (Đổi tên, Nhân bản, Di chuyển, Xóa...)'
+          >
+            <MoreVertical size={15} />
+          </button>
+        </div>
       </div>
 
       {/* Tiêu đề bài giảng & Metadata bên dưới */}
-      <div className='flex items-start justify-between gap-4 pt-4'>
+      <div className='flex items-start justify-between gap-3 pt-3.5'>
         <div className='min-w-0 flex-1'>
-          <h3 className='truncate text-xl font-medium text-emerald-950 font-display'>
+          <h3
+            className='truncate text-xl font-medium text-emerald-950 font-display transition group-hover:text-orange-800'
+            title={lecture.title}
+          >
             {lecture.title}
           </h3>
           <div className='mt-1 flex items-center gap-2 font-sans text-xs text-stone-500'>
@@ -758,13 +795,16 @@ export const LibraryPage = ({
         </div>
       )}
 
-      {/* MENU CHUỘT PHẢI (CUSTOM CONTEXT MENU) */}
+      {/* MENU CHUỘT PHẢI & KEBAB MENU (CUSTOM CONTEXT MENU) */}
       {contextMenu && (
         <div
           ref={contextMenuRef}
           style={{
-            top: Math.min(contextMenu.y, window.innerHeight - 260),
-            left: Math.min(contextMenu.x, window.innerWidth - 240)
+            top: Math.max(
+              10,
+              Math.min(contextMenu.y, window.innerHeight - 280)
+            ),
+            left: Math.max(10, Math.min(contextMenu.x, window.innerWidth - 240))
           }}
           className='fixed z-50 w-56 border border-stone-300 bg-white p-1.5 shadow-2xl font-sans text-xs text-stone-800'
         >
