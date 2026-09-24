@@ -49,9 +49,9 @@ export const EditorHeader = ({
   const canRedo = redoStack.length > 0
 
   return (
-    <header className='flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
+    <header className='relative flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
       {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Autosave Toggle, Save Status */}
-      <div className='flex items-center gap-2'>
+      <div className='relative z-10 flex shrink-0 items-center gap-2'>
         <button
           type='button'
           onClick={onBack}
@@ -125,19 +125,25 @@ export const EditorHeader = ({
           </button>
         </div>
 
-        {/* Trạng thái lưu (Đang lưu / Đã lưu / Đã lưu offline / Chưa lưu) */}
-        <div className='flex items-center'>
+        {/* Trạng thái lưu (Cố định chiều rộng w-[116px] để chống giật / xô lệch layout) */}
+        <div className='flex w-[116px] shrink-0 items-center justify-start'>
           {saveStatus === 'saving' ? (
-            <div className='flex items-center gap-1.5 px-2 py-1 text-xs text-amber-300'>
-              <Loader2 size={14} className='animate-spin text-amber-300' />
-              <span className='hidden text-[11px] font-medium sm:inline'>
+            <div className='flex items-center gap-1.5 px-1 py-1 text-xs text-amber-300'>
+              <Loader2
+                size={14}
+                className='animate-spin text-amber-300 shrink-0'
+              />
+              <span className='hidden text-[11px] font-medium sm:inline truncate'>
                 Đang lưu...
               </span>
             </div>
           ) : isAutoSave && countdown !== null ? (
-            <div className='flex items-center gap-1.5 px-2 py-1 text-xs text-amber-300'>
-              <Cloud size={14} className='animate-pulse text-amber-300' />
-              <span className='hidden text-[11px] font-medium sm:inline'>
+            <div className='flex items-center gap-1.5 px-1 py-1 text-xs text-amber-300'>
+              <Cloud
+                size={14}
+                className='animate-pulse text-amber-300 shrink-0'
+              />
+              <span className='hidden text-[11px] font-medium sm:inline truncate'>
                 Lưu sau {countdown}s
               </span>
             </div>
@@ -148,31 +154,33 @@ export const EditorHeader = ({
               className='flex items-center gap-1.5 rounded-md border border-orange-500/50 bg-orange-950/60 px-2 py-1 text-xs text-orange-300 shadow-2xs transition hover:bg-orange-900/70 cursor-pointer'
               title='Đang offline. Thay đổi đã được lưu an toàn vào trình duyệt. Bấm để thử đồng bộ lại lên máy chủ.'
             >
-              <CloudOff size={14} className='text-orange-400' />
-              <span className='text-[11px] font-bold'>Đã lưu offline</span>
+              <CloudOff size={14} className='text-orange-400 shrink-0' />
+              <span className='text-[11px] font-bold truncate'>
+                Đã lưu offline
+              </span>
             </button>
           ) : saveStatus === 'unsaved' ? (
             <button
               type='button'
               onClick={onManualSave}
-              className='flex items-center gap-1.5 rounded-md border border-amber-400/50 bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-300 shadow-2xs transition hover:bg-amber-900/70 active:scale-95 cursor-pointer'
+              className='flex items-center gap-1.5 rounded-md border border-amber-400/50 bg-amber-950/60 px-2 py-1 text-xs font-bold text-amber-300 shadow-2xs transition hover:bg-amber-900/70 active:scale-95 cursor-pointer'
               title='Có thay đổi chưa lưu. Bấm để lưu hoặc nhấn Ctrl+S'
             >
-              <Cloud size={14} />
-              <span className='text-[11px]'>
+              <Cloud size={14} className='shrink-0' />
+              <span className='text-[11px] truncate'>
                 {isAutoSave ? 'Lưu ngay' : 'Lưu (Ctrl+S)'}
               </span>
             </button>
           ) : (
             <div
-              className='flex items-center gap-1.5 px-2 py-1 text-xs text-stone-300'
+              className='flex items-center gap-1.5 px-1 py-1 text-xs text-stone-300'
               title='Mọi thay đổi đã được lưu an toàn lên máy chủ'
             >
-              <div className='flex items-center text-emerald-400'>
+              <div className='flex items-center text-emerald-400 shrink-0'>
                 <Cloud size={14} />
                 <Check size={11} className='-ml-1' />
               </div>
-              <span className='hidden text-[11px] font-medium sm:inline'>
+              <span className='hidden text-[11px] font-medium sm:inline truncate'>
                 Đã lưu
               </span>
             </div>
@@ -180,20 +188,20 @@ export const EditorHeader = ({
         </div>
       </div>
 
-      {/* KHU VỰC GIỮA: Tên bài giảng chỉnh sửa trực tiếp */}
-      <div className='mx-2 flex max-w-sm flex-1 items-center justify-center sm:max-w-md'>
+      {/* KHU VỰC GIỮA: Tên bài giảng căn giữa tuyệt đối (Absolute Centering) */}
+      <div className='pointer-events-none absolute left-1/2 top-1/2 flex w-full max-w-[200px] -translate-x-1/2 -translate-y-1/2 items-center justify-center px-2 sm:max-w-xs md:max-w-sm lg:max-w-md'>
         <input
           type='text'
           value={title}
           onChange={(e) => onTitleChange(e.target.value)}
           placeholder='Tiêu đề bài giảng...'
-          className='w-full truncate rounded-md border border-transparent bg-transparent px-2.5 py-1 text-center text-xs font-semibold text-stone-100 transition hover:border-emerald-700 focus:border-brand-rust focus:bg-emerald-950/80 focus:text-white focus:outline-none'
+          className='pointer-events-auto w-full truncate rounded-md border border-transparent bg-transparent px-2.5 py-1 text-center text-xs font-semibold text-stone-100 transition hover:border-emerald-700 focus:border-brand-rust focus:bg-emerald-950/80 focus:text-white focus:outline-none'
           title='Click để đổi tên bài giảng'
         />
       </div>
 
       {/* KHU VỰC PHẢI: Nút AI Copilot, Xuất bản, Trình chiếu */}
-      <div className='flex items-center gap-2'>
+      <div className='relative z-10 flex shrink-0 items-center gap-2'>
         {/* Toggle AI Copilot Panel */}
         <button
           type='button'
