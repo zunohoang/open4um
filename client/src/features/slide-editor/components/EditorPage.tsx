@@ -365,12 +365,33 @@ export const EditorPage = ({
   // Lắng nghe phím tắt toàn cục (Ctrl+Z, Ctrl+Y, Ctrl+S)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Bỏ qua nếu bộ gõ tiếng Việt / IME đang trong giai đoạn kết hợp ký tự
+      if (
+        e.isComposing ||
+        (e as unknown as { keyCode: number }).keyCode === 229
+      ) {
+        return
+      }
+
       // Phím tắt Ctrl+S / Cmd+S
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         handleManualSave()
         return
       }
+
+      // Nếu đang focus vào input/textarea bên ngoài Canvas (như ô chat AI hoặc ô tiêu đề),
+      // hãy để trình duyệt tự xử lý undo/redo của input đó
+      const target = e.target as HTMLElement | null
+      const isExternalInput =
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
+        !target.getAttribute('data-slide-canvas-text')
+
+      if (isExternalInput) {
+        return
+      }
+
       // Phím tắt Undo (Ctrl+Z)
       if (
         (e.ctrlKey || e.metaKey) &&
