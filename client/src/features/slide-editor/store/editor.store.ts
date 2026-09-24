@@ -137,41 +137,64 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   recordHistory: (slides: Slide[]) => {
     // Deep clone slides snapshot
     const snapshot = JSON.parse(JSON.stringify(slides)) as Slide[]
-    set((state) => ({
-      undoStack: [...state.undoStack.slice(-25), snapshot],
-      redoStack: []
-    }))
+    set((state) => {
+      const lastSnapshot = state.undoStack[state.undoStack.length - 1]
+      // Tránh lưu snapshot trùng lặp nếu nội dung hoàn toàn không thay đổi
+      if (
+        lastSnapshot &&
+        JSON.stringify(lastSnapshot) === JSON.stringify(snapshot)
+      ) {
+        return state
+      }
+      return {
+        undoStack: [...state.undoStack.slice(-30), snapshot],
+        redoStack: []
+      }
+    })
   },
 
   undo: (currentSlides: Slide[]) => {
-    const { undoStack, redoStack } = get()
+    const { undoStack, redoStack, selectedCompId, activeSlideIndex } = get()
     if (undoStack.length === 0) return null
 
     const previous = undoStack[undoStack.length - 1]
     const nextUndoStack = undoStack.slice(0, undoStack.length - 1)
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
+    // Kiểm tra xem selectedCompId có còn tồn tại trong slide sau khi hoàn tác không
+    const targetSlide = previous[activeSlideIndex]
+    const compStillExists =
+      targetSlide &&
+      selectedCompId &&
+      targetSlide.components?.some((c) => c.id === selectedCompId)
+
     set({
       undoStack: nextUndoStack,
       redoStack: [...redoStack, currentSnapshot],
-      selectedCompId: null
+      selectedCompId: compStillExists ? selectedCompId : null
     })
 
     return previous
   },
 
   redo: (currentSlides: Slide[]) => {
-    const { undoStack, redoStack } = get()
+    const { undoStack, redoStack, selectedCompId, activeSlideIndex } = get()
     if (redoStack.length === 0) return null
 
     const next = redoStack[redoStack.length - 1]
     const nextRedoStack = redoStack.slice(0, redoStack.length - 1)
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
+    const targetSlide = next[activeSlideIndex]
+    const compStillExists =
+      targetSlide &&
+      selectedCompId &&
+      targetSlide.components?.some((c) => c.id === selectedCompId)
+
     set({
       undoStack: [...undoStack, currentSnapshot],
       redoStack: nextRedoStack,
-      selectedCompId: null
+      selectedCompId: compStillExists ? selectedCompId : null
     })
 
     return next

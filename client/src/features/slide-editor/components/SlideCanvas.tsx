@@ -39,6 +39,31 @@ export const SlideCanvas = ({
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const hasRecordedHistoryRef = useRef(false)
 
+  // Quản lý gõ tiếng Việt (IME composition) và phân đoạn snapshot Undo/Redo cho văn bản
+  const isComposingRef = useRef(false)
+  const isTypingSessionRef = useRef(false)
+  const typingDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+
+  // Dọn dẹp debounce timer khi unmount
+  useEffect(() => {
+    return () => {
+      if (typingDebounceTimerRef.current) {
+        clearTimeout(typingDebounceTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Khi thoát chế độ sửa chữ hoặc đổi sang component khác, reset trạng thái gõ
+  useEffect(() => {
+    isTypingSessionRef.current = false
+    isComposingRef.current = false
+    if (typingDebounceTimerRef.current) {
+      clearTimeout(typingDebounceTimerRef.current)
+    }
+  }, [editingTextId])
+
   // Quản lý trạng thái kéo thả di chuyển hoặc co giãn phần tử
   const [dragState, setDragState] = useState<{
     type: 'move' | 'resize'
@@ -638,12 +663,95 @@ export const SlideCanvas = ({
               ) : editingTextId === comp.id ? (
                 /* Chế độ sửa văn bản trực tiếp khi double-click */
                 <textarea
+                  data-slide-canvas-text='true'
                   autoFocus
                   value={comp.content}
-                  onChange={(e) =>
-                    onUpdateComponent(comp.id, { content: e.target.value })
-                  }
-                  onBlur={() => setEditingTextId(null)}
+                  onCompositionStart={() => {
+                    isComposingRef.current = true
+                    if (typingDebounceTimerRef.current) {
+                      clearTimeout(typingDebounceTimerRef.current)
+                    }
+                  }}
+                  onCompositionEnd={() => {
+                    isComposingRef.current = false
+                    if (typingDebounceTimerRef.current) {
+                      clearTimeout(typingDebounceTimerRef.current)
+                    }
+                    // Sau khi gõ xong cụm ký tự dấu tiếng Việt, đặt debounce 700ms để chốt từ
+                    typingDebounceTimerRef.current = setTimeout(() => {
+                      if (!isComposingRef.current) {
+                        isTypingSessionRef.current = false
+                      }
+                    }, 700)
+                  }}
+                  onChange={(e) => {
+                    const nextVal = e.target.value
+                    const nativeComposing =
+                      (e.nativeEvent as InputEvent)?.isComposing ?? false
+                    const isComposing =
+                      isComposingRef.current || nativeComposing
+
+                    if (!isTypingSessionRef.current) {
+                      // Ký tự đầu tiên của một từ/phiên gõ mới:
+                      // Lưu snapshot trạng thái của slide TRƯỚC KHI gõ từ này vào undoStack
+                      onUpdateComponent(comp.id, { content: nextVal }, true)
+                      isTypingSessionRef.current = true
+                    } else {
+                      // Tiếp tục gõ các ký tự tiếp theo trong cùng từ:
+                      // Cập nhật canvas ngay lập tức để mượt mà, nhưng KHÔNG spam snapshot vào undoStack
+                      onUpdateComponent(comp.id, { content: nextVal }, false)
+                    }
+
+                    // Phát hiện ranh giới từ: Nếu vừa gõ dấu cách hoặc xuống dòng (và không đang kết hợp dấu IME)
+                    if (
+                      !isComposing &&
+                      (nextVal.endsWith(' ') || nextVal.endsWith('\n'))
+                    ) {
+                      isTypingSessionRef.current = false
+                      if (typingDebounceTimerRef.current) {
+                        clearTimeout(typingDebounceTimerRef.current)
+                      }
+                    } else if (!isComposing) {
+                      if (typingDebounceTimerRef.current) {
+                        clearTimeout(typingDebounceTimerRef.current)
+                      }
+                      typingDebounceTimerRef.current = setTimeout(() => {
+                        if (!isComposingRef.current) {
+                          isTypingSessionRef.current = false
+                        }
+                      }, 700)
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Nếu đang trong quá trình gõ tiếng Việt có dấu (IME), không chặn phím
+                    if (
+                      e.nativeEvent.isComposing ||
+                      (e as unknown as { keyCode: number }).keyCode === 229
+                    ) {
+                      return
+                    }
+                    // Phím Escape: kết thúc sửa văn bản
+                    if (e.key === 'Escape') {
+                      e.currentTarget.blur()
+                      return
+                    }
+                    // Nếu bấm Undo hoặc Redo trong lúc soạn thảo, reset phiên gõ để snapshot sau đó hoạt động chuẩn
+                    if (
+                      (e.ctrlKey || e.metaKey) &&
+                      (e.key.toLowerCase() === 'z' ||
+                        e.key.toLowerCase() === 'y')
+                    ) {
+                      isTypingSessionRef.current = false
+                    }
+                  }}
+                  onBlur={() => {
+                    if (typingDebounceTimerRef.current) {
+                      clearTimeout(typingDebounceTimerRef.current)
+                    }
+                    isTypingSessionRef.current = false
+                    isComposingRef.current = false
+                    setEditingTextId(null)
+                  }}
                   style={{
                     fontSize: `${comp.fontSize ?? 20}px`,
                     fontWeight: comp.fontWeight ?? 'normal',
