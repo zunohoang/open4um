@@ -5,7 +5,7 @@
 Áp dụng cho repository **ABSlider** trên GitHub (quản lý mã nguồn tập trung cho cả `client` và `server`), team 5 người: PM (Hoàng), Tester (Duy), 2 Developer (Nam, Thạch), DevOps (Đức). Mô hình nhánh: **Git Flow**. Commit theo **Conventional Commits**.
 
 > [!NOTE]
-> Toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**. Kiến trúc đích dùng Jenkins cho toàn bộ CI/CD; GitHub chỉ giữ source code và GHCR package. Client và server chạy bằng Docker Compose trên VPS, phía sau Nginx.
+> Toàn bộ dự án `ABSlider` nằm trong **1 repository Git duy nhất**. Jenkins là hệ thống CI/CD duy nhất; GitHub lưu source code và nhận commit status từ Jenkins, còn Docker Hub lưu container image. Client và server chạy bằng Docker Compose trên VPS, phía sau Nginx.
 
 
 ---
@@ -173,18 +173,17 @@ main -> Jenkins release quality gate
   -> rollback digest trước nếu lỗi
 ```
 
-### 5.3. Gate chuyển đổi khỏi GitHub Actions
+### 5.3. Jenkins-only CI/CD
 
-Không xóa workflow đang hoạt động trước khi Jenkins thay thế có runtime proof. Trình tự chuyển đổi bắt buộc:
+GitHub Actions đã được loại khỏi repository sau khi Jenkins có runtime proof cho build, test, Docker Hub publish theo immutable digest, manual approval và Production deploy. Contract hiện tại:
 
-1. Commit/push `Jenkinsfile.release` và deploy wrapper source.
-2. Cài Job Restrictions Plugin; tạo `jenkins-builder` rootless và release Multibranch Pipeline chỉ discover `develop/main`; giới hạn cả builder/deploy node bằng regex job name.
-3. Tạo hai public repository Docker Hub dưới namespace `ducchert87`; thêm credential Docker Hub ở scope release, chạy với `DEPLOY_ENABLED=false` và xác minh cả hai manifest theo digest có thể pull.
-4. Tạo agent `abslider-deploy-01` cùng rootless Docker riêng; cài wrapper root-owned, tạo secret file riêng và Nginx/DNS/TLS cho Development; bật deploy và đạt readiness/smoke gate.
-5. Chạy `main`, xác minh manual approval và rollback Production.
-6. Chỉ sau các gate trên mới xóa `.github/workflows/publish-images.yml` và xác minh push mới không tạo GitHub Actions run.
+1. `Jenkinsfile` xử lý CI và trả commit status về GitHub.
+2. `Jenkinsfile.release` chỉ nhận build trực tiếp từ `develop`/`main`.
+3. Jenkins builder rootless build và publish image lên Docker Hub theo SHA/digest.
+4. Deploy agent rootless triển khai đúng immutable digest; Production cần manual approval.
+5. Không thêm file vào `.github/workflows/`; mọi thay đổi CI/CD phải thực hiện trong Jenkins pipeline được review.
 
-Trong trạng thái chuyển tiếp hiện tại, workflow GitHub Actions vẫn là rollback cho image publishing. Điều này không được ghi nhận là Jenkins-only hoàn tất cho tới khi bước 6 PASS. Runtime secret luôn nằm ngoài repository và không được truyền qua Pipeline.
+Runtime secret luôn nằm ngoài repository và không được truyền qua Pipeline.
 
 
 ---

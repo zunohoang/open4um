@@ -59,6 +59,5 @@ tmp/
 temp/
 .eslintcache
 
-# GitHub
-.github/*
-!.github/workflows/
+# GitHub Actions is intentionally disabled; Jenkins owns all CI/CD.
+.github/workflows/
