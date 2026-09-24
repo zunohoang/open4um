@@ -7,18 +7,18 @@ import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useEditorStore } from '../store/editor.store'
+import {
+  clearOfflineDraft,
+  getOfflineDraft,
+  saveOfflineDraft
+} from '../utils/offlineStorage'
+import { getSlideComponents } from '../utils/slide'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { EditorHeader, type SaveStatus } from './EditorHeader'
 import { FloatingContextualToolbar } from './FloatingContextualToolbar'
 import { LeftSidebarRail } from './LeftSidebarRail'
 import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
-import { getSlideComponents } from '../utils/slide'
-import {
-  saveOfflineDraft,
-  getOfflineDraft,
-  clearOfflineDraft
-} from '../utils/offlineStorage'
 
 interface EditorPageProps {
   initialLecture?: Lecture
@@ -451,11 +451,11 @@ export const EditorPage = ({
 
       const updatedSlide: Slide = {
         ...sourceSlide,
-        title: titleComp ? titleComp.content : sourceSlide.title,
-        subtitle: subComp ? subComp.content : sourceSlide.subtitle,
+        title: titleComp ? titleComp.content : '',
+        subtitle: subComp ? subComp.content : '',
         bullets: bulletsComp
           ? bulletsComp.content.split('\n').filter((s) => s.trim())
-          : sourceSlide.bullets,
+          : [],
         components: updatedComps
       }
 
@@ -604,7 +604,21 @@ export const EditorPage = ({
     if (!lecture || !currentSlide) return
     const comps = getSlideComponents(currentSlide)
     const updatedComps = comps.filter((c) => c.id !== compId)
-    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+
+    // Đồng bộ lại title, subtitle, bullets tương ứng với các components còn lại
+    const titleComp = updatedComps.find((c) => c.type === 'title')
+    const subComp = updatedComps.find((c) => c.type === 'subtitle')
+    const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
+
+    const updatedSlide: Slide = {
+      ...currentSlide,
+      title: titleComp ? titleComp.content : '',
+      subtitle: subComp ? subComp.content : '',
+      bullets: bulletsComp
+        ? bulletsComp.content.split('\n').filter((s) => s.trim())
+        : [],
+      components: updatedComps
+    }
     const nextSlides = lecture.slides.map((s, idx) =>
       idx === activeSlideIndex ? updatedSlide : s
     )

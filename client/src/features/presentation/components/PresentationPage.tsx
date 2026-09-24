@@ -272,7 +272,7 @@ export const PresentationPage = ({
           {index + 1} / {lecture.slides.length}
         </span>
 
-        {slide?.components && slide.components.length > 0 ? (
+        {Array.isArray(slide?.components) ? (
           <div className='relative w-full flex-1'>
             {slide.components.map((comp) => (
               <div
