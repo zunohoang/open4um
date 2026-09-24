@@ -44,12 +44,14 @@ export const SlideCanvas = ({
     type: 'move' | 'resize'
     handle?: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
     compId: string
+    isText?: boolean
     startX: number
     startY: number
     initialX: number
     initialY: number
     initialWidth: number
     initialHeight: number
+    initialFontSize: number
   } | null>(null)
 
   // Bắt đầu kéo di chuyển vị trí phần tử
@@ -66,7 +68,8 @@ export const SlideCanvas = ({
       initialX: comp.x,
       initialY: comp.y,
       initialWidth: comp.width ?? 50,
-      initialHeight: comp.height ?? 20
+      initialHeight: comp.height ?? 20,
+      initialFontSize: comp.fontSize ?? 20
     })
   }
 
@@ -101,16 +104,20 @@ export const SlideCanvas = ({
       }
     }
 
+    const isTextComp = comp.type !== 'image' && comp.type !== 'shape'
+
     setDragState({
       type: 'resize',
       handle,
       compId: comp.id,
+      isText: isTextComp,
       startX: e.clientX,
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
       initialWidth: initW ?? 50,
-      initialHeight: initH ?? 20
+      initialHeight: initH ?? 20,
+      initialFontSize: comp.fontSize ?? 20
     })
   }
 
@@ -169,8 +176,8 @@ export const SlideCanvas = ({
         const minH = 3
         const x0 = dragState.initialX
         const y0 = dragState.initialY
-        const w0 = dragState.initialWidth
-        const h0 = dragState.initialHeight
+        const w0 = Math.max(1, dragState.initialWidth)
+        const h0 = Math.max(1, dragState.initialHeight)
         const R0 = x0 + w0
         const B0 = y0 + h0
         const dx = deltaPercentX
@@ -180,75 +187,144 @@ export const SlideCanvas = ({
         let nextY = y0
         let nextW = w0
         let nextH = h0
+        let nextFontSize: number | undefined
 
-        switch (dragState.handle) {
-          case 'se':
-            nextX = x0
-            nextY = y0
-            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-            break
+        const isCorner =
+          dragState.handle === 'nw' ||
+          dragState.handle === 'ne' ||
+          dragState.handle === 'se' ||
+          dragState.handle === 'sw'
 
-          case 'sw':
-            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-            nextW = R0 - nextX
-            nextY = y0
-            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-            break
+        if (dragState.isText && isCorner) {
+          // Với block text: Kéo 4 góc sẽ scale đồng thời cả kích thước khung và font-size
+          let s = 1
 
-          case 'ne':
-            nextX = x0
-            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-            nextH = B0 - nextY
-            break
+          switch (dragState.handle) {
+            case 'se': {
+              const sx = (w0 + dx) / w0
+              const sy = (h0 + dy) / h0
+              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
+              s = Math.max(minW / w0, s)
+              nextW = Math.min(100 - x0, w0 * s)
+              s = nextW / w0
+              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
+              nextX = x0
+              nextY = y0
+              break
+            }
+            case 'sw': {
+              const sx = (w0 - dx) / w0
+              const sy = (h0 + dy) / h0
+              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
+              s = Math.max(minW / w0, s)
+              nextW = Math.min(R0, w0 * s)
+              s = nextW / w0
+              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
+              nextX = R0 - nextW
+              nextY = y0
+              break
+            }
+            case 'ne': {
+              const sx = (w0 + dx) / w0
+              const sy = (h0 - dy) / h0
+              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
+              s = Math.max(minW / w0, s)
+              nextW = Math.min(100 - x0, w0 * s)
+              s = nextW / w0
+              nextH = Math.max(minH, Math.min(B0, h0 * s))
+              nextX = x0
+              nextY = B0 - nextH
+              break
+            }
+            case 'nw': {
+              const sx = (w0 - dx) / w0
+              const sy = (h0 - dy) / h0
+              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
+              s = Math.max(minW / w0, s)
+              nextW = Math.min(R0, w0 * s)
+              s = nextW / w0
+              nextH = Math.max(minH, Math.min(B0, h0 * s))
+              nextX = R0 - nextW
+              nextY = B0 - nextH
+              break
+            }
+          }
 
-          case 'nw':
-            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-            nextW = R0 - nextX
-            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-            nextH = B0 - nextY
-            break
+          nextFontSize = Math.round(
+            Math.max(10, Math.min(160, dragState.initialFontSize * s))
+          )
+        } else {
+          // Các đối tượng hình khối, ảnh hoặc kéo các chốt cạnh (e, w, n, s) của text
+          switch (dragState.handle) {
+            case 'se':
+              nextX = x0
+              nextY = y0
+              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+              break
 
-          case 'e':
-            nextX = x0
-            nextY = y0
-            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-            nextH = h0
-            break
+            case 'sw':
+              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+              nextW = R0 - nextX
+              nextY = y0
+              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+              break
 
-          case 'w':
-            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-            nextW = R0 - nextX
-            nextY = y0
-            nextH = h0
-            break
+            case 'ne':
+              nextX = x0
+              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+              nextH = B0 - nextY
+              break
 
-          case 's':
-            nextX = x0
-            nextY = y0
-            nextW = w0
-            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-            break
+            case 'nw':
+              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+              nextW = R0 - nextX
+              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+              nextH = B0 - nextY
+              break
 
-          case 'n':
-            nextX = x0
-            nextW = w0
-            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-            nextH = B0 - nextY
-            break
+            case 'e':
+              nextX = x0
+              nextY = y0
+              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+              nextH = h0
+              break
+
+            case 'w':
+              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+              nextW = R0 - nextX
+              nextY = y0
+              nextH = h0
+              break
+
+            case 's':
+              nextX = x0
+              nextY = y0
+              nextW = w0
+              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+              break
+
+            case 'n':
+              nextX = x0
+              nextW = w0
+              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+              nextH = B0 - nextY
+              break
+          }
         }
 
-        onUpdateComponent(
-          dragState.compId,
-          {
-            x: Math.round(nextX),
-            y: Math.round(nextY),
-            width: Math.round(nextW),
-            height: Math.round(nextH)
-          },
-          shouldRecord
-        )
+        const patch: Partial<SlideComponent> = {
+          x: Math.round(nextX),
+          y: Math.round(nextY),
+          width: Math.round(nextW),
+          height: Math.round(nextH)
+        }
+        if (nextFontSize !== undefined) {
+          patch.fontSize = nextFontSize
+        }
+
+        onUpdateComponent(dragState.compId, patch, shouldRecord)
       }
     }
 
