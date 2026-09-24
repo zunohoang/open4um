@@ -288,23 +288,73 @@ pipeline {
                   ' "$1" | tail -n 1
                 }
 
-                printf '%s' "$DOCKERHUB_TOKEN" |
-                  docker login "$REGISTRY" --username "$DOCKERHUB_USERNAME" --password-stdin
+                max_registry_attempts=4
 
-                if ! docker push "$CLIENT_IMAGE:$RELEASE_SHA" >"$client_log" 2>&1; then
-                  cat "$client_log" >&2
+                retry_registry_login() {
+                  attempt=1
+                  delay=5
+
+                  while :; do
+                    if printf '%s' "$DOCKERHUB_TOKEN" |
+                      docker login "$REGISTRY" \
+                        --username "$DOCKERHUB_USERNAME" \
+                        --password-stdin; then
+                      return 0
+                    fi
+
+                    if test "$attempt" -ge "$max_registry_attempts"; then
+                      echo "Docker registry login failed after ${attempt} attempts" >&2
+                      return 1
+                    fi
+
+                    printf 'Docker registry login attempt %s/%s failed; retrying in %ss\n' \
+                      "$attempt" "$max_registry_attempts" "$delay" >&2
+                    sleep "$delay"
+                    attempt=$((attempt + 1))
+                    delay=$((delay * 2))
+                  done
+                }
+
+                push_image() {
+                  image_ref="$1"
+                  log_file="$2"
+                  attempt=1
+                  delay=5
+
+                  while :; do
+                    : > "$log_file"
+                    if docker push "$image_ref" >"$log_file" 2>&1; then
+                      cat "$log_file"
+                      return 0
+                    fi
+
+                    cat "$log_file" >&2
+                    if test "$attempt" -ge "$max_registry_attempts"; then
+                      printf 'Image push failed after %s attempts: %s\n' \
+                        "$attempt" "$image_ref" >&2
+                      return 1
+                    fi
+
+                    printf 'Image push attempt %s/%s failed for %s; retrying in %ss\n' \
+                      "$attempt" "$max_registry_attempts" "$image_ref" "$delay" >&2
+                    sleep "$delay"
+                    attempt=$((attempt + 1))
+                    delay=$((delay * 2))
+                  done
+                }
+
+                retry_registry_login
+
+                if ! push_image "$CLIENT_IMAGE:$RELEASE_SHA" "$client_log"; then
                   echo 'Client image push failed' >&2
                   exit 1
                 fi
-                cat "$client_log"
                 client_digest="$(extract_digest "$client_log")"
 
-                if ! docker push "$SERVER_IMAGE:$RELEASE_SHA" >"$server_log" 2>&1; then
-                  cat "$server_log" >&2
+                if ! push_image "$SERVER_IMAGE:$RELEASE_SHA" "$server_log"; then
                   echo 'Server image push failed' >&2
                   exit 1
                 fi
-                cat "$server_log"
                 server_digest="$(extract_digest "$server_log")"
 
                 for digest in "$client_digest" "$server_digest"; do
@@ -316,8 +366,8 @@ pipeline {
 
                 docker tag "$CLIENT_IMAGE:$RELEASE_SHA" "$CLIENT_IMAGE:$BRANCH_NAME"
                 docker tag "$SERVER_IMAGE:$RELEASE_SHA" "$SERVER_IMAGE:$BRANCH_NAME"
-                docker push "$CLIENT_IMAGE:$BRANCH_NAME"
-                docker push "$SERVER_IMAGE:$BRANCH_NAME"
+                push_image "$CLIENT_IMAGE:$BRANCH_NAME" "$client_log"
+                push_image "$SERVER_IMAGE:$BRANCH_NAME" "$server_log"
 
                 {
                   printf 'RELEASE_ENVIRONMENT=%s\n' "$RELEASE_ENVIRONMENT"
