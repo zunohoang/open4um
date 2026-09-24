@@ -31,6 +31,27 @@ Không ghi một thay đổi là `Pushed` hoặc `Deployed` nếu mới chỉ ho
 
 ---
 
+## 2026-09-25 — Loại bỏ GitHub Actions sau khi Jenkins thay thế hoàn toàn
+
+### Thay đổi
+
+- Xóa workflow `.github/workflows/publish-images.yml`; merge/push vào `develop` hoặc `main` sẽ không còn build/publish image bằng GitHub Actions.
+- Chuyển tài liệu kiến trúc sang Jenkins-only: Jenkins thực hiện CI, Docker Hub publish và CD; GitHub chỉ quản lý source/PR và nhận commit status.
+- Chặn `.github/workflows/` trong `.gitignore` để tránh vô tình thêm lại workflow local.
+- Giữ nguyên các mục nhật ký GHCR/GitHub Actions cũ là bằng chứng lịch sử.
+
+### Bằng chứng
+
+- `git ls-files '.github/workflows/*'` không còn trả về workflow sau thay đổi.
+- `Jenkinsfile` và `Jenkinsfile.release` được giữ nguyên.
+- Việc không phát sinh GitHub Actions run mới chỉ có thể xác minh sau khi thay đổi được merge vào cả `develop` và `main`.
+
+### Trạng thái
+
+`COMMITTED_LOCAL` — đã commit trên nhánh `chore/remove-github-actions`, chưa push hoặc merge.
+
+---
+
 ## 2026-09-15 — Chuẩn bị chuyển toàn bộ CI/CD sang Jenkins
 
 ### Mục tiêu và quyết định

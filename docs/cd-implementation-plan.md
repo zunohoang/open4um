@@ -80,7 +80,7 @@ Các SHA trên chỉ là snapshot ngày lập kế hoạch. Trước khi triển
 | Production backup/restore rehearsal | `NOT_STARTED` |
 | Production approval/deploy | `NOT_STARTED` |
 | Kiwi TCMS integration | `NOT_STARTED` |
-| Gỡ GitHub Actions cũ | `NOT_STARTED` |
+| Gỡ GitHub Actions cũ | `IMPLEMENTED` |
 
 ## 4. Kiến trúc mục tiêu
 
@@ -667,7 +667,7 @@ Chỉ gỡ `.github/workflows/publish-images.yml` sau khi:
 - [ ] Production approval/deploy PASS.
 - [ ] Có runbook rollback Jenkins.
 
-Sau khi gỡ:
+Workflow `.github/workflows/publish-images.yml` đã được gỡ sau khi Jenkins build/publish và Production deploy có runtime proof. Sau khi merge thay đổi này vào từng nhánh:
 
 - [ ] Push thử và xác minh không còn GitHub Actions publish run.
 - [ ] Thu hồi credential GHCR không còn dùng.
@@ -715,7 +715,7 @@ Sau khi gỡ:
 - [ ] Development/Production không dùng chung volumes/credentials.
 - [ ] Jenkins/Kiwi không bị ảnh hưởng.
 - [ ] Reboot VPS không làm mất runtime.
-- [ ] GitHub Actions cũ được gỡ sau khi Jenkins thay thế hoàn toàn.
+- [x] GitHub Actions cũ được gỡ sau khi Jenkins thay thế hoàn toàn.
 - [ ] DevOps changelog và runbook được cập nhật.
 
 ## 21. Evidence log
