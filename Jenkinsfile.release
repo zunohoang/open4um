@@ -23,7 +23,7 @@ pipeline {
     REGISTRY = 'docker.io'
     CLIENT_IMAGE = 'docker.io/ducchert87/open4um-client'
     SERVER_IMAGE = 'docker.io/ducchert87/open4um-server'
-    PRODUCTION_APPROVERS = 'CONFIGURE_BEFORE_PRODUCTION'
+    PRODUCTION_APPROVERS = 'duckcy'
   }
 
   stages {
