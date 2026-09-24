@@ -3,7 +3,7 @@
 ## Tổng quan
 
 Cả thư mục **ABSlider** là **1 repository Git duy nhất** trên GitHub. Trong đó:
-- Mã nguồn được quản lý tập trung trong 1 repo: thư mục gốc chứa `docs/`, hạ tầng Docker dev, thư mục `.github/` chứa workflows CI/CD chung.
+- Mã nguồn được quản lý tập trung trong 1 repo: thư mục gốc chứa `docs/`, hạ tầng Docker dev và `Jenkinsfile`/`Jenkinsfile.release`. Jenkins là hệ thống CI/CD duy nhất; repository không còn workflow GitHub Actions.
 - **Nơi host tách riêng độc lập**:
   - **`client`** (Frontend): Xây dựng bằng React + Vite, build thành static files và triển khai trên dịch vụ lưu trữ web tĩnh riêng biệt.
   - **`server`** (Backend): Xây dựng bằng Node.js + Express, đóng gói Docker container và triển khai trên VPS riêng cùng các dịch vụ phụ trợ (MongoDB, Redis, MinIO).
@@ -11,7 +11,8 @@ Cả thư mục **ABSlider** là **1 repository Git duy nhất** trên GitHub. T
 
 ```
 ABSlider/                  # 1 Git repository duy nhất đẩy lên GitHub
-  .github/                 # Workflows GitHub Actions (CI/CD) & template chung
+  Jenkinsfile              # Jenkins CI cho pull request
+  Jenkinsfile.release      # Jenkins build, publish và deploy develop/main
   docs/                    # Tài liệu chung: đặc tả, convention, quy trình
   docs-template/           # Tài liệu tham khảo từ dự án trước (không sửa)
   docker-compose.dev.yml   # Môi trường dev dùng chung: MongoDB, Redis, MinIO
