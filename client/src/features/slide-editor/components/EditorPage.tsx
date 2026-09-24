@@ -409,7 +409,11 @@ export const EditorPage = ({
 
   // Cập nhật thuộc tính của một component
   const handleUpdateComponent = useCallback(
-    (compId: string, patch: Partial<SlideComponent>) => {
+    (
+      compId: string,
+      patch: Partial<SlideComponent>,
+      shouldRecordHistory = true
+    ) => {
       const currentLecture = lectureRef.current
       if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
 
@@ -437,7 +441,10 @@ export const EditorPage = ({
       const nextSlides = currentLecture.slides.map((s, idx) =>
         idx === activeSlideIndex ? updatedSlide : s
       )
-      mutateLecture({ ...currentLecture, slides: nextSlides })
+      mutateLecture(
+        { ...currentLecture, slides: nextSlides },
+        shouldRecordHistory
+      )
     },
     [activeSlideIndex, mutateLecture]
   )
@@ -498,6 +505,7 @@ export const EditorPage = ({
       x: 25,
       y: 20,
       width: 50,
+      height: 38,
       fontSize: 20,
       fontWeight: 'normal',
       fontStyle: 'normal',

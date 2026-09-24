@@ -11,7 +11,11 @@ interface SlideCanvasProps {
   totalSlides: number
   selectedCompId: string | null
   onSelectComponent: (id: string | null) => void
-  onUpdateComponent: (id: string, patch: Partial<SlideComponent>) => void
+  onUpdateComponent: (
+    id: string,
+    patch: Partial<SlideComponent>,
+    recordHistory?: boolean
+  ) => void
   onDuplicateComponent: (comp: SlideComponent) => void
   onDeleteComponent: (id: string) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
@@ -33,23 +37,26 @@ export const SlideCanvas = ({
 }: SlideCanvasProps) => {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const hasRecordedHistoryRef = useRef(false)
 
   // Quản lý trạng thái kéo thả di chuyển hoặc co giãn phần tử
   const [dragState, setDragState] = useState<{
     type: 'move' | 'resize'
+    handle?: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
     compId: string
     startX: number
     startY: number
     initialX: number
     initialY: number
     initialWidth: number
-    initialHeight?: number
+    initialHeight: number
   } | null>(null)
 
   // Bắt đầu kéo di chuyển vị trí phần tử
   const handleStartMove = (e: React.MouseEvent, comp: SlideComponent) => {
     e.stopPropagation()
     onSelectComponent(comp.id)
+    hasRecordedHistoryRef.current = false
 
     setDragState({
       type: 'move',
@@ -59,24 +66,51 @@ export const SlideCanvas = ({
       initialX: comp.x,
       initialY: comp.y,
       initialWidth: comp.width ?? 50,
-      initialHeight: comp.height ?? 30
+      initialHeight: comp.height ?? 20
     })
   }
 
-  // Bắt đầu co giãn kích thước bằng 4 chốt góc
-  const handleStartResize = (e: React.MouseEvent, comp: SlideComponent) => {
+  // Bắt đầu co giãn kích thước bằng các chốt neo góc và cạnh
+  const handleStartResize = (
+    e: React.MouseEvent,
+    comp: SlideComponent,
+    handle: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
+  ) => {
     e.stopPropagation()
     onSelectComponent(comp.id)
+    hasRecordedHistoryRef.current = false
+
+    const compEl =
+      (e.currentTarget.closest(
+        `[data-component-id='${comp.id}']`
+      ) as HTMLElement) || e.currentTarget.parentElement
+
+    let initW = comp.width
+    let initH = comp.height
+
+    if (canvasRef.current && compEl) {
+      const canvasRect = canvasRef.current.getBoundingClientRect()
+      const compRect = compEl.getBoundingClientRect()
+      if (canvasRect.width > 0 && canvasRect.height > 0) {
+        if (!initW) {
+          initW = Math.round((compRect.width / canvasRect.width) * 100)
+        }
+        if (!initH) {
+          initH = Math.round((compRect.height / canvasRect.height) * 100)
+        }
+      }
+    }
 
     setDragState({
       type: 'resize',
+      handle,
       compId: comp.id,
       startX: e.clientX,
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
-      initialWidth: comp.width ?? 50,
-      initialHeight: comp.height ?? 30
+      initialWidth: initW ?? 50,
+      initialHeight: initH ?? 20
     })
   }
 
@@ -88,33 +122,133 @@ export const SlideCanvas = ({
       const canvas = canvasRef.current
       if (!canvas) return
       const rect = canvas.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return
 
       const deltaX = e.clientX - dragState.startX
       const deltaY = e.clientY - dragState.startY
+
+      if (!hasRecordedHistoryRef.current && Math.hypot(deltaX, deltaY) < 2) {
+        return
+      }
+
+      let shouldRecord = false
+      if (!hasRecordedHistoryRef.current) {
+        hasRecordedHistoryRef.current = true
+        shouldRecord = true
+      }
 
       const deltaPercentX = (deltaX / rect.width) * 100
       const deltaPercentY = (deltaY / rect.height) * 100
 
       if (dragState.type === 'move') {
         const nextX = Math.round(
-          Math.max(1, Math.min(88, dragState.initialX + deltaPercentX))
+          Math.max(
+            0,
+            Math.min(
+              100 - dragState.initialWidth,
+              dragState.initialX + deltaPercentX
+            )
+          )
         )
         const nextY = Math.round(
-          Math.max(1, Math.min(88, dragState.initialY + deltaPercentY))
-        )
-        onUpdateComponent(dragState.compId, { x: nextX, y: nextY })
-      } else if (dragState.type === 'resize') {
-        const nextWidth = Math.round(
-          Math.max(5, Math.min(96, dragState.initialWidth + deltaPercentX))
-        )
-        const patch: Partial<SlideComponent> = { width: nextWidth }
-        if (dragState.initialHeight !== undefined) {
-          const nextHeight = Math.round(
-            Math.max(3, Math.min(96, dragState.initialHeight + deltaPercentY))
+          Math.max(
+            0,
+            Math.min(
+              100 - dragState.initialHeight,
+              dragState.initialY + deltaPercentY
+            )
           )
-          patch.height = nextHeight
+        )
+        onUpdateComponent(
+          dragState.compId,
+          { x: nextX, y: nextY },
+          shouldRecord
+        )
+      } else if (dragState.type === 'resize' && dragState.handle) {
+        const minW = 5
+        const minH = 3
+        const x0 = dragState.initialX
+        const y0 = dragState.initialY
+        const w0 = dragState.initialWidth
+        const h0 = dragState.initialHeight
+        const R0 = x0 + w0
+        const B0 = y0 + h0
+        const dx = deltaPercentX
+        const dy = deltaPercentY
+
+        let nextX = x0
+        let nextY = y0
+        let nextW = w0
+        let nextH = h0
+
+        switch (dragState.handle) {
+          case 'se':
+            nextX = x0
+            nextY = y0
+            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+            break
+
+          case 'sw':
+            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+            nextW = R0 - nextX
+            nextY = y0
+            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+            break
+
+          case 'ne':
+            nextX = x0
+            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+            nextH = B0 - nextY
+            break
+
+          case 'nw':
+            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+            nextW = R0 - nextX
+            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+            nextH = B0 - nextY
+            break
+
+          case 'e':
+            nextX = x0
+            nextY = y0
+            nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
+            nextH = h0
+            break
+
+          case 'w':
+            nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
+            nextW = R0 - nextX
+            nextY = y0
+            nextH = h0
+            break
+
+          case 's':
+            nextX = x0
+            nextY = y0
+            nextW = w0
+            nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
+            break
+
+          case 'n':
+            nextX = x0
+            nextW = w0
+            nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
+            nextH = B0 - nextY
+            break
         }
-        onUpdateComponent(dragState.compId, patch)
+
+        onUpdateComponent(
+          dragState.compId,
+          {
+            x: Math.round(nextX),
+            y: Math.round(nextY),
+            width: Math.round(nextW),
+            height: Math.round(nextH)
+          },
+          shouldRecord
+        )
       }
     }
 
@@ -250,16 +384,23 @@ export const SlideCanvas = ({
           return (
             <div
               key={comp.id}
+              data-component-id={comp.id}
               style={{
                 position: 'absolute',
                 left: `${comp.x}%`,
                 top: `${comp.y}%`,
                 width: comp.width ? `${comp.width}%` : 'auto',
                 height:
-                  isShape && comp.shapeType !== 'line' && comp.height
-                    ? `${comp.height}%`
-                    : 'auto',
-                maxWidth: '96%'
+                  isShape && comp.shapeType !== 'line'
+                    ? comp.height
+                      ? `${comp.height}%`
+                      : 'auto'
+                    : comp.type === 'image' && comp.height
+                      ? `${comp.height}%`
+                      : 'auto',
+                minHeight:
+                  isText && comp.height ? `${comp.height}%` : undefined,
+                maxWidth: '100%'
               }}
               onMouseDown={(e) => handleStartMove(e, comp)}
               onClick={(e) => {
@@ -279,27 +420,66 @@ export const SlideCanvas = ({
               {/* KHUNG BOUNDING BOX VÀ CÁC NÚT ĐIỀU KHIỂN CANVA KHI ĐƯỢC CHỌN */}
               {isSelected && (
                 <>
-                  {/* 4 Chốt định vị co giãn ở 4 góc */}
-                  <span
-                    onMouseDown={(e) => handleStartResize(e, comp)}
-                    className='absolute -top-1.5 -left-1.5 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-brand-rust shadow-xs'
-                    title='Kéo để co giãn kích thước'
-                  />
-                  <span
-                    onMouseDown={(e) => handleStartResize(e, comp)}
-                    className='absolute -top-1.5 -right-1.5 h-3 w-3 cursor-nesw-resize rounded-full border-2 border-white bg-brand-rust shadow-xs'
-                    title='Kéo để co giãn kích thước'
-                  />
-                  <span
-                    onMouseDown={(e) => handleStartResize(e, comp)}
-                    className='absolute -bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize rounded-full border-2 border-white bg-brand-rust shadow-xs'
-                    title='Kéo để co giãn kích thước'
-                  />
-                  <span
-                    onMouseDown={(e) => handleStartResize(e, comp)}
-                    className='absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-brand-rust shadow-xs'
-                    title='Kéo để co giãn kích thước'
-                  />
+                  {comp.shapeType === 'line' ? (
+                    <>
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'w')}
+                        className='absolute top-1/2 -left-2 z-30 h-4 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo điểm đầu'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'e')}
+                        className='absolute top-1/2 -right-2 z-30 h-4 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo điểm cuối'
+                      />
+                    </>
+                  ) : (
+                    <>
+                      {/* 4 Chốt định vị co giãn ở 4 góc */}
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'nw')}
+                        className='absolute -top-1.5 -left-1.5 z-30 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Co giãn góc trên - trái'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'ne')}
+                        className='absolute -top-1.5 -right-1.5 z-30 h-3 w-3 cursor-nesw-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Co giãn góc trên - phải'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'sw')}
+                        className='absolute -bottom-1.5 -left-1.5 z-30 h-3 w-3 cursor-nesw-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Co giãn góc dưới - trái'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'se')}
+                        className='absolute -bottom-1.5 -right-1.5 z-30 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Co giãn góc dưới - phải'
+                      />
+
+                      {/* Các chốt định vị co giãn ở 4 cạnh */}
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'w')}
+                        className='absolute top-1/2 -left-1.5 z-30 h-5 w-2 -translate-y-1/2 cursor-ew-resize rounded-full border border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo giãn chiều ngang'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'e')}
+                        className='absolute top-1/2 -right-1.5 z-30 h-5 w-2 -translate-y-1/2 cursor-ew-resize rounded-full border border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo giãn chiều ngang'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 'n')}
+                        className='absolute -top-1.5 left-1/2 z-30 h-2 w-5 -translate-x-1/2 cursor-ns-resize rounded-full border border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo giãn chiều dọc'
+                      />
+                      <span
+                        onMouseDown={(e) => handleStartResize(e, comp, 's')}
+                        className='absolute -bottom-1.5 left-1/2 z-30 h-2 w-5 -translate-x-1/2 cursor-ns-resize rounded-full border border-white bg-brand-rust shadow-xs transition-transform hover:scale-125'
+                        title='Kéo giãn chiều dọc'
+                      />
+                    </>
+                  )}
 
                   {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG */}
                   <div
@@ -368,11 +548,15 @@ export const SlideCanvas = ({
                   {renderShapeElement(comp)}
                 </div>
               ) : comp.type === 'image' ? (
-                <div className='overflow-hidden rounded-sm pointer-events-none'>
+                <div className='h-full w-full overflow-hidden rounded-sm pointer-events-none'>
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide graphic'
-                    className='h-auto w-full max-h-[70vh] object-contain'
+                    className={
+                      comp.height
+                        ? 'h-full w-full object-contain'
+                        : 'h-auto w-full max-h-[70vh] object-contain'
+                    }
                   />
                 </div>
               ) : editingTextId === comp.id ? (
@@ -397,7 +581,7 @@ export const SlideCanvas = ({
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none'
                   }}
-                  className='w-full resize-none rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none'
+                  className='w-full resize-none rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none break-words'
                   rows={comp.content.split('\n').length || 2}
                 />
               ) : (
@@ -418,7 +602,7 @@ export const SlideCanvas = ({
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
                     lineHeight: 1.3
                   }}
-                  className='w-full'
+                  className='w-full break-words'
                 >
                   {comp.type === 'bullets' ? (
                     <ul className='space-y-1.5 list-disc pl-5'>
@@ -426,15 +610,19 @@ export const SlideCanvas = ({
                         .split('\n')
                         .filter((s) => s.trim())
                         .map((bullet, idx) => (
-                          <li key={idx}>{bullet}</li>
+                          <li key={idx} className='break-words'>
+                            {bullet}
+                          </li>
                         ))}
                     </ul>
                   ) : comp.type === 'quote' ? (
-                    <div className='italic border-y border-stone-300 py-3 px-2'>
+                    <div className='italic border-y border-stone-300 py-3 px-2 break-words'>
                       “ {comp.content} ”
                     </div>
                   ) : (
-                    <div className='whitespace-pre-wrap'>{comp.content}</div>
+                    <div className='whitespace-pre-wrap break-words'>
+                      {comp.content}
+                    </div>
                   )}
                 </div>
               )}

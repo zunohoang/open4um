@@ -287,8 +287,16 @@ export const PresentationPage = ({
                     comp.shapeType !== 'line' &&
                     comp.height
                       ? `${comp.height}%`
-                      : 'auto',
-                  maxWidth: '94%',
+                      : comp.type === 'image' && comp.height
+                        ? `${comp.height}%`
+                        : 'auto',
+                  minHeight:
+                    comp.type !== 'shape' &&
+                    comp.type !== 'image' &&
+                    comp.height
+                      ? `${comp.height}%`
+                      : undefined,
+                  maxWidth: '100%',
                   fontSize: `${Math.round((comp.fontSize ?? 20) * 1.3)}px`,
                   fontWeight: comp.fontWeight ?? 'normal',
                   fontStyle: comp.fontStyle ?? 'normal',
@@ -310,7 +318,11 @@ export const PresentationPage = ({
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide visual'
-                    className='h-auto w-full object-contain'
+                    className={
+                      comp.height
+                        ? 'h-full w-full object-contain'
+                        : 'h-auto w-full object-contain'
+                    }
                   />
                 ) : comp.type === 'bullets' ? (
                   <ul className='space-y-2.5 list-disc pl-6'>
@@ -318,15 +330,17 @@ export const PresentationPage = ({
                       .split('\n')
                       .filter((s) => s.trim())
                       .map((bullet, idx) => (
-                        <li key={idx}>{bullet}</li>
+                        <li key={idx} className='break-words'>
+                          {bullet}
+                        </li>
                       ))}
                   </ul>
                 ) : comp.type === 'quote' ? (
-                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl'>
+                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl break-words'>
                     “ {comp.content} ”
                   </div>
                 ) : (
-                  <div>{comp.content}</div>
+                  <div className='break-words'>{comp.content}</div>
                 )}
               </div>
             ))}
