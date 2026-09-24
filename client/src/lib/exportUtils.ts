@@ -38,7 +38,7 @@ const createSlideElement = (
   el.appendChild(numberTag)
 
   // Nếu slide có components kéo thả Canvas
-  if (slide.components && slide.components.length > 0) {
+  if (Array.isArray(slide.components)) {
     const canvasArea = document.createElement('div')
     canvasArea.style.position = 'relative'
     canvasArea.style.width = '100%'
