@@ -1,6 +1,6 @@
+import type { Lecture, Slide } from '@/lib/types'
 import { toPng } from 'html-to-image'
 import { jsPDF } from 'jspdf'
-import type { Lecture, Slide } from '@/lib/types'
 
 /**
  * Tạo DOM element chuẩn tỷ lệ 16:9 (1280x720) cho một slide để xuất hình ảnh / PDF
@@ -50,7 +50,14 @@ const createSlideElement = (
       compEl.style.left = `${comp.x}%`
       compEl.style.top = `${comp.y}%`
       compEl.style.width = comp.width ? `${comp.width}%` : 'auto'
+      if (comp.height) {
+        compEl.style.height = `${comp.height}%`
+      }
       compEl.style.maxWidth = '95%'
+      if (comp.rotation) {
+        compEl.style.transform = `rotate(${comp.rotation}deg)`
+        compEl.style.transformOrigin = 'center center'
+      }
       compEl.style.fontSize = `${Math.round((comp.fontSize ?? 20) * 1.35)}px`
       compEl.style.fontWeight = comp.fontWeight ?? 'normal'
       compEl.style.fontStyle = comp.fontStyle ?? 'normal'
@@ -69,7 +76,14 @@ const createSlideElement = (
         compEl.style.fontFamily = "'Inter', sans-serif"
       }
 
-      if (comp.type === 'bullets') {
+      if (comp.type === 'image') {
+        const img = document.createElement('img')
+        img.src = comp.imageUrl || comp.content
+        img.style.width = '100%'
+        img.style.height = comp.height ? '100%' : 'auto'
+        img.style.objectFit = 'contain'
+        compEl.appendChild(img)
+      } else if (comp.type === 'bullets') {
         const ul = document.createElement('ul')
         ul.style.listStyleType = 'disc'
         ul.style.paddingLeft = '28px'

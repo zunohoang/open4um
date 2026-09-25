@@ -1,5 +1,5 @@
 import type { Slide, SlideComponent } from '@/lib/types'
-import { Copy, Sparkles, Trash2 } from 'lucide-react'
+import { Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP } from '../constants/theme-options'
 import { getSlideComponents } from '../utils/slide'
@@ -39,13 +39,8 @@ export const SlideCanvas = ({
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const hasRecordedHistoryRef = useRef(false)
 
-  // Quản lý gõ tiếng Việt (IME composition) và phân đoạn snapshot Undo/Redo cho văn bản
   // Quản lý gõ tiếng Việt (IME composition), phiên sửa văn bản (Session-based Undo) và auto-expand
   const isComposingRef = useRef(false)
-  const isTypingSessionRef = useRef(false)
-  const typingDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
   const isTextSessionRecordedRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -59,18 +54,14 @@ export const SlideCanvas = ({
 
   // Khi thoát chế độ sửa chữ hoặc đổi sang component khác, reset trạng thái phiên gõ
   useEffect(() => {
-    isTypingSessionRef.current = false
     isTextSessionRecordedRef.current = false
     isComposingRef.current = false
-    if (typingDebounceTimerRef.current) {
-      clearTimeout(typingDebounceTimerRef.current)
-    }
   }, [editingTextId])
 
-  // Quản lý trạng thái kéo thả di chuyển hoặc co giãn phần tử
+  // Quản lý trạng thái kéo thả di chuyển, co giãn hoặc xoay phần tử
   const [dragState, setDragState] = useState<{
-    type: 'move' | 'resize'
-    handle?: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
+    type: 'move' | 'resize' | 'rotate'
+    handle?: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w' | 'rotate'
     compId: string
     isText?: boolean
     startX: number
@@ -80,6 +71,9 @@ export const SlideCanvas = ({
     initialWidth: number
     initialHeight: number
     initialFontSize: number
+    initialRotation: number
+    centerX: number
+    centerY: number
   } | null>(null)
 
   // Bắt đầu kéo di chuyển vị trí phần tử
@@ -113,7 +107,10 @@ export const SlideCanvas = ({
       initialY: comp.y,
       initialWidth: comp.width ?? 50,
       initialHeight: comp.height ?? 20,
-      initialFontSize: comp.fontSize ?? 20
+      initialFontSize: comp.fontSize ?? 20,
+      initialRotation: comp.rotation ?? 0,
+      centerX: 0,
+      centerY: 0
     })
   }
 
@@ -161,7 +158,43 @@ export const SlideCanvas = ({
       initialY: comp.y,
       initialWidth: initW ?? 50,
       initialHeight: initH ?? 20,
-      initialFontSize: comp.fontSize ?? 20
+      initialFontSize: comp.fontSize ?? 20,
+      initialRotation: comp.rotation ?? 0,
+      centerX: 0,
+      centerY: 0
+    })
+  }
+
+  // Bắt đầu kéo xoay góc đối tượng
+  const handleStartRotate = (e: React.MouseEvent, comp: SlideComponent) => {
+    e.stopPropagation()
+    onSelectComponent(comp.id)
+    hasRecordedHistoryRef.current = false
+
+    const compEl =
+      (e.currentTarget.closest(
+        `[data-component-id='${comp.id}']`
+      ) as HTMLElement) || e.currentTarget.parentElement
+    if (!compEl) return
+
+    const rect = compEl.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+
+    setDragState({
+      type: 'rotate',
+      handle: 'rotate',
+      compId: comp.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: comp.x,
+      initialY: comp.y,
+      initialWidth: comp.width ?? 50,
+      initialHeight: comp.height ?? 20,
+      initialFontSize: comp.fontSize ?? 20,
+      initialRotation: comp.rotation ?? 0,
+      centerX,
+      centerY
     })
   }
 
@@ -191,7 +224,48 @@ export const SlideCanvas = ({
       const deltaPercentX = (deltaX / rect.width) * 100
       const deltaPercentY = (deltaY / rect.height) * 100
 
-      if (dragState.type === 'move') {
+      if (dragState.type === 'rotate') {
+        const currentAngle =
+          (Math.atan2(
+            e.clientY - dragState.centerY,
+            e.clientX - dragState.centerX
+          ) *
+            180) /
+          Math.PI
+        const startAngle =
+          (Math.atan2(
+            dragState.startY - dragState.centerY,
+            dragState.startX - dragState.centerX
+          ) *
+            180) /
+          Math.PI
+        const deltaAngle = currentAngle - startAngle
+
+        let nextRotation = (dragState.initialRotation + deltaAngle) % 360
+        if (nextRotation < 0) nextRotation += 360
+
+        let finalRotation = Math.round(nextRotation)
+        if (e.shiftKey) {
+          // Giữ Shift để snap theo bước 15 độ
+          finalRotation = Math.round(finalRotation / 15) * 15
+        } else {
+          // Tự động snap nhẹ khi gần các góc chuẩn (0, 45, 90, 135, 180, 225, 270, 315, 360)
+          const snapAngles = [0, 45, 90, 135, 180, 225, 270, 315, 360]
+          for (const snap of snapAngles) {
+            if (Math.abs(finalRotation - snap) <= 3) {
+              finalRotation = snap === 360 ? 0 : snap
+              break
+            }
+          }
+        }
+        if (finalRotation >= 360) finalRotation = 0
+
+        onUpdateComponent(
+          dragState.compId,
+          { rotation: finalRotation },
+          shouldRecord
+        )
+      } else if (dragState.type === 'move') {
         const nextX = Math.round(
           Math.max(
             0,
@@ -520,7 +594,11 @@ export const SlideCanvas = ({
                       : 'auto',
                 minHeight:
                   isText && comp.height ? `${comp.height}%` : undefined,
-                maxWidth: '100%'
+                maxWidth: '100%',
+                transform: comp.rotation
+                  ? `rotate(${comp.rotation}deg)`
+                  : undefined,
+                transformOrigin: 'center center'
               }}
               onMouseDown={(e) => handleStartMove(e, comp)}
               onClick={(e) => {
@@ -601,12 +679,54 @@ export const SlideCanvas = ({
                     </>
                   )}
 
-                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG */}
+                  {/* CHỐT XOAY ĐỐI TƯỢNG PHONG CÁCH CANVA */}
+                  <div
+                    onMouseDown={(e) => handleStartRotate(e, comp)}
+                    className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center justify-center cursor-grab active:cursor-grabbing group/rot select-none ${
+                      comp.y < 8 ? '-top-9' : '-bottom-9'
+                    }`}
+                    title='Kéo để xoay đối tượng (Giữ Shift để snap 15°)'
+                  >
+                    <div
+                      className={`absolute left-1/2 h-3 w-px -translate-x-1/2 bg-brand-rust pointer-events-none ${
+                        comp.y < 8 ? '-bottom-3' : '-top-3'
+                      }`}
+                    />
+                    <div className='flex h-6 w-6 items-center justify-center rounded-full border-2 border-brand-rust bg-white text-brand-rust shadow-md transition-transform hover:scale-110 active:scale-95'>
+                      <RotateCw
+                        size={12}
+                        style={{
+                          transform: `rotate(-${comp.rotation || 0}deg)`
+                        }}
+                        className='transition-transform group-hover/rot:rotate-45'
+                      />
+                    </div>
+                    {dragState?.type === 'rotate' &&
+                      dragState.compId === comp.id && (
+                        <div
+                          className={`absolute left-1/2 rounded bg-stone-900/90 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white shadow-md select-none whitespace-nowrap pointer-events-none ${
+                            comp.y < 8 ? '-top-6' : '-bottom-6'
+                          }`}
+                          style={{
+                            transform: `translateX(-50%) rotate(-${comp.rotation || 0}deg)`,
+                            transformOrigin: 'center center'
+                          }}
+                        >
+                          {comp.rotation ?? 0}°
+                        </div>
+                      )}
+                  </div>
+
+                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG (GIỮ NGUYÊN CHIỀU NGANG THẲNG ĐỨNG KHI XOAY PHẦN TỬ) */}
                   <div
                     onMouseDown={(e) => e.stopPropagation()}
-                    className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
+                    className={`absolute left-1/2 flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
                       comp.y < 8 ? 'top-full mt-3.5' : 'bottom-full mb-3.5'
                     }`}
+                    style={{
+                      transform: `translateX(-50%) rotate(-${comp.rotation || 0}deg)`,
+                      transformOrigin: 'center center'
+                    }}
                   >
                     {isText && (
                       <>
