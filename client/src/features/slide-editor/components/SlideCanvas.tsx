@@ -1,6 +1,6 @@
 import type { Slide, SlideComponent } from '@/lib/types'
 import { Copy, Sparkles, Trash2 } from 'lucide-react'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP } from '../constants/theme-options'
 import { getSlideComponents } from '../utils/slide'
 
@@ -40,24 +40,27 @@ export const SlideCanvas = ({
   const hasRecordedHistoryRef = useRef(false)
 
   // Quản lý gõ tiếng Việt (IME composition) và phân đoạn snapshot Undo/Redo cho văn bản
+  // Quản lý gõ tiếng Việt (IME composition), phiên sửa văn bản (Session-based Undo) và auto-expand
   const isComposingRef = useRef(false)
   const isTypingSessionRef = useRef(false)
   const typingDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   )
+  const isTextSessionRecordedRef = useRef(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Dọn dẹp debounce timer khi unmount
-  useEffect(() => {
-    return () => {
-      if (typingDebounceTimerRef.current) {
-        clearTimeout(typingDebounceTimerRef.current)
-      }
+  // Tự động co giãn chiều cao theo nội dung thực tế (scrollHeight) khi vào chế độ soạn thảo
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
     }
-  }, [])
+  }, [editingTextId, slide])
 
-  // Khi thoát chế độ sửa chữ hoặc đổi sang component khác, reset trạng thái gõ
+  // Khi thoát chế độ sửa chữ hoặc đổi sang component khác, reset trạng thái phiên gõ
   useEffect(() => {
     isTypingSessionRef.current = false
+    isTextSessionRecordedRef.current = false
     isComposingRef.current = false
     if (typingDebounceTimerRef.current) {
       clearTimeout(typingDebounceTimerRef.current)
@@ -81,6 +84,22 @@ export const SlideCanvas = ({
 
   // Bắt đầu kéo di chuyển vị trí phần tử
   const handleStartMove = (e: React.MouseEvent, comp: SlideComponent) => {
+    // Không di chuyển nếu đang trong chế độ soạn thảo văn bản
+    if (editingTextId === comp.id) return
+
+    const target = e.target as HTMLElement
+    const isText = comp.type !== 'image' && comp.type !== 'shape'
+
+    // Nếu là text và đã được chọn: nếu người dùng click vào vùng chữ (text content),
+    // không kích hoạt di chuyển để người dùng có thể bôi đen văn bản tự nhiên
+    if (
+      comp.id === selectedCompId &&
+      isText &&
+      target.closest("[data-text-content='true']")
+    ) {
+      return
+    }
+
     e.stopPropagation()
     onSelectComponent(comp.id)
     hasRecordedHistoryRef.current = false
@@ -585,7 +604,9 @@ export const SlideCanvas = ({
                   {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG */}
                   <div
                     onMouseDown={(e) => e.stopPropagation()}
-                    className='absolute -top-10 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-1 shadow-lg backdrop-blur-xs select-none'
+                    className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
+                      comp.y < 8 ? 'top-full mt-3.5' : 'bottom-full mb-3.5'
+                    }`}
                   >
                     {isText && (
                       <>
@@ -593,7 +614,7 @@ export const SlideCanvas = ({
                           type='button'
                           onClick={() => onAiQuickAction('rewrite')}
                           disabled={isAiLoading}
-                          className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50'
+                          className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50 whitespace-nowrap shrink-0'
                           title='Yêu cầu AI viết lại ý văn'
                         >
                           <Sparkles size={11} />
@@ -604,7 +625,7 @@ export const SlideCanvas = ({
                           type='button'
                           onClick={() => onAiQuickAction('shorten')}
                           disabled={isAiLoading}
-                          className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50'
+                          className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
                           title='Yêu cầu AI rút gọn súc tích'
                         >
                           Rút gọn
@@ -614,7 +635,7 @@ export const SlideCanvas = ({
                           type='button'
                           onClick={() => onAiQuickAction('expand')}
                           disabled={isAiLoading}
-                          className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50'
+                          className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
                           title='Yêu cầu AI mở rộng chi tiết'
                         >
                           Mở rộng
@@ -626,7 +647,7 @@ export const SlideCanvas = ({
                     <button
                       type='button'
                       onClick={() => onDuplicateComponent(comp)}
-                      className='flex items-center justify-center rounded-full p-1 text-stone-600 hover:bg-stone-100'
+                      className='flex items-center justify-center rounded-full p-1 text-stone-600 hover:bg-stone-100 shrink-0'
                       title='Nhân bản'
                     >
                       <Copy size={13} />
@@ -634,7 +655,7 @@ export const SlideCanvas = ({
                     <button
                       type='button'
                       onClick={() => onDeleteComponent(comp.id)}
-                      className='flex items-center justify-center rounded-full p-1 text-red-600 hover:bg-red-50'
+                      className='flex items-center justify-center rounded-full p-1 text-red-600 hover:bg-red-50 shrink-0'
                       title='Xóa'
                     >
                       <Trash2 size={13} />
@@ -663,63 +684,30 @@ export const SlideCanvas = ({
               ) : editingTextId === comp.id ? (
                 /* Chế độ sửa văn bản trực tiếp khi double-click */
                 <textarea
+                  ref={textareaRef}
                   data-slide-canvas-text='true'
                   autoFocus
                   value={comp.content}
+                  onMouseDown={(e) => e.stopPropagation()}
                   onCompositionStart={() => {
                     isComposingRef.current = true
-                    if (typingDebounceTimerRef.current) {
-                      clearTimeout(typingDebounceTimerRef.current)
-                    }
                   }}
                   onCompositionEnd={() => {
                     isComposingRef.current = false
-                    if (typingDebounceTimerRef.current) {
-                      clearTimeout(typingDebounceTimerRef.current)
-                    }
-                    // Sau khi gõ xong cụm ký tự dấu tiếng Việt, đặt debounce 700ms để chốt từ
-                    typingDebounceTimerRef.current = setTimeout(() => {
-                      if (!isComposingRef.current) {
-                        isTypingSessionRef.current = false
-                      }
-                    }, 700)
                   }}
                   onChange={(e) => {
                     const nextVal = e.target.value
-                    const nativeComposing =
-                      (e.nativeEvent as InputEvent)?.isComposing ?? false
-                    const isComposing =
-                      isComposingRef.current || nativeComposing
+                    // Cập nhật chiều cao textarea tự động nở theo nội dung thực tế
+                    e.currentTarget.style.height = 'auto'
+                    e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`
 
-                    if (!isTypingSessionRef.current) {
-                      // Ký tự đầu tiên của một từ/phiên gõ mới:
-                      // Lưu snapshot trạng thái của slide TRƯỚC KHI gõ từ này vào undoStack
+                    if (!isTextSessionRecordedRef.current) {
+                      // Ký tự đầu tiên của phiên gõ: Lưu snapshot trước khi sửa vào undoStack
                       onUpdateComponent(comp.id, { content: nextVal }, true)
-                      isTypingSessionRef.current = true
+                      isTextSessionRecordedRef.current = true
                     } else {
-                      // Tiếp tục gõ các ký tự tiếp theo trong cùng từ:
-                      // Cập nhật canvas ngay lập tức để mượt mà, nhưng KHÔNG spam snapshot vào undoStack
+                      // Các ký tự tiếp theo trong cùng phiên: Cập nhật component nhưng không tạo thêm snapshot
                       onUpdateComponent(comp.id, { content: nextVal }, false)
-                    }
-
-                    // Phát hiện ranh giới từ: Nếu vừa gõ dấu cách hoặc xuống dòng (và không đang kết hợp dấu IME)
-                    if (
-                      !isComposing &&
-                      (nextVal.endsWith(' ') || nextVal.endsWith('\n'))
-                    ) {
-                      isTypingSessionRef.current = false
-                      if (typingDebounceTimerRef.current) {
-                        clearTimeout(typingDebounceTimerRef.current)
-                      }
-                    } else if (!isComposing) {
-                      if (typingDebounceTimerRef.current) {
-                        clearTimeout(typingDebounceTimerRef.current)
-                      }
-                      typingDebounceTimerRef.current = setTimeout(() => {
-                        if (!isComposingRef.current) {
-                          isTypingSessionRef.current = false
-                        }
-                      }, 700)
                     }
                   }}
                   onKeyDown={(e) => {
@@ -741,14 +729,11 @@ export const SlideCanvas = ({
                       (e.key.toLowerCase() === 'z' ||
                         e.key.toLowerCase() === 'y')
                     ) {
-                      isTypingSessionRef.current = false
+                      isTextSessionRecordedRef.current = false
                     }
                   }}
                   onBlur={() => {
-                    if (typingDebounceTimerRef.current) {
-                      clearTimeout(typingDebounceTimerRef.current)
-                    }
-                    isTypingSessionRef.current = false
+                    isTextSessionRecordedRef.current = false
                     isComposingRef.current = false
                     setEditingTextId(null)
                   }}
@@ -763,14 +748,20 @@ export const SlideCanvas = ({
                       comp.fontFamily ||
                       'inherit',
                     textTransform:
-                      comp.textCase === 'uppercase' ? 'uppercase' : 'none'
+                      comp.textCase === 'uppercase' ? 'uppercase' : 'none',
+                    lineHeight: 1.3
                   }}
-                  className='w-full resize-none rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none break-words'
-                  rows={comp.content.split('\n').length || 2}
+                  className='w-full resize-none overflow-hidden rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none break-words'
                 />
               ) : (
                 /* Hiển thị văn bản bình thường */
                 <div
+                  data-text-content='true'
+                  onMouseDown={(e) => {
+                    if (isSelected) {
+                      e.stopPropagation()
+                    }
+                  }}
                   style={{
                     fontSize: `${comp.fontSize ?? 20}px`,
                     fontWeight: comp.fontWeight ?? 'normal',
@@ -786,7 +777,7 @@ export const SlideCanvas = ({
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
                     lineHeight: 1.3
                   }}
-                  className='w-full break-words'
+                  className={`w-full break-words ${isSelected ? 'select-text cursor-text' : 'select-none'}`}
                 >
                   {comp.type === 'bullets' ? (
                     <ul className='space-y-1.5 list-disc pl-5'>
