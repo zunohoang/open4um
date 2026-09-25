@@ -44,6 +44,16 @@ extract_function() {
 bash -n "$deploy_script" "$smoke_script"
 grep -Fx 'set -Eeuo pipefail' "$deploy_script" >/dev/null ||
   fail 'deploy wrapper must inherit ERR traps inside functions'
+grep -Fx 'unset RELEASE_SHA RELEASE_ENVIRONMENT' "$deploy_script" >/dev/null ||
+  fail 'deploy wrapper must clear inherited release metadata before Compose'
+grep -Fx 'unset ABSLIDER_CLIENT_IMAGE ABSLIDER_SERVER_IMAGE' "$deploy_script" >/dev/null ||
+  fail 'deploy wrapper must clear inherited image metadata before Compose'
+grep -F 'compose_with_manifest "$candidate_manifest" pull client server' "$deploy_script" >/dev/null ||
+  fail 'deploy wrapper must only pull application images during a release'
+
+if grep -Fx 'compose_with_manifest "$candidate_manifest" pull' "$deploy_script" >/dev/null; then
+  fail 'deploy wrapper must not pull pinned infrastructure images on every release'
+fi
 
 normalizer_source="$(extract_function normalize_registry_reference)"
 verifier_source="$(extract_function verify_pulled_digest)"

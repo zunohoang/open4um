@@ -36,6 +36,13 @@ readonly release_sha="$2"
 readonly client_image="$3"
 readonly server_image="$4"
 
+# Docker Compose gives the parent process environment precedence over
+# --env-file values. Jenkins exports these names for the candidate release, so
+# leaving them set would make a rollback start the previous images with the
+# candidate release metadata. Release manifests must remain authoritative.
+unset RELEASE_SHA RELEASE_ENVIRONMENT
+unset ABSLIDER_CLIENT_IMAGE ABSLIDER_SERVER_IMAGE
+
 case "$release_environment" in
   develop)
     readonly compose_project='abslider-develop'
@@ -290,7 +297,7 @@ rollback() {
 trap rollback ERR
 
 compose_with_manifest "$candidate_manifest" config --quiet
-compose_with_manifest "$candidate_manifest" pull
+compose_with_manifest "$candidate_manifest" pull client server
 verify_pulled_digest "$client_image"
 verify_pulled_digest "$server_image"
 compose_with_manifest "$candidate_manifest" up --detach --wait --wait-timeout 180
