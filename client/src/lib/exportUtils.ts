@@ -1,6 +1,6 @@
+import type { Lecture, Slide } from '@/lib/types'
 import { toPng } from 'html-to-image'
 import { jsPDF } from 'jspdf'
-import type { Lecture, Slide } from '@/lib/types'
 
 /**
  * Tạo DOM element chuẩn tỷ lệ 16:9 (1280x720) cho một slide để xuất hình ảnh / PDF

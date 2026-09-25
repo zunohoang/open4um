@@ -695,27 +695,38 @@ export const SlideCanvas = ({
                     <div className='flex h-6 w-6 items-center justify-center rounded-full border-2 border-brand-rust bg-white text-brand-rust shadow-md transition-transform hover:scale-110 active:scale-95'>
                       <RotateCw
                         size={12}
+                        style={{
+                          transform: `rotate(-${comp.rotation || 0}deg)`
+                        }}
                         className='transition-transform group-hover/rot:rotate-45'
                       />
                     </div>
                     {dragState?.type === 'rotate' &&
                       dragState.compId === comp.id && (
                         <div
-                          className={`absolute left-1/2 -translate-x-1/2 rounded bg-stone-900/90 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white shadow-md select-none whitespace-nowrap pointer-events-none ${
+                          className={`absolute left-1/2 rounded bg-stone-900/90 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white shadow-md select-none whitespace-nowrap pointer-events-none ${
                             comp.y < 8 ? '-top-6' : '-bottom-6'
                           }`}
+                          style={{
+                            transform: `translateX(-50%) rotate(-${comp.rotation || 0}deg)`,
+                            transformOrigin: 'center center'
+                          }}
                         >
                           {comp.rotation ?? 0}°
                         </div>
                       )}
                   </div>
 
-                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG */}
+                  {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG (GIỮ NGUYÊN CHIỀU NGANG THẲNG ĐỨNG KHI XOAY PHẦN TỬ) */}
                   <div
                     onMouseDown={(e) => e.stopPropagation()}
-                    className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
+                    className={`absolute left-1/2 flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
                       comp.y < 8 ? 'top-full mt-3.5' : 'bottom-full mb-3.5'
                     }`}
+                    style={{
+                      transform: `translateX(-50%) rotate(-${comp.rotation || 0}deg)`,
+                      transformOrigin: 'center center'
+                    }}
                   >
                     {isText && (
                       <>
