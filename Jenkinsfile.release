@@ -5,7 +5,7 @@ pipeline {
     booleanParam(
       name: 'DEPLOY_ENABLED',
       defaultValue: false,
-      description: 'Deploy the published immutable digests after all release gates pass'
+      description: 'Enable the approval-gated Production deploy; Development deploys automatically'
     )
   }
 
@@ -445,7 +445,10 @@ pipeline {
       }
       when {
         beforeAgent true
-        expression { return params.DEPLOY_ENABLED }
+        expression {
+          return env.BRANCH_NAME == 'develop' ||
+            (env.BRANCH_NAME == 'main' && params.DEPLOY_ENABLED)
+        }
       }
       options {
         timeout(time: 15, unit: 'MINUTES')
