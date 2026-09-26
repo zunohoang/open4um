@@ -172,9 +172,12 @@ containers without Production ports, networks or volumes:
 - the plaintext drill directory was deleted after a sanitized success event was
   written to the system journal.
 
-The first timer-originated run is a separate acceptance check. After its trigger,
-record a non-empty `LastTriggerUSec`, `Result=success`, `ExecMainStatus=0` and a
-new `BACKUP_SUCCEEDED` journal entry before closing the task.
+The first timer-originated run completed on 2026-09-26 Asia/Bangkok. Systemd
+recorded `LastTriggerUSec=Fri 2026-09-25 19:39:02 UTC`, `Result=success` and
+`ExecMainStatus=0`. The wrapper emitted `BACKUP_SUCCEEDED` at 19:39:06 UTC only
+after retention pruning and `restic check` completed. The timer remained
+`enabled` and `active`, scheduled its next run, and the public readiness endpoint
+reported MongoDB, Redis and MinIO as healthy after the backup.
 
 ## Incident restore boundary
 
