@@ -1,0 +1,32 @@
+[Unit]
+Description=ABSlider encrypted Production backup to Azure Blob Storage
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/abslider-backup/backup.env
+Environment=RESTIC_CACHE_DIR=/var/cache/restic
+ExecStart=/opt/abslider/bin/backup-abslider
+TimeoutStartSec=2h
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CacheDirectory=restic
+ReadWritePaths=/opt/abslider/backups /var/cache/restic
+ReadOnlyPaths=/opt/abslider/shared /opt/abslider/releases /etc/nginx /etc/abslider-backup
+
+[Install]
+WantedBy=multi-user.target

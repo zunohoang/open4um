@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+unset AZURE_ACCOUNT_KEY AZURE_ACCOUNT_SAS AZURE_FORCE_CLI_CREDENTIAL
+
+readonly restore_root='/opt/abslider/backups/restore-drills'
+readonly expected_restic_version='0.19.1'
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ "$(id -u)" -eq 0 ]] || fail 'restore wrapper must run as root'
+[[ "$#" -eq 2 ]] || fail 'usage: restore-abslider <snapshot-id|latest> <drill-name>'
+command -v restic >/dev/null 2>&1 || fail 'Restic is not installed'
+[[ "$(restic version)" == "restic ${expected_restic_version} "* ]] ||
+  fail "Restic ${expected_restic_version} is required"
+
+readonly snapshot_id="$1"
+readonly drill_name="$2"
+
+[[ "$snapshot_id" == 'latest' || "$snapshot_id" =~ ^[0-9a-f]{8,64}$ ]] ||
+  fail 'invalid Restic snapshot ID'
+[[ "$drill_name" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || fail 'invalid restore drill name'
+
+: "${AZURE_ACCOUNT_NAME:?set AZURE_ACCOUNT_NAME}"
+: "${RESTIC_REPOSITORY:?set RESTIC_REPOSITORY}"
+: "${RESTIC_PASSWORD_FILE:?set RESTIC_PASSWORD_FILE}"
+: "${ABSLIDER_BACKUP_HOST:?set ABSLIDER_BACKUP_HOST}"
+
+[[ "$RESTIC_REPOSITORY" == 'azure:abslider-restic:/production' ]] ||
+  fail 'unexpected Restic repository'
+[[ "$AZURE_ACCOUNT_NAME" =~ ^[a-z0-9]{3,24}$ ]] ||
+  fail 'invalid Azure storage account name'
+[[ "$ABSLIDER_BACKUP_HOST" == 'abslider-production-01' ]] ||
+  fail 'unexpected backup host'
+[[ -f "$RESTIC_PASSWORD_FILE" && ! -L "$RESTIC_PASSWORD_FILE" ]] ||
+  fail 'Restic password file is missing or unsafe'
+[[ "$(stat --format='%U:%G' "$RESTIC_PASSWORD_FILE")" == 'root:root' ]] ||
+  fail 'Restic password file must be owned by root:root'
+[[ "$(stat --format='%a' "$RESTIC_PASSWORD_FILE")" == '600' ]] ||
+  fail 'Restic password file must have mode 0600'
+
+readonly target="${restore_root}/${drill_name}"
+[[ ! -e "$target" ]] || fail "restore target already exists: ${target}"
+install -d -o root -g root -m 0700 "$restore_root" "$target"
+
+restic restore "$snapshot_id" \
+  --host "$ABSLIDER_BACKUP_HOST" \
+  --tag abslider,production \
+  --target "$target"
+
+readonly payload="${target}/opt/abslider/backups/payload"
+[[ -d "$payload" && ! -L "$payload" ]] || fail 'restored payload directory is missing'
+[[ -f "${payload}/SHA256SUMS" ]] || fail 'restored checksum manifest is missing'
+
+(
+  cd "$payload"
+  sha256sum --check SHA256SUMS
+)
+
+printf 'RESTORE_ARCHIVE_VERIFIED snapshot=%s target=%s\n' "$snapshot_id" "$payload"
+printf '%s\n' 'Live MongoDB, Redis and MinIO were not modified.'

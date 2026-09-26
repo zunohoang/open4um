@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the ABSlider Production backup every day
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Bangkok
+RandomizedDelaySec=10m
+Persistent=true
+Unit=abslider-backup.service
+
+[Install]
+WantedBy=timers.target

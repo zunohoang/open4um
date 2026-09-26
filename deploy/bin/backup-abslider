@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+unset DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
+unset AZURE_ACCOUNT_KEY AZURE_ACCOUNT_SAS AZURE_FORCE_CLI_CREDENTIAL
+
+readonly install_root='/opt/abslider'
+readonly compose_file="${install_root}/shared/compose.yml"
+readonly secret_file="${install_root}/shared/production.env"
+readonly current_link="${install_root}/releases/production/current"
+readonly deploy_lock="${install_root}/releases/.deploy.lock"
+readonly backup_root="${install_root}/backups"
+readonly payload_dir="${backup_root}/payload"
+readonly backup_lock="${backup_root}/.backup.lock"
+readonly compose_project='abslider-production'
+readonly expected_restic_version='0.19.1'
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "required command is missing: $1"
+}
+
+assert_regular_file() {
+  local path="$1"
+
+  [[ -f "$path" && ! -L "$path" ]] || fail "required regular file is missing: ${path}"
+}
+
+assert_file_metadata() {
+  local path="$1"
+  local expected_owner="$2"
+  local expected_mode="$3"
+
+  assert_regular_file "$path"
+  [[ "$(stat --format='%U:%G' "$path")" == "$expected_owner" ]] ||
+    fail "unexpected owner for ${path}"
+  [[ "$(stat --format='%a' "$path")" == "$expected_mode" ]] ||
+    fail "unexpected mode for ${path}"
+}
+
+clean_payload() {
+  [[ "$payload_dir" == '/opt/abslider/backups/payload' ]] || return 70
+  [[ -d "$payload_dir" && ! -L "$payload_dir" ]] || return 0
+  find "$payload_dir" -mindepth 1 -delete
+}
+
+paused_services=0
+resume_services() {
+  if [[ "$paused_services" -eq 1 ]]; then
+    compose unpause minio server >/dev/null 2>&1 || true
+    paused_services=0
+  fi
+}
+
+cleanup() {
+  local status="$?"
+  trap - EXIT INT TERM
+  resume_services
+  clean_payload || status=70
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+compose() {
+  docker compose \
+    --project-name "$compose_project" \
+    --env-file "$secret_file" \
+    --env-file "$current_manifest" \
+    --file "$compose_file" \
+    "$@"
+}
+
+container_id_for() {
+  local service="$1"
+  local container_id
+
+  container_id="$(compose ps --quiet "$service")"
+  [[ -n "$container_id" && "$container_id" != *$'\n'* ]] ||
+    fail "expected exactly one running container for service: ${service}"
+  printf '%s\n' "$container_id"
+}
+
+[[ "$(id -u)" -eq 0 ]] || fail 'backup wrapper must run as root'
+
+for command_name in docker restic flock sha256sum find sort tar; do
+  require_command "$command_name"
+done
+[[ "$(restic version)" == "restic ${expected_restic_version} "* ]] ||
+  fail "Restic ${expected_restic_version} is required"
+
+: "${AZURE_ACCOUNT_NAME:?set AZURE_ACCOUNT_NAME}"
+: "${RESTIC_REPOSITORY:?set RESTIC_REPOSITORY}"
+: "${RESTIC_PASSWORD_FILE:?set RESTIC_PASSWORD_FILE}"
+: "${ABSLIDER_BACKUP_HOST:?set ABSLIDER_BACKUP_HOST}"
+: "${DOCKER_HOST:?set DOCKER_HOST}"
+
+[[ "$AZURE_ACCOUNT_NAME" =~ ^[a-z0-9]{3,24}$ ]] || fail 'invalid Azure storage account name'
+[[ "$RESTIC_REPOSITORY" == 'azure:abslider-restic:/production' ]] ||
+  fail 'unexpected Restic repository'
+[[ "$ABSLIDER_BACKUP_HOST" == 'abslider-production-01' ]] ||
+  fail 'unexpected backup host'
+[[ "$DOCKER_HOST" =~ ^unix:///run/user/[0-9]+/docker\.sock$ ]] ||
+  fail 'unexpected Docker socket'
+
+assert_file_metadata "$compose_file" 'root:root' '644'
+assert_file_metadata "$secret_file" 'root:abslider-deploy' '640'
+assert_regular_file "$RESTIC_PASSWORD_FILE"
+[[ "$(stat --format='%U:%G' "$RESTIC_PASSWORD_FILE")" == 'root:root' ]] ||
+  fail 'Restic password file must be owned by root:root'
+[[ "$(stat --format='%a' "$RESTIC_PASSWORD_FILE")" == '600' ]] ||
+  fail 'Restic password file must have mode 0600'
+
+[[ -L "$current_link" ]] || fail 'Production current release symlink is missing'
+current_dir="$(readlink --canonicalize "$current_link")"
+case "$current_dir" in
+  "${install_root}/releases/production/"*) ;;
+  *) fail 'Production current release points outside its release directory' ;;
+esac
+readonly current_dir
+readonly current_manifest="${current_dir}/release.env"
+assert_regular_file "$current_manifest"
+
+[[ -f "$deploy_lock" && ! -L "$deploy_lock" ]] || fail 'deployment lock is missing'
+install -d -o root -g root -m 0700 "$backup_root"
+[[ ! -L "$backup_root" ]] || fail 'backup root must not be a symbolic link'
+
+exec 8>"$backup_lock"
+flock --exclusive --wait 1 8 || fail 'another ABSlider backup is running'
+exec 9<"$deploy_lock"
+flock --shared --wait 300 9 || fail 'an ABSlider deployment is still running'
+
+clean_payload
+install -d -o root -g root -m 0700 \
+  "$payload_dir/database" \
+  "$payload_dir/redis" \
+  "$payload_dir/minio" \
+  "$payload_dir/runtime"
+
+compose config --quiet
+container_id_for mongo >/dev/null
+readonly redis_container="$(container_id_for redis)"
+readonly minio_container="$(container_id_for minio)"
+container_id_for server >/dev/null
+
+readonly created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+readonly release_sha="$(sed -n 's/^RELEASE_SHA=//p' "$current_manifest")"
+[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'current Production release SHA is invalid'
+
+printf 'Creating MongoDB logical archive\n'
+compose exec -T mongo sh -eu -c '
+  exec mongodump \
+    --host 127.0.0.1 \
+    --port 27017 \
+    --username "$MONGO_INITDB_ROOT_USERNAME" \
+    --password "$MONGO_INITDB_ROOT_PASSWORD" \
+    --authenticationDatabase admin \
+    --archive \
+    --gzip
+' >"${payload_dir}/database/mongo.archive.gz"
+
+printf 'Creating Redis RDB snapshot\n'
+[[ "$(compose exec -T redis redis-cli SAVE | tr -d '\r')" == 'OK' ]] ||
+  fail 'Redis SAVE did not return OK'
+docker cp "${redis_container}:/data/dump.rdb" "${payload_dir}/redis/dump.rdb"
+
+printf 'Copying MinIO data while write services are paused\n'
+paused_services=1
+compose pause server minio >/dev/null
+docker cp "${minio_container}:/data/." "${payload_dir}/minio/"
+compose unpause minio server >/dev/null
+paused_services=0
+
+install -o root -g root -m 0600 "$secret_file" "${payload_dir}/runtime/production.env"
+install -o root -g root -m 0644 "$compose_file" "${payload_dir}/runtime/compose.yml"
+install -o root -g root -m 0600 "$current_manifest" "${payload_dir}/runtime/release.env"
+tar \
+  --create \
+  --file "${payload_dir}/runtime/nginx.tar" \
+  --directory /etc/nginx \
+  nginx.conf sites-available sites-enabled
+
+cat >"${payload_dir}/BACKUP-METADATA" <<EOF
+environment=production
+host=${ABSLIDER_BACKUP_HOST}
+created_at=${created_at}
+release_sha=${release_sha}
+azure_account=${AZURE_ACCOUNT_NAME}
+restic_repository=${RESTIC_REPOSITORY}
+EOF
+
+(
+  cd "$payload_dir"
+  find . -type f ! -name SHA256SUMS -print0 |
+    sort --zero-terminated |
+    xargs --null sha256sum >SHA256SUMS
+  sha256sum --check SHA256SUMS
+)
+
+printf 'Uploading encrypted Restic snapshot\n'
+restic backup "$payload_dir" \
+  --host "$ABSLIDER_BACKUP_HOST" \
+  --tag abslider \
+  --tag production \
+  --tag scheduled
+
+restic forget \
+  --host "$ABSLIDER_BACKUP_HOST" \
+  --tag abslider,production \
+  --group-by host,tags \
+  --keep-daily 7 \
+  --keep-weekly 4 \
+  --keep-monthly 6 \
+  --prune
+
+restic check
+
+printf 'BACKUP_SUCCEEDED environment=production host=%s release_sha=%s created_at=%s\n' \
+  "$ABSLIDER_BACKUP_HOST" "$release_sha" "$created_at"
