@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
+import { BrandLogo } from '@/components/ui'
 
 interface WorkspaceHeaderProps {
   onCreate?: () => void
@@ -51,12 +52,16 @@ export const WorkspaceHeader = ({
   return (
     <header className='fixed top-0 left-0 right-0 z-30 flex h-16 items-center justify-between border-b border-stone-300 bg-brand-paper px-5 sm:px-12'>
       {/* Logo & Nhãn vai trò */}
-      <div className='flex items-center gap-3 font-sans text-lg font-extrabold tracking-widest text-emerald-950'>
-        <div>
-          AB<span className='text-orange-700'>SLIDER</span>
-        </div>
+      <div className='flex items-center gap-3'>
+        <BrandLogo
+          variant='horizontal'
+          theme='light'
+          height={32}
+          asLink
+          to={isAdmin ? '/admin' : '/library'}
+        />
         {isAdmin && (
-          <span className='border border-orange-300 bg-orange-100 px-2 py-0.5 text-xs font-bold text-orange-900'>
+          <span className='border border-orange-300 bg-orange-100 px-2 py-0.5 font-sans text-xs font-bold text-orange-900'>
             QUẢN TRỊ
           </span>
         )}

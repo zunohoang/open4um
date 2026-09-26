@@ -1,6 +1,7 @@
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
 import type { Lecture, SlideComponent } from '@/lib/types'
+import { BrandLogo } from '@/components/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
@@ -137,7 +138,15 @@ export const PresentationPage = ({
   if (isLoading) {
     return (
       <main className='grid min-h-screen place-items-center bg-black p-6 text-stone-300 font-sans text-sm'>
-        Đang tải bài trình chiếu...
+        <div className='flex flex-col items-center gap-4'>
+          <BrandLogo
+            variant='mark'
+            theme='dark'
+            height={48}
+            className='animate-pulse'
+          />
+          <span>Đang tải bài trình chiếu...</span>
+        </div>
       </main>
     )
   }
@@ -145,7 +154,13 @@ export const PresentationPage = ({
   if (!lecture) {
     return (
       <main className='grid min-h-screen place-items-center bg-black p-6 text-stone-100 font-sans'>
-        <div className='text-center'>
+        <div className='flex flex-col items-center text-center'>
+          <BrandLogo
+            variant='mark'
+            theme='dark'
+            height={48}
+            className='mb-4 opacity-50'
+          />
           <p className='text-sm text-red-300'>Không tìm thấy bài giảng</p>
           <button
             type='button'

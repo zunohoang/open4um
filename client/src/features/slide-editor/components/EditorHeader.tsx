@@ -3,13 +3,13 @@ import {
   Cloud,
   CloudOff,
   FileDown,
-  Home,
   Loader2,
   Play,
   Redo2,
   Sparkles,
   Undo2
 } from 'lucide-react'
+import { BrandLogo } from '@/components/ui'
 import { useEditorStore } from '../store/editor.store'
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
@@ -55,11 +55,18 @@ export const EditorHeader = ({
         <button
           type='button'
           onClick={onBack}
-          className='flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold text-stone-200 transition hover:bg-emerald-900/60 hover:text-white cursor-pointer'
-          title='Trở về thư viện'
+          className='flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold text-stone-200 transition hover:bg-emerald-900/60 hover:text-white cursor-pointer group'
+          title='ABSlider - Trở về thư viện'
         >
-          <Home size={15} />
-          <span className='hidden sm:inline'>Thư viện</span>
+          <BrandLogo
+            variant='mark'
+            theme='dark'
+            height={24}
+            className='transition-transform group-hover:scale-105'
+          />
+          <span className='hidden sm:inline font-sans text-xs font-medium text-stone-200'>
+            Thư viện
+          </span>
         </button>
 
         <span className='text-emerald-800'>|</span>
