@@ -5,7 +5,7 @@ import type { Slide, SlideComponent } from '@/lib/types'
  * tự động chuyển đổi title, subtitle và bullets thành các SlideComponent tiêu chuẩn.
  */
 export const getSlideComponents = (slide: Slide): SlideComponent[] => {
-  if (slide.components && slide.components.length > 0) {
+  if (Array.isArray(slide.components)) {
     return slide.components
   }
 

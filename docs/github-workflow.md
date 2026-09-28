@@ -180,8 +180,10 @@ GitHub Actions đã được loại khỏi repository sau khi Jenkins có runtim
 1. `Jenkinsfile` xử lý CI và trả commit status về GitHub.
 2. `Jenkinsfile.release` chỉ nhận build trực tiếp từ `develop`/`main`.
 3. Jenkins builder rootless build và publish image lên Docker Hub theo SHA/digest.
-4. Deploy agent rootless triển khai đúng immutable digest; Production cần manual approval.
-5. Không thêm file vào `.github/workflows/`; mọi thay đổi CI/CD phải thực hiện trong Jenkins pipeline được review.
+4. `develop` tự động deploy các digest vừa publish lên Development sau khi tất cả release gate PASS.
+5. `main` chỉ deploy Production khi `DEPLOY_ENABLED=true` và người được phép xác nhận bước `Approve Production`.
+6. Deploy agent rootless triển khai đúng immutable digest.
+7. Không thêm file vào `.github/workflows/`; mọi thay đổi CI/CD phải thực hiện trong Jenkins pipeline được review.
 
 Runtime secret luôn nằm ngoài repository và không được truyền qua Pipeline.
 

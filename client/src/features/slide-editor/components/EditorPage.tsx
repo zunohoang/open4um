@@ -7,13 +7,18 @@ import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useEditorStore } from '../store/editor.store'
+import {
+  clearOfflineDraft,
+  getOfflineDraft,
+  saveOfflineDraft
+} from '../utils/offlineStorage'
+import { getSlideComponents } from '../utils/slide'
 import { AiCopilotPanel } from './AiCopilotPanel'
-import { EditorHeader } from './EditorHeader'
+import { EditorHeader, type SaveStatus } from './EditorHeader'
 import { FloatingContextualToolbar } from './FloatingContextualToolbar'
 import { LeftSidebarRail } from './LeftSidebarRail'
 import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
-import { getSlideComponents } from '../utils/slide'
 
 interface EditorPageProps {
   initialLecture?: Lecture
@@ -44,19 +49,41 @@ export const EditorPage = ({
   } = useEditorStore()
 
   const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
-  const [lecture, setLecture] = useState<Lecture | null>(
-    initialLecture || lectureFromState || null
-  )
+  const lectureId = params.id || initialLecture?._id || lectureFromState?._id
+
+  // Kiểm tra ngay khi khởi tạo xem có bản nháp offline trong localStorage không
+  const [lecture, setLecture] = useState<Lecture | null>(() => {
+    if (lectureId) {
+      const draft = getOfflineDraft(lectureId)
+      if (draft) {
+        return draft.lecture
+      }
+    }
+    return initialLecture || lectureFromState || null
+  })
   const [isLoading, setIsLoading] = useState(!lecture)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isUnauthorized, setIsUnauthorized] = useState(false)
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
 
-  // Trạng thái Autosave đếm ngược
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>(
-    'saved'
-  )
+  // Trạng thái Bật/Tắt Tự động lưu (mặc định Bật, lưu vào localStorage)
+  const [isAutoSave, setIsAutoSave] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('abslider_autosave_enabled')
+      return saved !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  // Trạng thái lưu: nếu mở từ bản nháp offline chưa đồng bộ, khởi tạo là 'offline_saved'
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
+    if (lectureId && getOfflineDraft(lectureId)) {
+      return 'offline_saved'
+    }
+    return 'saved'
+  })
   const [countdown, setCountdown] = useState<number | null>(null)
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -67,22 +94,6 @@ export const EditorPage = ({
   useEffect(() => {
     lectureRef.current = lecture
   }, [lecture])
-
-  // Lưu bài giảng lên server
-  const triggerSaveToServer = useCallback(
-    async (toSave: Lecture) => {
-      setSaveStatus('saving')
-      setCountdown(null)
-      try {
-        await editorApi.autosave(toSave)
-        setSaveStatus('saved')
-      } catch {
-        setSaveStatus('unsaved')
-        showToast('Không thể lưu thay đổi vào máy chủ', 'error')
-      }
-    },
-    [showToast]
-  )
 
   const clearCountdownTimers = useCallback(() => {
     if (countdownTimerRef.current) {
@@ -96,10 +107,68 @@ export const EditorPage = ({
     setCountdown(null)
   }, [])
 
+  // Chuyển đổi trạng thái Bật / Tắt Autosave
+  const handleToggleAutoSave = useCallback(() => {
+    setIsAutoSave((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('abslider_autosave_enabled', String(next))
+      } catch {
+        // ignore
+      }
+      if (!next) {
+        clearCountdownTimers()
+      }
+      return next
+    })
+  }, [clearCountdownTimers])
+
+  // Thực hiện lưu bài giảng: kiểm tra online/offline
+  const executeSave = useCallback(
+    async (toSave: Lecture, isAuto = false) => {
+      setSaveStatus('saving')
+      clearCountdownTimers()
+
+      // 1. Nếu không có kết nối mạng: lưu tạm vào localStorage
+      if (!navigator.onLine) {
+        saveOfflineDraft(toSave)
+        setSaveStatus('offline_saved')
+        if (!isAuto) {
+          showToast(
+            'Mất kết nối mạng. Đã lưu tạm bài giảng offline vào trình duyệt.',
+            'info'
+          )
+        }
+        return
+      }
+
+      // 2. Nếu có mạng: gửi lên server
+      try {
+        await editorApi.autosave(toSave)
+        clearOfflineDraft(toSave._id)
+        setSaveStatus('saved')
+        if (!isAuto) {
+          showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
+        }
+      } catch (err: unknown) {
+        console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
+        saveOfflineDraft(toSave)
+        setSaveStatus('offline_saved')
+        showToast(
+          'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
+          'error'
+        )
+      }
+    },
+    [clearCountdownTimers, showToast]
+  )
+
   // Tải dữ liệu bài giảng từ server
   const loadLecture = useCallback(async () => {
     if (!params.id) return
-    setIsLoading(true)
+    if (!lectureRef.current) {
+      setIsLoading(true)
+    }
     setLoadError(null)
     setIsUnauthorized(false)
 
@@ -118,7 +187,26 @@ export const EditorPage = ({
         return
       }
 
-      setLecture(loaded)
+      // Kiểm tra xem có bản nháp offline chưa đồng bộ không
+      const draft = getOfflineDraft(params.id)
+      const hasUnsyncedChanges =
+        draft &&
+        (JSON.stringify(draft.lecture.slides) !==
+          JSON.stringify(loaded.slides) ||
+          draft.lecture.title !== loaded.title)
+
+      if (draft && hasUnsyncedChanges) {
+        setLecture(draft.lecture)
+        setSaveStatus('offline_saved')
+        showToast(
+          'Đã khôi phục bản nháp chỉnh sửa offline. Nhấn Ctrl+S hoặc nút Lưu để cập nhật lên máy chủ.',
+          'info'
+        )
+      } else {
+        setLecture(loaded)
+        setSaveStatus('saved')
+        if (draft) clearOfflineDraft(params.id)
+      }
 
       // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
       const savedIndexStr = sessionStorage.getItem(
@@ -135,21 +223,32 @@ export const EditorPage = ({
         }
       }
     } catch (err) {
-      const msg = isAxiosError(err)
-        ? (err.response?.data as { message?: string })?.message ||
-          'Không thể tải bài giảng'
-        : 'Không thể kết nối đến máy chủ'
-      setLoadError(msg)
+      // Khi server tắt hoặc offline: thử mở bản nháp offline từ localStorage
+      const draft = getOfflineDraft(params.id)
+      if (draft) {
+        setLecture(draft.lecture)
+        setSaveStatus('offline_saved')
+        showToast(
+          'Đang offline (máy chủ không phản hồi). Đã mở bản nháp lưu tạm trong trình duyệt.',
+          'info'
+        )
+      } else if (!lectureRef.current) {
+        const msg = isAxiosError(err)
+          ? (err.response?.data as { message?: string })?.message ||
+            'Không thể tải bài giảng'
+          : 'Không thể kết nối đến máy chủ'
+        setLoadError(msg)
+      }
     } finally {
       setIsLoading(false)
     }
-  }, [params.id, user, setActiveSlideIndex])
+  }, [params.id, user, setActiveSlideIndex, showToast])
 
   useEffect(() => {
-    if (!lecture && params.id) {
+    if (params.id) {
       void loadLecture()
     }
-  }, [lecture, params.id, loadLecture])
+  }, [params.id, loadLecture])
 
   // Đồng bộ vị trí slide đang xem vào sessionStorage
   useEffect(() => {
@@ -173,7 +272,7 @@ export const EditorPage = ({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [saveStatus])
 
-  // Cập nhật trạng thái bài giảng và kích hoạt đếm ngược Autosave (2 giây)
+  // Cập nhật trạng thái bài giảng và kích hoạt đếm ngược Autosave nếu đang bật
   const mutateLecture = useCallback(
     (next: Lecture, shouldRecordHistory = true) => {
       if (shouldRecordHistory && lectureRef.current) {
@@ -182,67 +281,117 @@ export const EditorPage = ({
 
       setLecture(next)
       setSaveStatus('unsaved')
-
       clearCountdownTimers()
-      setCountdown(2)
 
-      countdownIntervalRef.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev === null || prev <= 1) return 1
-          return prev - 1
-        })
-      }, 1000)
+      // Nếu Autosave đang bật: đếm ngược debounce 2 giây rồi tự động lưu
+      if (isAutoSave) {
+        setCountdown(2)
 
-      countdownTimerRef.current = setTimeout(() => {
-        clearCountdownTimers()
-        if (lectureRef.current) {
-          void triggerSaveToServer(lectureRef.current)
-        }
-      }, 2000)
+        countdownIntervalRef.current = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev === null || prev <= 1) return 1
+            return prev - 1
+          })
+        }, 1000)
+
+        countdownTimerRef.current = setTimeout(() => {
+          clearCountdownTimers()
+          if (lectureRef.current) {
+            void executeSave(lectureRef.current, true)
+          }
+        }, 2000)
+      }
     },
-    [clearCountdownTimers, recordHistory, triggerSaveToServer]
+    [clearCountdownTimers, executeSave, isAutoSave, recordHistory]
   )
 
-  // Lưu thủ công (Ctrl+S / Cmd+S)
+  // Lưu thủ công (Ctrl+S / Cmd+S hoặc bấm nút Lưu)
   const handleManualSave = useCallback(() => {
-    if (!lecture) return
+    if (!lectureRef.current) return
     clearCountdownTimers()
-    void triggerSaveToServer(lecture)
-  }, [clearCountdownTimers, lecture, triggerSaveToServer])
+    void executeSave(lectureRef.current, false)
+  }, [clearCountdownTimers, executeSave])
 
   // Xử lý Undo
   const handleUndo = useCallback(() => {
-    if (!lecture) return
-    const prevSlides = undo(lecture.slides)
+    if (!lectureRef.current) return
+    const prevSlides = undo(lectureRef.current.slides)
     if (prevSlides) {
-      setLecture((prev) => (prev ? { ...prev, slides: prevSlides } : prev))
-      setSaveStatus('unsaved')
-      clearCountdownTimers()
-      void triggerSaveToServer({ ...lecture, slides: prevSlides })
+      const nextLecture = { ...lectureRef.current, slides: prevSlides }
+      mutateLecture(nextLecture, false)
     }
-  }, [clearCountdownTimers, lecture, triggerSaveToServer, undo])
+  }, [mutateLecture, undo])
 
   // Xử lý Redo
   const handleRedo = useCallback(() => {
-    if (!lecture) return
-    const nextSlides = redo(lecture.slides)
+    if (!lectureRef.current) return
+    const nextSlides = redo(lectureRef.current.slides)
     if (nextSlides) {
-      setLecture((prev) => (prev ? { ...prev, slides: nextSlides } : prev))
-      setSaveStatus('unsaved')
-      clearCountdownTimers()
-      void triggerSaveToServer({ ...lecture, slides: nextSlides })
+      const nextLecture = { ...lectureRef.current, slides: nextSlides }
+      mutateLecture(nextLecture, false)
     }
-  }, [clearCountdownTimers, lecture, redo, triggerSaveToServer])
+  }, [mutateLecture, redo])
+
+  // Lắng nghe sự kiện kết nối mạng khôi phục (Online) để tự động đồng bộ
+  useEffect(() => {
+    const handleOnline = () => {
+      if (
+        lectureRef.current &&
+        (saveStatus === 'offline_saved' || saveStatus === 'unsaved')
+      ) {
+        showToast(
+          'Đã có kết nối mạng. Đang tự động đồng bộ bài giảng lên máy chủ...',
+          'info'
+        )
+        void executeSave(lectureRef.current, true)
+      }
+    }
+
+    const handleOffline = () => {
+      showToast(
+        'Mất kết nối mạng. Các thay đổi tiếp theo sẽ được lưu tạm offline.',
+        'info'
+      )
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [executeSave, saveStatus, showToast])
 
   // Lắng nghe phím tắt toàn cục (Ctrl+Z, Ctrl+Y, Ctrl+S)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Bỏ qua nếu bộ gõ tiếng Việt / IME đang trong giai đoạn kết hợp ký tự
+      if (
+        e.isComposing ||
+        (e as unknown as { keyCode: number }).keyCode === 229
+      ) {
+        return
+      }
+
       // Phím tắt Ctrl+S / Cmd+S
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         handleManualSave()
         return
       }
+
+      // Nếu đang focus vào input/textarea bên ngoài Canvas (như ô chat AI hoặc ô tiêu đề),
+      // hãy để trình duyệt tự xử lý undo/redo của input đó
+      const target = e.target as HTMLElement | null
+      const isExternalInput =
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
+        !target.getAttribute('data-slide-canvas-text')
+
+      if (isExternalInput) {
+        return
+      }
+
       // Phím tắt Undo (Ctrl+Z)
       if (
         (e.ctrlKey || e.metaKey) &&
@@ -281,7 +430,11 @@ export const EditorPage = ({
 
   // Cập nhật thuộc tính của một component
   const handleUpdateComponent = useCallback(
-    (compId: string, patch: Partial<SlideComponent>) => {
+    (
+      compId: string,
+      patch: Partial<SlideComponent>,
+      shouldRecordHistory = true
+    ) => {
       const currentLecture = lectureRef.current
       if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
 
@@ -298,18 +451,21 @@ export const EditorPage = ({
 
       const updatedSlide: Slide = {
         ...sourceSlide,
-        title: titleComp ? titleComp.content : sourceSlide.title,
-        subtitle: subComp ? subComp.content : sourceSlide.subtitle,
+        title: titleComp ? titleComp.content : '',
+        subtitle: subComp ? subComp.content : '',
         bullets: bulletsComp
           ? bulletsComp.content.split('\n').filter((s) => s.trim())
-          : sourceSlide.bullets,
+          : [],
         components: updatedComps
       }
 
       const nextSlides = currentLecture.slides.map((s, idx) =>
         idx === activeSlideIndex ? updatedSlide : s
       )
-      mutateLecture({ ...currentLecture, slides: nextSlides })
+      mutateLecture(
+        { ...currentLecture, slides: nextSlides },
+        shouldRecordHistory
+      )
     },
     [activeSlideIndex, mutateLecture]
   )
@@ -370,6 +526,7 @@ export const EditorPage = ({
       x: 25,
       y: 20,
       width: 50,
+      height: 38,
       fontSize: 20,
       fontWeight: 'normal',
       fontStyle: 'normal',
@@ -447,7 +604,21 @@ export const EditorPage = ({
     if (!lecture || !currentSlide) return
     const comps = getSlideComponents(currentSlide)
     const updatedComps = comps.filter((c) => c.id !== compId)
-    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
+
+    // Đồng bộ lại title, subtitle, bullets tương ứng với các components còn lại
+    const titleComp = updatedComps.find((c) => c.type === 'title')
+    const subComp = updatedComps.find((c) => c.type === 'subtitle')
+    const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
+
+    const updatedSlide: Slide = {
+      ...currentSlide,
+      title: titleComp ? titleComp.content : '',
+      subtitle: subComp ? subComp.content : '',
+      bullets: bulletsComp
+        ? bulletsComp.content.split('\n').filter((s) => s.trim())
+        : [],
+      components: updatedComps
+    }
     const nextSlides = lecture.slides.map((s, idx) =>
       idx === activeSlideIndex ? updatedSlide : s
     )
@@ -598,7 +769,7 @@ export const EditorPage = ({
   const handleBack = () => {
     if (saveStatus === 'unsaved' && lectureRef.current) {
       clearCountdownTimers()
-      void triggerSaveToServer(lectureRef.current)
+      void executeSave(lectureRef.current, false)
     }
     if (onBack) onBack()
     else navigate('/library')
@@ -693,6 +864,8 @@ export const EditorPage = ({
         onPresent={handlePresent}
         saveStatus={saveStatus}
         countdown={countdown}
+        isAutoSave={isAutoSave}
+        onToggleAutoSave={handleToggleAutoSave}
       />
 
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}

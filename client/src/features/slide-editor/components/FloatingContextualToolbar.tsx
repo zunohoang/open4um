@@ -13,6 +13,7 @@ import {
   Minus,
   PaintBucket,
   Plus,
+  RotateCw,
   Shapes,
   Square,
   Trash2,
@@ -216,6 +217,38 @@ export const FloatingContextualToolbar = ({
           >
             <Plus size={12} />
           </button>
+        </div>
+
+        <span className='h-4 w-px bg-stone-200' />
+
+        {/* Xoay ảnh */}
+        <div className='flex items-center gap-1'>
+          <span className='text-[11px] font-medium text-stone-500'>Xoay:</span>
+          <button
+            type='button'
+            onClick={() =>
+              onUpdateComponent({
+                rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
+              })
+            }
+            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+            title='Xoay 90° cùng chiều kim đồng hồ'
+          >
+            <RotateCw size={12} />
+            <span className='font-mono text-[11px]'>
+              {selectedComponent.rotation ?? 0}°
+            </span>
+          </button>
+          {(selectedComponent.rotation ?? 0) !== 0 && (
+            <button
+              type='button'
+              onClick={() => onUpdateComponent({ rotation: 0 })}
+              className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+              title='Đặt lại góc xoay về 0°'
+            >
+              0°
+            </button>
+          )}
         </div>
 
         <span className='h-4 w-px bg-stone-200' />
@@ -469,6 +502,38 @@ export const FloatingContextualToolbar = ({
             </button>
           </div>
         )}
+
+        <span className='h-4 w-px bg-stone-200' />
+
+        {/* Xoay hình khối */}
+        <div className='flex items-center gap-1'>
+          <span className='text-[11px] font-medium text-stone-500'>Xoay:</span>
+          <button
+            type='button'
+            onClick={() =>
+              onUpdateComponent({
+                rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
+              })
+            }
+            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+            title='Xoay 90° cùng chiều kim đồng hồ'
+          >
+            <RotateCw size={12} />
+            <span className='font-mono text-[11px]'>
+              {selectedComponent.rotation ?? 0}°
+            </span>
+          </button>
+          {(selectedComponent.rotation ?? 0) !== 0 && (
+            <button
+              type='button'
+              onClick={() => onUpdateComponent({ rotation: 0 })}
+              className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+              title='Đặt lại góc xoay về 0°'
+            >
+              0°
+            </button>
+          )}
+        </div>
 
         <span className='h-4 w-px bg-stone-200' />
 
@@ -738,7 +803,38 @@ export const FloatingContextualToolbar = ({
 
       <span className='h-4 w-px bg-stone-200' />
 
-      {/* 7. Nhân bản & Xóa */}
+      {/* 7. Xoay văn bản */}
+      <div className='flex items-center gap-1'>
+        <button
+          type='button'
+          onClick={() =>
+            onUpdateComponent({
+              rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
+            })
+          }
+          className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+          title='Xoay 90° cùng chiều kim đồng hồ'
+        >
+          <RotateCw size={12} />
+          <span className='font-mono text-[11px]'>
+            {selectedComponent.rotation ?? 0}°
+          </span>
+        </button>
+        {(selectedComponent.rotation ?? 0) !== 0 && (
+          <button
+            type='button'
+            onClick={() => onUpdateComponent({ rotation: 0 })}
+            className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+            title='Đặt lại góc xoay về 0°'
+          >
+            0°
+          </button>
+        )}
+      </div>
+
+      <span className='h-4 w-px bg-stone-200' />
+
+      {/* 8. Nhân bản & Xóa */}
       <button
         type='button'
         onClick={() => onDuplicateComponent(selectedComponent)}

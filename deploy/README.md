@@ -86,8 +86,15 @@ Before publishing a release, run the non-mutating source contract checks:
 
 ```sh
 deploy/tests/contract.sh
+deploy/tests/backup-contract.sh
 ```
 
 They validate shell syntax, environment/SHA/digest rejection and Compose
-rendering for both environments. Actual candidate, rollback and public smoke
-tests still require an isolated runtime and valid DNS/TLS.
+rendering for both environments. The backup contract additionally validates the
+Managed Identity-only Azure configuration, deployment-lock coordination,
+retention policy and non-destructive restore boundary. Actual candidate,
+rollback, public smoke, backup and restore tests still require an isolated
+runtime and valid DNS/TLS.
+
+Production backup installation and recovery procedures are documented in
+[`../docs/backup-restore-runbook.md`](../docs/backup-restore-runbook.md).

@@ -56,6 +56,7 @@ export interface SlideComponent {
   y: number // % từ mép trên (0 - 100)
   width?: number // % chiều rộng
   height?: number // % chiều cao
+  rotation?: number // Góc xoay theo độ (degrees 0 - 360)
   fontSize?: number // px
   fontWeight?: 'normal' | 'bold'
   fontStyle?: 'normal' | 'italic'

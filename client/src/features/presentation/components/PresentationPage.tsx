@@ -1,6 +1,7 @@
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
 import type { Lecture, SlideComponent } from '@/lib/types'
+import { BrandLogo } from '@/components/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
@@ -137,7 +138,15 @@ export const PresentationPage = ({
   if (isLoading) {
     return (
       <main className='grid min-h-screen place-items-center bg-black p-6 text-stone-300 font-sans text-sm'>
-        Đang tải bài trình chiếu...
+        <div className='flex flex-col items-center gap-4'>
+          <BrandLogo
+            variant='mark'
+            theme='dark'
+            height={48}
+            className='animate-pulse'
+          />
+          <span>Đang tải bài trình chiếu...</span>
+        </div>
       </main>
     )
   }
@@ -145,7 +154,13 @@ export const PresentationPage = ({
   if (!lecture) {
     return (
       <main className='grid min-h-screen place-items-center bg-black p-6 text-stone-100 font-sans'>
-        <div className='text-center'>
+        <div className='flex flex-col items-center text-center'>
+          <BrandLogo
+            variant='mark'
+            theme='dark'
+            height={48}
+            className='mb-4 opacity-50'
+          />
           <p className='text-sm text-red-300'>Không tìm thấy bài giảng</p>
           <button
             type='button'
@@ -272,7 +287,7 @@ export const PresentationPage = ({
           {index + 1} / {lecture.slides.length}
         </span>
 
-        {slide?.components && slide.components.length > 0 ? (
+        {Array.isArray(slide?.components) ? (
           <div className='relative w-full flex-1'>
             {slide.components.map((comp) => (
               <div
@@ -287,8 +302,16 @@ export const PresentationPage = ({
                     comp.shapeType !== 'line' &&
                     comp.height
                       ? `${comp.height}%`
-                      : 'auto',
-                  maxWidth: '94%',
+                      : comp.type === 'image' && comp.height
+                        ? `${comp.height}%`
+                        : 'auto',
+                  minHeight:
+                    comp.type !== 'shape' &&
+                    comp.type !== 'image' &&
+                    comp.height
+                      ? `${comp.height}%`
+                      : undefined,
+                  maxWidth: '100%',
                   fontSize: `${Math.round((comp.fontSize ?? 20) * 1.3)}px`,
                   fontWeight: comp.fontWeight ?? 'normal',
                   fontStyle: comp.fontStyle ?? 'normal',
@@ -310,7 +333,11 @@ export const PresentationPage = ({
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide visual'
-                    className='h-auto w-full object-contain'
+                    className={
+                      comp.height
+                        ? 'h-full w-full object-contain'
+                        : 'h-auto w-full object-contain'
+                    }
                   />
                 ) : comp.type === 'bullets' ? (
                   <ul className='space-y-2.5 list-disc pl-6'>
@@ -318,15 +345,17 @@ export const PresentationPage = ({
                       .split('\n')
                       .filter((s) => s.trim())
                       .map((bullet, idx) => (
-                        <li key={idx}>{bullet}</li>
+                        <li key={idx} className='break-words'>
+                          {bullet}
+                        </li>
                       ))}
                   </ul>
                 ) : comp.type === 'quote' ? (
-                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl'>
+                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl break-words'>
                     “ {comp.content} ”
                   </div>
                 ) : (
-                  <div>{comp.content}</div>
+                  <div className='break-words'>{comp.content}</div>
                 )}
               </div>
             ))}

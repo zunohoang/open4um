@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 256" role="img" aria-labelledby="title desc">
+  <title id="title">ABSlider</title>
+  <desc id="desc">Logo ABSlider sáng dùng trên nền tối</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M64 54h126a15 15 0 0 1 15 15v91a15 15 0 0 1-15 15H64a15 15 0 0 1-15-15V69a15 15 0 0 1 15-15Z" stroke="#f5f1e8" stroke-width="14"/>
+    <path d="M127 175v27M127 202l-34 25M127 202l34 25" stroke="#f5f1e8" stroke-width="14"/>
+    <path d="M82 91h37M82 115h33M82 139h29" stroke="#f5f1e8" stroke-width="11"/>
+    <path d="M15 92h30M8 116h37M18 140h27" stroke="#c45b3f" stroke-width="11"/>
+  </g>
+  <path d="m146 87 39 28-39 28Z" fill="#c45b3f"/>
+  <path d="M211 22c3 12 10 20 22 23-12 3-19 11-22 23-3-12-10-20-22-23 12-3 19-11 22-23Z" fill="#c45b3f"/>
+  <text x="270" y="157" font-family="Noto Sans, Arial, sans-serif" font-size="105" font-weight="800" letter-spacing="2">
+    <tspan fill="#c45b3f">AB</tspan><tspan fill="#f5f1e8">SLIDER</tspan>
+  </text>
+</svg>

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { authApi } from '@/features/auth/api/auth.api'
 import { useAuthStore } from '@/features/auth/store/auth.store'
-import { PasswordInput, useToast } from '@/components/ui'
+import { BrandLogo, PasswordInput, useToast } from '@/components/ui'
 
 const getErrorMessage = (error: unknown) => {
   if (typeof error === 'object' && error && 'response' in error) {
@@ -251,9 +251,12 @@ export const AuthPage = () => {
   return (
     <main className='grid min-h-screen bg-stone-100 lg:grid-cols-[1.1fr_.9fr]'>
       <section className='flex min-h-[45vh] flex-col justify-center bg-emerald-950 px-8 py-16 text-stone-100 sm:px-16 lg:min-h-screen lg:px-[9vw]'>
-        <span className='font-sans text-xs font-bold tracking-widest text-orange-300'>
-          ABSLIDER / STUDIO
-        </span>
+        <div className='flex items-center gap-3'>
+          <BrandLogo variant='horizontal' theme='dark' height={40} />
+          <span className='border border-orange-400/40 bg-orange-500/10 px-2 py-0.5 font-sans text-xs font-bold tracking-widest text-orange-300'>
+            STUDIO
+          </span>
+        </div>
         <h1 className='mt-6 max-w-2xl text-6xl font-medium leading-[1.1] sm:text-7xl'>
           Biến ý tưởng thành bài giảng.
         </h1>
@@ -272,6 +275,10 @@ export const AuthPage = () => {
       </section>
 
       <div className='m-auto w-full max-w-md bg-stone-100 px-8 py-12 sm:px-12 lg:p-14'>
+        <div className='mb-8 flex justify-center lg:hidden'>
+          <BrandLogo variant='horizontal' theme='light' height={34} />
+        </div>
+
         {/* --- LOGIN MODE --- */}
         {mode === 'login' && (
           <form onSubmit={handleLogin}>
