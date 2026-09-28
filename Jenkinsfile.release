@@ -249,6 +249,23 @@ pipeline {
                 wget --quiet --output-document=- \
                   http://127.0.0.1:8080/health |
                 grep -qx ok
+
+              for static_asset in \
+                /favicon.ico \
+                /favicon.svg \
+                /favicon-32x32.png \
+                /favicon-16x16.png \
+                /apple-touch-icon.png \
+                /site.webmanifest \
+                /icon-192x192.png \
+                /icon-512x512.png \
+                /icon-maskable-512x512.png \
+                /brand/abslider-og.png
+              do
+                docker exec "$container_name" \
+                  wget --quiet --tries=1 --spider \
+                    "http://127.0.0.1:8080${static_asset}"
+              done
             '''
           }
         }

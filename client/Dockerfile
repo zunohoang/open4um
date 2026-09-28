@@ -19,7 +19,9 @@ RUN test -n "$VITE_API_BASE_URL" \
   && printf '%s' "$RELEASE_ENVIRONMENT" | grep -Eq '^(develop|production)$' \
   && npm run build \
   && printf '{"sha":"%s","environment":"%s"}\n' \
-    "$RELEASE_SHA" "$RELEASE_ENVIRONMENT" > dist/version.json
+    "$RELEASE_SHA" "$RELEASE_ENVIRONMENT" > dist/version.json \
+  && find dist -type d -exec chmod 0755 {} + \
+  && find dist -type f -exec chmod 0644 {} +
 
 FROM ${NGINX_IMAGE} AS runtime
 COPY --chmod=0644 nginx.conf /etc/nginx/nginx.conf
