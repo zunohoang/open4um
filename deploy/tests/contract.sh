@@ -5,6 +5,9 @@ readonly repository_root="$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.."
   pwd
 )"
+readonly client_dockerfile="${repository_root}/client/Dockerfile"
+readonly client_nginx_config="${repository_root}/client/nginx.conf"
+readonly release_pipeline="${repository_root}/Jenkinsfile.release"
 readonly deploy_script="${repository_root}/deploy/bin/deploy-abslider"
 readonly smoke_script="${repository_root}/deploy/bin/smoke-abslider"
 readonly compose_file="${repository_root}/deploy/compose.yml"
@@ -42,6 +45,33 @@ extract_function() {
 }
 
 bash -n "$deploy_script" "$smoke_script"
+grep -F '&& find dist -type d -exec chmod 0755 {} +' "$client_dockerfile" >/dev/null ||
+  fail 'client image must normalize Vite dist directory permissions'
+grep -F '&& find dist -type f -exec chmod 0644 {} +' "$client_dockerfile" >/dev/null ||
+  fail 'client image must normalize Vite dist file permissions'
+grep -F 'location = /site.webmanifest {' "$client_nginx_config" >/dev/null ||
+  fail 'client nginx must not route a missing site manifest to the SPA fallback'
+grep -F 'default_type application/manifest+json;' "$client_nginx_config" >/dev/null ||
+  fail 'client nginx must serve the site manifest with its expected media type'
+
+for static_asset in \
+  /favicon.ico \
+  /favicon.svg \
+  /favicon-32x32.png \
+  /favicon-16x16.png \
+  /apple-touch-icon.png \
+  /site.webmanifest \
+  /icon-192x192.png \
+  /icon-512x512.png \
+  /icon-maskable-512x512.png \
+  /brand/abslider-og.png
+do
+  grep -F "$static_asset" "$release_pipeline" >/dev/null ||
+    fail "client image validation is missing static asset: ${static_asset}"
+  grep -F "$static_asset" "$smoke_script" >/dev/null ||
+    fail "deployment smoke test is missing static asset: ${static_asset}"
+done
+
 grep -Fx 'set -Eeuo pipefail' "$deploy_script" >/dev/null ||
   fail 'deploy wrapper must inherit ERR traps inside functions'
 grep -Fx 'unset RELEASE_SHA RELEASE_ENVIRONMENT' "$deploy_script" >/dev/null ||
