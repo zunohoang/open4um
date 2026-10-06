@@ -24,6 +24,7 @@ export const createBlankLecture = asyncHandler(async (req, res) => {
   const lecture = await lectureService.createBlankLecture(
     req.user.id,
     req.body.title,
+    req.body.theme,
     req.body.folderId
   )
   ok(res, lecture, 201)
@@ -154,6 +155,21 @@ export const exportLecture = asyncHandler(async (req, res) => {
   const result = await lectureService.exportLecture(
     req.user.id,
     String(req.params.id)
+  )
+  ok(res, result)
+})
+
+export const aiChat = asyncHandler(async (req, res) => {
+  const result = await lectureService.aiChatInEditor(
+    req.user.id,
+    String(req.params.id),
+    {
+      message: req.body.message,
+      slideId: req.body.slideId,
+      selectedCompId: req.body.selectedCompId,
+      sourceMaterial: req.body.sourceMaterial,
+      history: req.body.history
+    }
   )
   ok(res, result)
 })

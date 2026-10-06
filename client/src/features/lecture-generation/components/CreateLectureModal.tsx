@@ -5,6 +5,10 @@ import { lectureApi } from '@/features/library/api/lecture.api'
 import { useToast } from '@/components/ui/Toast'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import type { Lecture, Outline } from '@/lib/types'
+import {
+  THEME_PRESETS,
+  DEFAULT_THEME_ID
+} from '@/features/slide-editor/constants/theme-options'
 
 interface CreateLectureModalProps {
   open: boolean
@@ -24,6 +28,8 @@ export const CreateLectureModal = ({
 
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [selectedThemeId, setSelectedThemeId] =
+    useState<string>(DEFAULT_THEME_ID)
   const [outline, setOutline] = useState<Outline | null>(null)
   const [lectureId, setLectureId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState('')
@@ -182,6 +188,7 @@ export const CreateLectureModal = ({
         lectureId: lectureId ?? undefined,
         title: title.trim() || 'Bài giảng mới',
         prompt,
+        theme: selectedThemeId,
         outline
       })
       if (typeof created.creditBalance === 'number') {
@@ -204,7 +211,8 @@ export const CreateLectureModal = ({
     setBusyCreate(true)
     try {
       const created = await lectureApi.createBlank(
-        title.trim() || 'Bài giảng mới'
+        title.trim() || 'Bài giảng mới',
+        selectedThemeId
       )
       onDone(created)
       onClose()
@@ -290,11 +298,58 @@ export const CreateLectureModal = ({
                 <textarea
                   id='modal-lecture-prompt'
                   className='mt-2 w-full border border-stone-300 bg-white p-3 text-xs outline-orange-700 resize-none custom-scrollbar'
-                  rows={8}
+                  rows={5}
                   placeholder='Ví dụ: Căn bản về NodeJS cho sinh viên IT...'
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                 />
+              </div>
+
+              {/* BỘ CHỌN THEME (GIAO DIỆN) */}
+              <div>
+                <label className='block text-xs font-bold text-stone-700 uppercase tracking-wider mb-2'>
+                  Giao diện (Theme)
+                </label>
+                <div className='space-y-1.5 max-h-44 overflow-y-auto pr-1 custom-scrollbar'>
+                  {THEME_PRESETS.map((t) => {
+                    const isSelected = selectedThemeId === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type='button'
+                        onClick={() => setSelectedThemeId(t.id)}
+                        className={`flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition cursor-pointer ${
+                          isSelected
+                            ? 'border-orange-700 bg-orange-50/60 ring-2 ring-orange-700/20 shadow-xs'
+                            : 'border-stone-200 bg-white hover:border-stone-300'
+                        }`}
+                      >
+                        <div
+                          className='flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-black/10 shadow-2xs'
+                          style={{ backgroundColor: t.background }}
+                        >
+                          <span
+                            className='h-2 w-2 rounded-full'
+                            style={{ backgroundColor: t.accentColor }}
+                          />
+                        </div>
+                        <div className='min-w-0 flex-1'>
+                          <div className='text-xs font-bold text-stone-900 truncate'>
+                            {t.name}
+                          </div>
+                          <div className='text-[10px] text-stone-500 line-clamp-1'>
+                            {t.description}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <span className='text-orange-700 text-xs font-bold shrink-0'>
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
               {/* Nút Sinh outline nằm riêng ở trên */}
@@ -302,7 +357,7 @@ export const CreateLectureModal = ({
                 type='button'
                 disabled={busy || prompt.trim().length < 5}
                 onClick={() => void handleGenerateOutline()}
-                className='w-full bg-orange-700 py-3 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800 disabled:opacity-50'
+                className='w-full bg-orange-700 py-3 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-orange-800 disabled:opacity-50 cursor-pointer'
               >
                 {busyOutline ? 'Đang sinh outline...' : 'Sinh outline'}
               </button>

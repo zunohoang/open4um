@@ -409,24 +409,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
           </div>
 
           {/* Nội dung theo bố cục */}
-          {layout === 'quote' && bullets.length > 0 ? (
-            <div
-              style={{
-                margin: 'auto 0',
-                padding: '24px 16px',
-                borderTop: '2px solid rgba(0,0,0,0.1)',
-                borderBottom: '2px solid rgba(0,0,0,0.1)',
-                textAlign: 'center',
-                fontFamily: '"Lora", serif',
-                fontStyle: 'italic',
-                fontSize: '24px',
-                color: '#064e3b',
-                lineHeight: 1.4
-              }}
-            >
-              “ {bullets.join(' ')} ”
-            </div>
-          ) : layout === 'two-column' && bullets.length > 0 ? (
+          {layout === 'two-column' && bullets.length > 0 ? (
             <div
               style={{
                 display: 'grid',

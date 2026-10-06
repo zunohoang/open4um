@@ -2,23 +2,32 @@ import { ExportModal } from '@/components/ui/ExportModal'
 import { useToast } from '@/components/ui/Toast'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
-import type { Lecture, ShapeType, Slide, SlideComponent } from '@/lib/types'
+import type {
+  ContentLayoutType,
+  Lecture,
+  ShapeType,
+  Slide,
+  SlideComponent
+} from '@/lib/types'
 import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useEditorStore } from '../store/editor.store'
+import { getThemeById } from '../constants/theme-options'
+import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import {
   clearOfflineDraft,
   getOfflineDraft,
   saveOfflineDraft
 } from '../utils/offlineStorage'
-import { getSlideComponents } from '../utils/slide'
+import { getSlideComponents, syncSlideWithTheme } from '../utils/slide'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { EditorHeader, type SaveStatus } from './EditorHeader'
 import { FloatingContextualToolbar } from './FloatingContextualToolbar'
 import { LeftSidebarRail } from './LeftSidebarRail'
 import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
+import { SourceMaterialModal } from './SourceMaterialModal'
+import { OutlineModal } from './OutlineModal'
 
 interface EditorPageProps {
   initialLecture?: Lecture
@@ -45,7 +54,16 @@ export const EditorPage = ({
     recordHistory,
     undo,
     redo,
-    addAiMessage
+    addAiMessage,
+    updateAiMessageStatus,
+    aiMessages,
+    previewSlide,
+    previewSlideAction,
+    setPreviewSlide,
+    sourceMaterial,
+    setSourceMaterial,
+    isSourceMaterialModalOpen,
+    setIsSourceMaterialModalOpen
   } = useEditorStore()
 
   const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
@@ -66,6 +84,7 @@ export const EditorPage = ({
   const [isUnauthorized, setIsUnauthorized] = useState(false)
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
 
   // Trạng thái Bật/Tắt Tự động lưu (mặc định Bật, lưu vào localStorage)
   const [isAutoSave, setIsAutoSave] = useState<boolean>(() => {
@@ -422,9 +441,19 @@ export const EditorPage = ({
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
+  // Đồng bộ sourceMaterial từ bài giảng vào store nếu có
+  useEffect(() => {
+    if (lecture?.sourceMaterial && !sourceMaterial) {
+      setSourceMaterial(lecture.sourceMaterial)
+    }
+  }, [lecture?.sourceMaterial, sourceMaterial, setSourceMaterial])
+
   // THAO TÁC TRÊN SLIDE VÀ COMPONENT
   const currentSlide = lecture?.slides[activeSlideIndex]
-  const currentComponents = currentSlide ? getSlideComponents(currentSlide) : []
+  const activeSlideToDisplay = previewSlide || currentSlide
+  const currentComponents = activeSlideToDisplay
+    ? getSlideComponents(activeSlideToDisplay, lecture?.theme)
+    : []
   const selectedComponent =
     currentComponents.find((c) => c.id === selectedCompId) || null
 
@@ -439,7 +468,7 @@ export const EditorPage = ({
       if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
 
       const sourceSlide = currentLecture.slides[activeSlideIndex]
-      const comps = getSlideComponents(sourceSlide)
+      const comps = getSlideComponents(sourceSlide, currentLecture.theme)
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
@@ -472,10 +501,10 @@ export const EditorPage = ({
 
   // Thêm khối văn bản mới
   const handleAddTextComponent = (
-    type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote'
+    type: 'title' | 'subtitle' | 'text' | 'bullets'
   ) => {
     if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide)
+    const comps = getSlideComponents(currentSlide, lecture.theme)
     const newId = `comp-${Date.now()}`
 
     const newComp: SlideComponent = {
@@ -486,19 +515,17 @@ export const EditorPage = ({
           ? 'Tiêu đề mới'
           : type === 'subtitle'
             ? 'Dòng phụ đề mới'
-            : type === 'quote'
-              ? 'Nhập trích dẫn ý nghĩa tại đây...'
-              : 'Nội dung văn bản mới...',
+            : 'Nội dung văn bản mới...',
       x: 12,
       y: 20 + comps.length * 6,
       width: 76,
       fontSize: type === 'title' ? 36 : type === 'subtitle' ? 18 : 20,
       fontWeight: type === 'title' ? 'bold' : 'normal',
-      fontStyle: type === 'quote' || type === 'subtitle' ? 'italic' : 'normal',
+      fontStyle: type === 'subtitle' ? 'italic' : 'normal',
       textDecoration: 'none',
       textCase: 'normal',
-      textAlign: type === 'quote' ? 'center' : 'left',
-      fontFamily: type === 'title' || type === 'quote' ? 'display' : 'sans',
+      textAlign: 'left',
+      fontFamily: type === 'title' ? 'display' : 'sans',
       color: '#173c39'
     }
 
@@ -515,7 +542,7 @@ export const EditorPage = ({
   // Thêm khối hình ảnh mới từ ảnh tải lên
   const handleAddImageComponent = (imageUrl: string) => {
     if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide)
+    const comps = getSlideComponents(currentSlide, lecture.theme)
     const newId = `img-comp-${Date.now()}`
 
     const newComp: SlideComponent = {
@@ -547,20 +574,21 @@ export const EditorPage = ({
   // Thêm khối hình khối mới (Shape)
   const handleAddShapeComponent = (shapeType: ShapeType) => {
     if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide)
+    const comps = getSlideComponents(currentSlide, lecture.theme)
     const newId = `shape-${Date.now()}`
 
     const isLine = shapeType === 'line'
     const isSquareOrCircle = shapeType === 'square' || shapeType === 'circle'
+    const currentTheme = getThemeById(lecture.theme)
 
     const newComp: SlideComponent = {
       id: newId,
       type: 'shape',
       shapeType,
       content: '',
-      fillColor: isLine ? 'transparent' : '#c45b3f',
-      borderColor: '#173c39',
-      borderWidth: isLine ? 3 : 0,
+      fillColor: isLine ? 'transparent' : currentTheme.cardBackground,
+      borderColor: currentTheme.cardBorder,
+      borderWidth: isLine ? 3 : 1,
       borderRadius: shapeType === 'rounded-rect' ? 16 : 0,
       x: 35,
       y: 30,
@@ -581,7 +609,7 @@ export const EditorPage = ({
   // Nhân bản component
   const handleDuplicateComponent = (comp: SlideComponent) => {
     if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide)
+    const comps = getSlideComponents(currentSlide, lecture.theme)
     const newComp: SlideComponent = {
       ...comp,
       id: `comp-${Date.now()}`,
@@ -602,7 +630,7 @@ export const EditorPage = ({
   // Xóa component
   const handleDeleteComponent = (compId: string) => {
     if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide)
+    const comps = getSlideComponents(currentSlide, lecture.theme)
     const updatedComps = comps.filter((c) => c.id !== compId)
 
     // Đồng bộ lại title, subtitle, bullets tương ứng với các components còn lại
@@ -627,24 +655,100 @@ export const EditorPage = ({
     if (selectedCompId === compId) setSelectedCompId(null)
   }
 
-  // Áp dụng layout mẫu cho slide
-  const handleApplyTemplate = (layout: Slide['layout']) => {
+  // Đổi giao diện bài giảng (Theme) và đồng bộ màu sắc các slide hiện có
+  const handleThemeChange = (themeId: string) => {
+    if (!lecture) return
+    const themePreset = getThemeById(themeId)
+    const updatedLecture: Lecture = {
+      ...lecture,
+      theme: themeId,
+      slides: lecture.slides.map((s) => syncSlideWithTheme(s, themeId))
+    }
+    mutateLecture(updatedLecture)
+    showToast(`Đã đổi giao diện thành "${themePreset.name}"`, 'success')
+  }
+
+  // Áp dụng bố cục nội dung trực quan hiện đại cho slide hiện tại
+  const handleApplyContentLayout = (layout: ContentLayoutType) => {
     if (!lecture || !currentSlide) return
-    const updatedSlide: Slide = { ...currentSlide, layout }
+
+    let items = currentSlide.contentItems
+    if (!items || items.length === 0) {
+      if (currentSlide.bullets && currentSlide.bullets.length > 0) {
+        items = currentSlide.bullets.map((b, i) => {
+          const parts = b.split(':')
+          if (parts.length > 1) {
+            return {
+              title: parts[0].trim(),
+              description: parts.slice(1).join(':').trim(),
+              tag: `Mục 0${i + 1}`
+            }
+          }
+          return {
+            title: `Ý chính 0${i + 1}`,
+            description: b.trim(),
+            tag: `Phần 0${i + 1}`
+          }
+        })
+      } else {
+        items = [
+          {
+            title: 'Trọng tâm 1',
+            description:
+              'Phân tích bản chất vấn đề và xây dựng giải pháp cốt lõi.',
+            tag: 'Giai đoạn 1',
+            stat: '85%'
+          },
+          {
+            title: 'Trọng tâm 2',
+            description:
+              'Triển khai thực thi có đo lường và đánh giá liên tục.',
+            tag: 'Giai đoạn 2',
+            stat: '3.2x'
+          },
+          {
+            title: 'Trọng tâm 3',
+            description:
+              'Đúc kết giá trị thực tiễn và mở rộng quy mô hành động.',
+            tag: 'Giai đoạn 3',
+            stat: 'Top 1'
+          }
+        ]
+      }
+    }
+
+    const rawSlide: Slide = {
+      ...currentSlide,
+      layout,
+      contentLayout: layout,
+      contentItems: items,
+      components: undefined
+    }
+
+    const updatedSlide: Slide = {
+      ...rawSlide,
+      components: getSlideComponents(rawSlide, lecture.theme)
+    }
+
     const nextSlides = lecture.slides.map((s, idx) =>
       idx === activeSlideIndex ? updatedSlide : s
     )
     mutateLecture({ ...lecture, slides: nextSlides })
-    showToast(`Đã áp dụng mẫu bố cục ${layout}`, 'success')
+    setSelectedCompId(null)
+    showToast(`Đã áp dụng bố cục: ${layout}`, 'success')
   }
 
   const handleAddSlide = (atIndex?: number) => {
     if (!lecture) return
     const targetIndex = atIndex ?? lecture.slides.length
-    const newSlide: Slide = {
+    const rawSlide: Slide = {
       id: `slide-${crypto.randomUUID()}`,
       title: 'Tiêu đề slide',
       bullets: []
+    }
+    const newSlide: Slide = {
+      ...rawSlide,
+      components: getSlideComponents(rawSlide, lecture.theme)
     }
 
     const nextSlides = [...lecture.slides]
@@ -685,10 +789,12 @@ export const EditorPage = ({
     const clonedSlide: Slide = {
       ...sourceSlide,
       id: `slide-${crypto.randomUUID()}`,
-      components: getSlideComponents(sourceSlide).map((comp) => ({
-        ...comp,
-        id: `comp-${crypto.randomUUID()}`
-      }))
+      components: getSlideComponents(sourceSlide, lecture.theme).map(
+        (comp) => ({
+          ...comp,
+          id: `comp-${crypto.randomUUID()}`
+        })
+      )
     }
 
     const nextSlides = [...lecture.slides]
@@ -719,37 +825,261 @@ export const EditorPage = ({
     }
   }
 
-  // Gọi AI chỉnh sửa slide từ ô prompt
+  // Gọi AI chat / chỉnh sửa slide với context đầy đủ
   const handleApplyAiPrompt = async (instruction: string) => {
     if (!lecture || !currentSlide || !instruction.trim()) return
     try {
       setIsAiLoading(true)
       addAiMessage('user', instruction)
 
-      const updated = await editorApi.aiEdit(
-        lecture._id,
-        currentSlide,
-        instruction
-      )
-      recordHistory(lecture.slides)
-      setLecture(updated)
-      setSelectedCompId(null)
-      setSaveStatus('saved')
+      const historyPayload = aiMessages
+        .filter((m) => m.id !== 'welcome-msg')
+        .slice(-6)
+        .map((m) => ({
+          role: m.role,
+          text: m.text
+        }))
 
-      addAiMessage(
-        'assistant',
-        `Đã hoàn tất chỉnh sửa slide theo yêu cầu: "${instruction}"`
-      )
-      showToast('Đã áp dụng chỉnh sửa AI thành công', 'success')
+      const response = await editorApi.aiChat(lecture._id, {
+        message: instruction,
+        slideId: currentSlide.id,
+        selectedCompId: selectedCompId || undefined,
+        sourceMaterial: sourceMaterial || lecture.sourceMaterial || undefined,
+        history: historyPayload
+      })
+
+      const targetIndex =
+        typeof response.targetSlideIndex === 'number' &&
+        response.targetSlideIndex >= 0 &&
+        response.targetSlideIndex < lecture.slides.length
+          ? response.targetSlideIndex
+          : activeSlideIndex
+
+      const formattedProposals = response.proposals?.map((p, idx) => ({
+        id: p.id || `prop-${Date.now()}-${idx}`,
+        action: p.action,
+        targetSlideIndex: p.targetSlideIndex,
+        proposedSlide: p.proposedSlide,
+        summary: p.summary,
+        status: 'pending' as const
+      }))
+
+      addAiMessage({
+        role: 'assistant',
+        text: response.reply,
+        action: response.action,
+        targetSlideIndex: targetIndex,
+        proposedSlide: response.proposedSlide,
+        proposals: formattedProposals,
+        status:
+          response.proposedSlide ||
+          (formattedProposals && formattedProposals.length > 0)
+            ? 'pending'
+            : undefined
+      })
+
+      if (response.proposals && response.proposals.length > 1) {
+        // Nhiều đề xuất (BATCH_CHANGES): preview slide đầu tiên
+        const firstProp = response.proposals[0]
+        setPreviewSlide(
+          firstProp.proposedSlide,
+          firstProp.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
+        )
+        showToast(
+          `AI đã đề xuất ${response.proposals.length} slide mới. Bạn có thể xem trước hoặc chấp nhận tất cả.`,
+          'info'
+        )
+      } else if (response.proposedSlide) {
+        if (
+          targetIndex !== activeSlideIndex &&
+          response.action !== 'CREATE_SLIDE'
+        ) {
+          setActiveSlideIndex(targetIndex)
+        }
+        setPreviewSlide(
+          response.proposedSlide,
+          response.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
+        )
+        showToast(
+          response.action === 'CREATE_SLIDE'
+            ? 'AI đã đề xuất tạo slide mới. Bạn có thể xem trước trên Canvas.'
+            : `AI đã đề xuất thay đổi cho Slide ${targetIndex + 1}. Bạn có thể xem trước trên Canvas.`,
+          'info'
+        )
+      } else {
+        showToast('AI đã phản hồi yêu cầu của bạn', 'info')
+      }
+
+      if (
+        response.updatedSummary &&
+        response.updatedSummary !== lecture.contextSummary
+      ) {
+        setLecture((prev) =>
+          prev ? { ...prev, contextSummary: response.updatedSummary } : prev
+        )
+      }
     } catch (err) {
       const msg = isAxiosError(err)
         ? (err.response?.data as { message?: string })?.message ||
-          'Không thể thực hiện chỉnh sửa AI'
-        : 'Không thể thực hiện chỉnh sửa AI'
-      addAiMessage('assistant', `⚠️ Không thể áp dụng chỉnh sửa: ${msg}`)
+          'Không thể thực hiện yêu cầu AI'
+        : 'Không thể thực hiện yêu cầu AI'
+      addAiMessage('assistant', `⚠️ Không thể xử lý yêu cầu: ${msg}`)
       showToast(msg, 'error')
     } finally {
       setIsAiLoading(false)
+    }
+  }
+
+  // Chấp nhận đề xuất từ AI (Accept)
+  const handleAcceptProposal = (
+    messageId: string,
+    proposedSlide: Slide,
+    action?: string,
+    targetSlideIndex?: number
+  ) => {
+    if (!lecture) return
+    updateAiMessageStatus(messageId, 'accepted')
+    recordHistory(lecture.slides)
+
+    const targetIdx =
+      typeof targetSlideIndex === 'number' &&
+      targetSlideIndex >= 0 &&
+      targetSlideIndex < lecture.slides.length
+        ? targetSlideIndex
+        : activeSlideIndex
+
+    const finalizedSlide: Slide = {
+      ...proposedSlide,
+      components:
+        Array.isArray(proposedSlide.components) &&
+        proposedSlide.components.length > 0
+          ? proposedSlide.components
+          : getSlideComponents(proposedSlide, lecture.theme)
+    }
+
+    let nextSlides: Slide[]
+    if (action === 'CREATE_SLIDE') {
+      nextSlides = [...lecture.slides]
+      const insertIdx = targetIdx + 1
+      nextSlides.splice(insertIdx, 0, finalizedSlide)
+      mutateLecture({ ...lecture, slides: nextSlides })
+      setActiveSlideIndex(insertIdx)
+      showToast('Đã thêm slide mới từ đề xuất của AI', 'success')
+    } else {
+      nextSlides = lecture.slides.map((s, idx) =>
+        idx === targetIdx ? finalizedSlide : s
+      )
+      mutateLecture({ ...lecture, slides: nextSlides })
+      setActiveSlideIndex(targetIdx)
+      showToast(`Đã áp dụng chỉnh sửa AI vào Slide ${targetIdx + 1}`, 'success')
+    }
+
+    setPreviewSlide(null)
+    setSelectedCompId(null)
+  }
+
+  // Chấp nhận toàn bộ danh sách đề xuất từ AI (Accept All)
+  const handleAcceptAllProposals = (
+    messageId: string,
+    proposals: AiSlideProposalItem[]
+  ) => {
+    if (!lecture || proposals.length === 0) return
+    updateAiMessageStatus(messageId, 'accepted')
+    recordHistory(lecture.slides)
+
+    const nextSlides = [...lecture.slides]
+
+    // 1. Áp dụng các thay đổi UPDATE_SLIDE trước
+    proposals
+      .filter((p) => p.action === 'UPDATE_SLIDE')
+      .forEach((p) => {
+        if (p.targetSlideIndex >= 0 && p.targetSlideIndex < nextSlides.length) {
+          const slideWithComps: Slide = {
+            ...p.proposedSlide,
+            components:
+              Array.isArray(p.proposedSlide.components) &&
+              p.proposedSlide.components.length > 0
+                ? p.proposedSlide.components
+                : getSlideComponents(p.proposedSlide, lecture.theme)
+          }
+          nextSlides[p.targetSlideIndex] = slideWithComps
+        }
+      })
+
+    // 2. Chèn các slide mới CREATE_SLIDE theo thứ tự tăng dần
+    const createProps = proposals.filter((p) => p.action === 'CREATE_SLIDE')
+    let insertedOffset = 0
+    createProps.forEach((p) => {
+      const insertAt = Math.min(
+        nextSlides.length,
+        Math.max(0, p.targetSlideIndex + 1 + insertedOffset)
+      )
+      const slideWithComps: Slide = {
+        ...p.proposedSlide,
+        components:
+          Array.isArray(p.proposedSlide.components) &&
+          p.proposedSlide.components.length > 0
+            ? p.proposedSlide.components
+            : getSlideComponents(p.proposedSlide, lecture.theme)
+      }
+      nextSlides.splice(insertAt, 0, slideWithComps)
+      insertedOffset++
+    })
+
+    mutateLecture({ ...lecture, slides: nextSlides })
+    setPreviewSlide(null)
+    setSelectedCompId(null)
+    showToast(
+      `Đã áp dụng thành công ${proposals.length} đề xuất slide từ AI`,
+      'success'
+    )
+  }
+
+  // Từ chối đề xuất từ AI (Reject)
+  const handleRejectProposal = (messageId: string) => {
+    updateAiMessageStatus(messageId, 'rejected')
+    if (previewSlide) {
+      setPreviewSlide(null)
+    }
+    showToast('Đã từ chối đề xuất', 'info')
+  }
+
+  // Chấp nhận bản preview đang hiển thị trên canvas
+  const handleAcceptCurrentPreview = () => {
+    if (!previewSlide) return
+    const pendingMsg = [...aiMessages]
+      .reverse()
+      .find(
+        (m) =>
+          m.status === 'pending' &&
+          ((m.proposedSlide && m.proposedSlide.id === previewSlide.id) ||
+            m.proposals?.some((p) => p.proposedSlide.id === previewSlide.id))
+      )
+    const matchingProp = pendingMsg?.proposals?.find(
+      (p) => p.proposedSlide.id === previewSlide.id
+    )
+
+    if (matchingProp && pendingMsg) {
+      handleAcceptProposal(
+        pendingMsg.id,
+        previewSlide,
+        matchingProp.action,
+        matchingProp.targetSlideIndex
+      )
+    } else if (pendingMsg && pendingMsg.proposedSlide) {
+      handleAcceptProposal(
+        pendingMsg.id,
+        previewSlide,
+        pendingMsg.action,
+        pendingMsg.targetSlideIndex
+      )
+    } else {
+      handleAcceptProposal(
+        `temp-${Date.now()}`,
+        previewSlide,
+        previewSlideAction || 'UPDATE_SLIDE',
+        activeSlideIndex
+      )
     }
   }
 
@@ -861,11 +1191,14 @@ export const EditorPage = ({
         onRedo={handleRedo}
         onManualSave={handleManualSave}
         onOpenExport={() => setIsExportModalOpen(true)}
+        onOpenOutline={() => setIsOutlineModalOpen(true)}
         onPresent={handlePresent}
         saveStatus={saveStatus}
         countdown={countdown}
         isAutoSave={isAutoSave}
         onToggleAutoSave={handleToggleAutoSave}
+        currentThemeId={lecture.theme}
+        onThemeChange={handleThemeChange}
       />
 
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
@@ -875,7 +1208,7 @@ export const EditorPage = ({
           onAddTextComponent={handleAddTextComponent}
           onAddImageComponent={handleAddImageComponent}
           onAddShapeComponent={handleAddShapeComponent}
-          onApplyTemplate={handleApplyTemplate}
+          onApplyContentLayout={handleApplyContentLayout}
           outline={lecture.outline}
         />
 
@@ -900,17 +1233,24 @@ export const EditorPage = ({
 
           {/* Khung Canvas tỷ lệ 16:9 */}
           <SlideCanvas
-            slide={currentSlide}
+            slide={activeSlideToDisplay}
+            originalSlide={
+              previewSlideAction === 'CREATE_SLIDE' ? undefined : currentSlide
+            }
             components={currentComponents}
+            themeId={lecture.theme}
             slideIndex={activeSlideIndex}
             totalSlides={lecture.slides.length}
-            selectedCompId={selectedCompId}
-            onSelectComponent={setSelectedCompId}
+            selectedCompId={previewSlide ? null : selectedCompId}
+            onSelectComponent={previewSlide ? () => {} : setSelectedCompId}
             onUpdateComponent={handleUpdateComponent}
             onDuplicateComponent={handleDuplicateComponent}
             onDeleteComponent={handleDeleteComponent}
             onAiQuickAction={handleAiQuickAction}
             isAiLoading={isAiLoading}
+            isPreview={Boolean(previewSlide)}
+            onAcceptPreview={handleAcceptCurrentPreview}
+            onExitPreview={() => setPreviewSlide(null)}
           />
 
           {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
@@ -928,6 +1268,16 @@ export const EditorPage = ({
         {/* CỘT PHẢI: Trợ lý AI Copilot */}
         <AiCopilotPanel
           onApplyAiPrompt={handleApplyAiPrompt}
+          onAcceptProposal={handleAcceptProposal}
+          onAcceptAllProposals={handleAcceptAllProposals}
+          onRejectProposal={handleRejectProposal}
+          currentSlideIndex={activeSlideIndex}
+          totalSlides={lecture.slides.length}
+          currentSlideTitle={currentSlide?.title}
+          selectedComponentName={selectedComponent?.type}
+          lectureTitle={lecture.title}
+          contextSummary={lecture.contextSummary}
+          onSelectSlide={setActiveSlideIndex}
           isAiLoading={isAiLoading}
         />
       </div>
@@ -940,6 +1290,28 @@ export const EditorPage = ({
         initialSlideIndex={activeSlideIndex}
         onSuccess={(msg) => showToast(msg, 'success')}
         onError={(msg) => showToast(msg, 'error')}
+      />
+
+      {/* MODAL TÀI LIỆU NGUỒN */}
+      <SourceMaterialModal
+        open={isSourceMaterialModalOpen}
+        onClose={() => setIsSourceMaterialModalOpen(false)}
+        sourceMaterial={sourceMaterial || lecture?.sourceMaterial || ''}
+        onSave={(content) => {
+          setSourceMaterial(content)
+          if (lecture) {
+            mutateLecture({ ...lecture, sourceMaterial: content })
+            showToast('Đã lưu tài liệu nguồn tham khảo', 'success')
+          }
+        }}
+      />
+
+      {/* MODAL DÀN Ý */}
+      <OutlineModal
+        open={isOutlineModalOpen}
+        onClose={() => setIsOutlineModalOpen(false)}
+        outline={lecture.outline}
+        lectureTitle={lecture.title}
       />
     </div>
   )

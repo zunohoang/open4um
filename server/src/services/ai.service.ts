@@ -1,9 +1,133 @@
+import { GoogleGenAI } from '@google/genai'
 import { env } from '@/config/env'
+import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { AppError } from '@/utils/AppError'
 
-const AI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-const DEFAULT_AI_MODEL = 'gemini-3.5-flash'
+const AI_API_BASE = 'https://api.shopaikey.com'
+const DEFAULT_AI_MODEL = 'gemini-2.5-flash'
+
+const getAiClient = (): GoogleGenAI => {
+  const apiKey = env.GEMINI_API_KEY
+  if (!apiKey) {
+    logger.error({ err: 'Thiếu API key.' }, 'ai.getAiClient failed')
+    throw new AppError(
+      'Tính năng hiện chưa khả dụng. Vui lòng liên hệ quản trị viên.',
+      503
+    )
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      baseUrl: AI_API_BASE
+    }
+  })
+}
+
+/**
+ * Phân tích cú pháp JSON từ phản hồi AI với khả năng tự động xử lý và phục hồi lỗi:
+ * 1. Bóc tách markdown code blocks và text thừa xung quanh ({ ... } hoặc [ ... ]).
+ * 2. Tự động escape các ký tự điều khiển (unescaped literal newlines \n, \r, \t) bên trong string literals.
+ * 3. Tự động thêm nháy kép cho unquoted keys (vd: description: "..." -> "description": "...").
+ * 4. Xóa bỏ trailing commas (vd: , } hoặc , ]).
+ */
+export const safeParseAiJson = <T>(rawText: string): T => {
+  if (!rawText || !rawText.trim()) {
+    throw new Error('Chuỗi phản hồi từ AI rỗng')
+  }
+
+  let text = rawText.trim()
+
+  text = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+
+  const firstBrace = text.indexOf('{')
+  const firstBracket = text.indexOf('[')
+  let startIndex = -1
+  let endIndex = -1
+
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIndex = firstBrace
+    endIndex = text.lastIndexOf('}')
+  } else if (firstBracket !== -1) {
+    startIndex = firstBracket
+    endIndex = text.lastIndexOf(']')
+  }
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    text = text.substring(startIndex, endIndex + 1)
+  }
+
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    // Tiếp tục phục hồi
+  }
+
+  let sanitized = ''
+  let inString = false
+  let isEscaped = false
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+
+    if (inString) {
+      if (isEscaped) {
+        sanitized += char
+        isEscaped = false
+      } else if (char === '\\') {
+        sanitized += char
+        isEscaped = true
+      } else if (char === '"') {
+        sanitized += char
+        inString = false
+      } else if (char === '\n') {
+        sanitized += '\\n'
+      } else if (char === '\r') {
+        sanitized += '\\r'
+      } else if (char === '\t') {
+        sanitized += '\\t'
+      } else if (char.charCodeAt(0) < 32) {
+        // bỏ qua control char
+      } else {
+        sanitized += char
+      }
+    } else {
+      if (char === '"') {
+        inString = true
+      }
+      sanitized += char
+    }
+  }
+
+  try {
+    return JSON.parse(sanitized) as T
+  } catch {
+    // Tiếp tục phục hồi unquoted keys và trailing commas
+  }
+
+  try {
+    const fixedKeys = sanitized
+      .replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":')
+      .replace(/,\s*([}\]])/g, '$1')
+    return JSON.parse(fixedKeys) as T
+  } catch {
+    try {
+      const evalFn = new Function(`return (${sanitized})`)
+      return evalFn() as T
+    } catch (finalErr) {
+      logger.error(
+        { err: finalErr, snippet: text.substring(0, 300) },
+        'safeParseAiJson failed to parse'
+      )
+      throw finalErr
+    }
+  }
+}
 
 export interface OutlineSection {
   heading: string
@@ -21,18 +145,9 @@ export interface GeneratedOutline {
 export const generateOutlineFromPrompt = async (
   prompt: string
 ): Promise<GeneratedOutline> => {
-  const apiKey = env.GEMINI_API_KEY
-
-  if (!apiKey) {
-    logger.error({ err: 'Thiếu API key.' }, 'ai.generateOutline failed')
-    throw new AppError(
-      'Tính năng hiện chưa khả dụng. Vui lòng liên hệ quản trị viên.',
-      503
-    )
-  }
+  const ai = getAiClient()
 
   try {
-    const url = `${AI_API_BASE}/${DEFAULT_AI_MODEL}:generateContent?key=${apiKey}`
     const systemInstruction =
       'Bạn là một trợ lý AI chuyên nghiệp về thiết kế bài giảng và slide thuyết trình. ' +
       'Hãy phân tích chủ đề của người dùng và tạo một dàn ý bài giảng có cấu trúc logic gồm từ 3 đến 6 chương/phần chính (sections). ' +
@@ -41,64 +156,38 @@ export const generateOutlineFromPrompt = async (
 
     const userContent = `Hãy tạo dàn ý bài giảng chi tiết, logic và hấp dẫn cho chủ đề sau:\n"${prompt}"`
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: userContent }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              title: { type: 'STRING' },
-              sections: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    heading: { type: 'STRING' },
-                    bullets: {
-                      type: 'ARRAY',
-                      items: { type: 'STRING' }
-                    }
-                  },
-                  required: ['heading', 'bullets']
-                }
+    const response = await ai.models.generateContent({
+      model: DEFAULT_AI_MODEL,
+      contents: userContent,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            sections: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  heading: { type: 'STRING' },
+                  bullets: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' }
+                  }
+                },
+                required: ['heading', 'bullets']
               }
-            },
-            required: ['title', 'sections']
-          }
+            }
+          },
+          required: ['title', 'sections']
         }
-      })
+      }
     })
 
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as {
-        error?: { message?: string }
-      }
-      const message =
-        errorData.error?.message || `AI API lỗi mã ${response.status}`
-      logger.error({ err: message }, 'ai.generateOutline failed')
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
-
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>
-        }
-      }>
-    }
-
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    const rawText = response.text
     if (!rawText) {
       logger.error(
         { err: 'Không nhận được nội dung từ AI' },
@@ -110,11 +199,7 @@ export const generateOutlineFromPrompt = async (
       )
     }
 
-    const cleanText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-    const parsed = JSON.parse(cleanText) as GeneratedOutline
+    const parsed = safeParseAiJson<GeneratedOutline>(rawText)
 
     if (
       !parsed.title ||
@@ -155,18 +240,9 @@ export const refineOutlineWithFeedback = async (
   originalPrompt: string,
   feedback: string
 ): Promise<GeneratedOutline> => {
-  const apiKey = env.GEMINI_API_KEY
-
-  if (!apiKey) {
-    logger.error({ err: 'Thiếu API key.' }, 'ai.refineOutline failed')
-    throw new AppError(
-      'Tính năng hiện chưa khả dụng. Vui lòng liên hệ quản trị viên.',
-      503
-    )
-  }
+  const ai = getAiClient()
 
   try {
-    const url = `${AI_API_BASE}/${DEFAULT_AI_MODEL}:generateContent?key=${apiKey}`
     const systemInstruction =
       'Bạn là một trợ lý AI chuyên nghiệp về thiết kế bài giảng và slide thuyết trình. ' +
       'Nhiệm vụ của bạn là nhận vào chủ đề bài giảng, dàn ý hiện tại và ý kiến góp ý điều chỉnh của người dùng, ' +
@@ -188,37 +264,17 @@ export const refineOutlineWithFeedback = async (
       `Ý kiến / Yêu cầu điều chỉnh của người dùng:\n"${feedback}"\n\n` +
       'Hãy cập nhật và tinh chỉnh lại dàn ý theo đúng ý kiến đóng góp của người dùng.'
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: userContent }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: 'application/json'
-        }
-      })
+    const response = await ai.models.generateContent({
+      model: DEFAULT_AI_MODEL,
+      contents: userContent,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        responseMimeType: 'application/json'
+      }
     })
 
-    if (!response.ok) {
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
-
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>
-        }
-      }>
-    }
-
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    const rawText = response.text
     if (!rawText) {
       throw new AppError(
         'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
@@ -226,11 +282,7 @@ export const refineOutlineWithFeedback = async (
       )
     }
 
-    const cleanText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-    const parsed = JSON.parse(cleanText) as GeneratedOutline
+    const parsed = safeParseAiJson<GeneratedOutline>(rawText)
 
     return {
       title: parsed.title?.trim() || currentOutline.title,
@@ -251,9 +303,21 @@ export const refineOutlineWithFeedback = async (
   }
 }
 
+export interface GeneratedContentItem {
+  title: string
+  description: string
+  tag?: string
+  stat?: string
+}
+
 export interface GeneratedSlideData {
+  header?: string
   title: string
   subtitle?: string
+  footer?: string
+  contentLayout?:
+    'cards' | 'steps' | 'callout' | 'icon-list' | 'two-column' | 'standard'
+  contentItems?: GeneratedContentItem[]
   bullets: string[]
   layout?: 'standard' | 'two-column' | 'quote' | 'headline'
   titleAlign?: 'left' | 'center' | 'right'
@@ -264,45 +328,53 @@ export interface GeneratedSlideData {
 
 /**
  * Sinh danh sách slide chi tiết từ dàn ý và prompt ban đầu (Giai đoạn 2).
- * Mỗi chương/section trong outline sẽ được AI mở rộng thành 2-3 slide có chiều sâu (lý thuyết, ví dụ, câu hỏi tương tác)
- * cùng với slide mở đầu (intro) và slide tổng kết (summary).
+ * Mỗi chương/section trong outline sẽ được AI mở rộng thành 2-3 slide có chiều sâu sư phạm,
+ * hỗ trợ header/footer page và luân chuyển linh hoạt giữa các bố cục: headline, quote, two-column, standard.
  */
 export const generateSlidesFromOutline = async (
   outline: GeneratedOutline,
   prompt: string
 ): Promise<Array<Record<string, unknown>>> => {
-  const apiKey = env.GEMINI_API_KEY
-
-  if (!apiKey) {
-    logger.error({ err: 'Thiếu API key.' }, 'ai.generateSlides failed')
-    throw new AppError(
-      'Tính năng hiện chưa khả dụng. Vui lòng liên hệ quản trị viên.',
-      503
-    )
-  }
+  const ai = getAiClient()
 
   try {
-    const url = `${AI_API_BASE}/${DEFAULT_AI_MODEL}:generateContent?key=${apiKey}`
     const systemInstruction =
       'Bạn là một chuyên gia sư phạm và nhà thiết kế bài giảng trình chiếu chuyên nghiệp hàng đầu. ' +
       'Nhiệm vụ của bạn là nhận vào dàn ý bài giảng (tiêu đề và các chương chính) cùng chủ đề của người dùng, ' +
-      'sau đó phát triển thành một bộ bài giảng (slides) hoàn chỉnh, mạch lạc và có chiều sâu sư phạm.\n' +
-      'Cấu trúc bộ slide BẮT BUỘC bao gồm:\n' +
-      '1. Slide mở đầu (Intro/Headline): Giới thiệu chủ đề, mục tiêu bài học hoặc câu hỏi kích thích tư duy.\n' +
-      '2. Các slides nội dung chính: Với MỖI chương/phần (section) trong dàn ý, hãy triển khai thành 2 đến 3 slides chi tiết:\n' +
-      '   - Slide lý thuyết cốt lõi: Giải thích bản chất, định nghĩa hoặc quy luật.\n' +
-      '   - Slide ví dụ thực tế / phân tích tình huống / minh họa trực quan.\n' +
-      '   - Slide thực hành / so sánh / câu hỏi tương tác gợi mở cho người học.\n' +
-      '3. Slide tổng kết (Summary): Đúc kết các điểm trọng tâm cần nhớ (Key takeaways) và lời khuyên áp dụng.\n\n' +
-      'Mỗi slide phải có:\n' +
-      '- title: Tiêu đề súc tích, hấp dẫn\n' +
-      '- subtitle: Phụ đề hoặc ngữ cảnh mở rộng\n' +
-      '- bullets: Mảng từ 2 đến 5 ý chính rõ ràng, sắc nét\n' +
-      '- layout: Chọn phù hợp giữa "standard" | "two-column" | "quote" | "headline"\n' +
-      '- titleAlign: "left" | "center"\n' +
-      '- titleSize: "sm" | "md" | "lg" | "xl"\n' +
-      '- bulletStyle: "disc" | "decimal" | "dash"\n' +
-      '- speakerNotes: Lời thoại hoặc hướng dẫn giảng dạy chi tiết cho giảng viên.'
+      'sau đó phát triển thành một bộ bài giảng (slides) hoàn chỉnh, trực quan, đặc sắc và có chiều sâu sư phạm.\n\n' +
+      'Quy chuẩn cấu trúc bài giảng:\n' +
+      '1. Slide mở đầu (Intro): Tiêu đề lớn, câu hỏi kích thích tư duy hoặc phụ đề truyền cảm hứng, layout "headline", không cần header.\n' +
+      '2. Các slides nội dung chính: Với MỖI chương trong dàn ý, triển khai 2 đến 3 slides chi tiết. BẮT BUỘC AI PHẢI PHÂN TÍCH BẢN CHẤT NỘI DUNG ĐỂ CHỦ ĐỘNG CHỌN LAYOUT ẤN TƯỢNG, LUÂN CHUYỂN LINH HOẠT giữa 7 dạng bố cục trực quan sau (TUYỆT ĐỐI KHÔNG dùng quote):\n' +
+      '   - "split-highlight": Bố cục bất đối xứng hiện đại! Cột trái là 1 khối thẻ Hero lớn chiếm 45% nổi bật viền nhấn màu chủ đạo (dành cho luận điểm trọng tâm cốt lõi); Cột phải là 2 thẻ con nhỏ xếp chồng giải thích bổ trợ.\n' +
+      '   - "metrics-grid": Bố cục số liệu / thống kê ấn tượng! Gồm 2 đến 3 khối hộp hiển thị con số đo lường khổng lồ (cung cấp trường "stat" như 85%, 3.5X, 10M+, 24/7) kèm tiêu đề và phân tích bên dưới.\n' +
+      '   - "quad-grid": Lưới 4 ô thẻ 2x2 cân xứng hoàn hảo! Dành cho nội dung có 4 yếu tố, 4 góc nhìn, mô hình SWOT, 4 giai đoạn hoặc 4 nguyên tắc.\n' +
+      '   - "horizontal-rows": 3 thanh thẻ dài nằm ngang xếp tầng từ trên xuống, mỗi thanh có huy hiệu thứ tự ở đầu, tiêu đề và giải thích trải rộng.\n' +
+      '   - "two-column": 2 khối cột chữ nhật bo góc cân đối đối xứng (50-50), dành cho phân tích so sánh, đối chiếu (Ưu vs Nhược, Lý thuyết vs Thực tế).\n' +
+      '   - "steps": Quy trình các bước thực hiện tuần tự 01, 02, 03 có huy hiệu số bước nổi bật, dành cho hướng dẫn kỹ thuật, luồng xử lý, lộ trình triển khai.\n' +
+      '   - "cards": 3 thẻ chữ nhật đứng song song (Cards Grid kinh điển), dành cho các tính năng, đặc điểm hoặc mô đun kiến thức thông thường.\n' +
+      '   Mỗi slide có thể có "header" (ví dụ: "CHƯƠNG 01 • TỔNG QUAN", "PHẦN 02 • THỰC HÀNH") và "footer" để định hình phong cách.\n' +
+      '3. BẮT BUỘC VỀ DỮ LIỆU NỘI DUNG (QUAN TRỌNG NHẤT - KHÔNG ĐƯỢC BỎ TRỐNG):\n' +
+      '   - MỌI slide nội dung (trừ slide mở đầu headline) BẮT BUỘC PHẢI CÓ TỪ 2 ĐẾN 4 PHẦN TỬ TRONG "contentItems" VÀ "bullets".\n' +
+      '   - TUYỆT ĐỐI KHÔNG ĐƯỢC trả về mảng rỗng [] hay null cho contentItems hay bullets.\n' +
+      '   - Mỗi phần tử trong "contentItems" phải có "title" (tiêu đề khối ngắn gọn) và "description" (nội dung phân tích, kiến thức thực tế sâu sắc, từ 1-3 câu hoàn chỉnh).\n' +
+      '   - Với layout "split-highlight", "cards", "horizontal-rows", "steps": bắt buộc sinh 3 items.\n' +
+      '   - Với layout "two-column": bắt buộc sinh 2 items đối chiếu.\n' +
+      '   - Với layout "quad-grid": bắt buộc sinh 4 items.\n' +
+      '   - Với layout "metrics-grid": bắt buộc sinh 2-3 items có "stat" (chỉ số, độ phức tạp Big-O, phần trăm hoặc số lượng) kèm "title" và "description".\n' +
+      '4. Slide tổng kết (Summary): Đúc kết các điểm then chốt cần ghi nhớ (Key takeaways).\n\n' +
+      'Mỗi slide trả về các trường:\n' +
+      '- header: Nhãn chương mục ở đầu trang (hoặc để trống "").\n' +
+      '- title: Tiêu đề súc tích, rõ ràng.\n' +
+      '- subtitle: Phụ đề bổ trợ (nếu cần).\n' +
+      '- footer: Chân trang (hoặc để trống "").\n' +
+      '- layout: "split-highlight" | "metrics-grid" | "quad-grid" | "horizontal-rows" | "two-column" | "steps" | "cards" | "headline".\n' +
+      '- contentItems: Bắt buộc mảng 2-4 phần tử { title: string, description: string, stat?: string, tag?: string } chứa đầy đủ kiến thức.\n' +
+      '- bullets: Bắt buộc mảng 2-4 câu tóm tắt ý chính.\n' +
+      '- titleAlign: "left" | "center".\n' +
+      '- titleSize: "sm" | "md" | "lg" | "xl".\n' +
+      '- bulletStyle: "disc" | "decimal" | "dash".\n' +
+      '- speakerNotes: Lời thoại giảng dạy cho giảng viên.\n\n' +
+      'BẮT BUỘC: Phản hồi duy nhất 1 JSON object chuẩn có thuộc tính "slides" là danh sách các slide. Không chèn ký tự xuống dòng thô bên trong các giá trị chuỗi.'
 
     const outlineSummary = outline.sections
       .map(
@@ -315,71 +387,74 @@ export const generateSlidesFromOutline = async (
       `Chủ đề yêu cầu ban đầu: "${prompt || outline.title}"\n` +
       `Tiêu đề bài giảng: "${outline.title}"\n\n` +
       `Dàn ý các chương/phần chính:\n${outlineSummary}\n\n` +
-      'Hãy phát triển thành một bộ slide hoàn chỉnh, giàu kiến thức và giá trị thực tế.'
+      'Hãy phát triển thành một bộ slide trực quan, sinh động với các bố cục đặc sắc đa dạng (hero highlight, metrics, quad grid, horizontal rows, cards, steps).\n' +
+      'LƯU Ý ĐẶC BIỆT: Tất cả các slide nội dung đều phải được viết đầy đủ nội dung chi tiết vào mảng contentItems và bullets, tuyệt đối không để mảng rỗng!'
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: userContent }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              slides: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    title: { type: 'STRING' },
-                    subtitle: { type: 'STRING' },
-                    bullets: {
-                      type: 'ARRAY',
-                      items: { type: 'STRING' }
-                    },
-                    layout: { type: 'STRING' },
-                    titleAlign: { type: 'STRING' },
-                    titleSize: { type: 'STRING' },
-                    bulletStyle: { type: 'STRING' },
-                    speakerNotes: { type: 'STRING' }
+    const response = await ai.models.generateContent({
+      model: DEFAULT_AI_MODEL,
+      contents: userContent,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            slides: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  header: { type: 'STRING' },
+                  title: { type: 'STRING' },
+                  subtitle: { type: 'STRING' },
+                  footer: { type: 'STRING' },
+                  layout: {
+                    type: 'STRING',
+                    enum: [
+                      'split-highlight',
+                      'metrics-grid',
+                      'quad-grid',
+                      'horizontal-rows',
+                      'two-column',
+                      'steps',
+                      'cards',
+                      'headline'
+                    ]
                   },
-                  required: ['title', 'bullets']
-                }
+                  contentItems: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        title: { type: 'STRING' },
+                        description: { type: 'STRING' },
+                        stat: { type: 'STRING' },
+                        tag: { type: 'STRING' }
+                      },
+                      required: ['title', 'description']
+                    }
+                  },
+                  bullets: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' }
+                  },
+                  titleAlign: { type: 'STRING' },
+                  titleSize: { type: 'STRING' },
+                  bulletStyle: { type: 'STRING' },
+                  speakerNotes: { type: 'STRING' }
+                },
+                required: ['title', 'layout', 'contentItems', 'bullets']
               }
-            },
-            required: ['slides']
-          }
+            }
+          },
+          required: ['slides']
         }
-      })
+      }
     })
 
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as {
-        error?: { message?: string }
-      }
-      const message =
-        errorData.error?.message || `AI API lỗi mã ${response.status}`
-      logger.error({ err: message }, 'ai.generateSlides failed')
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
-
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>
-        }
-      }>
-    }
-
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    const rawText = response.text
     if (!rawText) {
       logger.error(
         { err: 'Không nhận được nội dung từ AI' },
@@ -391,32 +466,48 @@ export const generateSlidesFromOutline = async (
       )
     }
 
-    const cleanText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-    const parsed = JSON.parse(cleanText) as { slides?: GeneratedSlideData[] }
+    const parsed = safeParseAiJson<
+      Record<string, unknown> | GeneratedSlideData[]
+    >(rawText)
 
-    if (
-      !parsed.slides ||
-      !Array.isArray(parsed.slides) ||
-      parsed.slides.length === 0
+    let rawSlides: GeneratedSlideData[] = []
+    if (Array.isArray(parsed)) {
+      rawSlides = parsed
+    } else if (Array.isArray(parsed.slides)) {
+      rawSlides = parsed.slides as GeneratedSlideData[]
+    } else if (Array.isArray(parsed.data)) {
+      rawSlides = parsed.data as GeneratedSlideData[]
+    } else if (
+      Array.isArray((parsed.presentation as Record<string, unknown>)?.slides)
     ) {
+      rawSlides = (parsed.presentation as Record<string, unknown>)
+        .slides as GeneratedSlideData[]
+    }
+
+    if (rawSlides.length === 0) {
       logger.error(
-        { err: 'Slides trả về không đúng định dạng' },
+        {
+          err: 'Slides trả về không đúng định dạng',
+          keys: Array.isArray(parsed) ? 'is_array_empty' : Object.keys(parsed)
+        },
         'ai.generateSlides failed'
       )
       throw new AppError('Cấu trúc slide trả về không đúng định dạng', 502)
     }
 
-    return parsed.slides.map((s) => ({
+    return rawSlides.map((s) => ({
       id: `slide-${crypto.randomUUID()}`,
+      header: s.header || '',
       title: s.title || 'Slide nội dung',
       subtitle: s.subtitle || '',
+      footer: s.footer || '',
       bullets: Array.isArray(s.bullets) ? s.bullets : [],
-      layout: s.layout || 'standard',
-      titleAlign: s.titleAlign || 'left',
-      titleSize: s.titleSize || 'md',
+      contentItems: Array.isArray(s.contentItems) ? s.contentItems : undefined,
+      layout: s.layout || s.contentLayout || 'cards',
+      titleAlign:
+        s.titleAlign ||
+        (s.layout === 'headline' || s.layout === 'quote' ? 'center' : 'left'),
+      titleSize: s.titleSize || (s.layout === 'headline' ? 'xl' : 'md'),
       bulletStyle: s.bulletStyle || 'disc',
       components: [],
       speakerNotes: s.speakerNotes || ''
@@ -441,18 +532,9 @@ export const editSlideWithInstruction = async <
   instruction: string
 ): Promise<T> => {
   const normalizedInstruction = instruction.trim()
-  const apiKey = env.GEMINI_API_KEY
-
-  if (!apiKey) {
-    logger.error({ err: 'Thiếu API key.' }, 'ai.generateOutline failed')
-    throw new AppError(
-      'Tính năng hiện chưa khả dụng. Vui lòng liên hệ quản trị viên.',
-      503
-    )
-  }
+  const ai = getAiClient()
 
   try {
-    const url = `${AI_API_BASE}/${DEFAULT_AI_MODEL}:generateContent?key=${apiKey}`
     const systemInstruction =
       'Bạn là một trợ lý AI chuyên nghiệp về thiết kế và tinh chỉnh slide thuyết trình. ' +
       'Bạn nhận được thông tin một slide hiện tại (gồm title, bullets, subtitle, layout, speakerNotes) ' +
@@ -466,43 +548,17 @@ export const editSlideWithInstruction = async <
       `Yêu cầu chỉnh sửa của người dùng: "${normalizedInstruction}"\n\n` +
       'Hãy cập nhật slide theo yêu cầu và trả về kết quả dưới dạng JSON hoàn chỉnh.'
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: userContent }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: {
-          temperature: 0.4,
-          responseMimeType: 'application/json'
-        }
-      })
+    const response = await ai.models.generateContent({
+      model: DEFAULT_AI_MODEL,
+      contents: userContent,
+      config: {
+        systemInstruction,
+        temperature: 0.4,
+        responseMimeType: 'application/json'
+      }
     })
 
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as {
-        error?: { message?: string }
-      }
-      const message =
-        errorData.error?.message || `AI API lỗi mã ${response.status}`
-      logger.error({ err: message }, 'ai.editSlide failed')
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
-
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>
-        }
-      }>
-    }
-
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    const rawText = response.text
     if (!rawText) {
       logger.error(
         { err: 'Không nhận được nội dung từ AI' },
@@ -514,11 +570,7 @@ export const editSlideWithInstruction = async <
       )
     }
 
-    const cleanText = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-    const parsed = JSON.parse(cleanText) as Record<string, unknown>
+    const parsed = safeParseAiJson<Record<string, unknown>>(rawText)
 
     return {
       ...slide,
@@ -528,6 +580,456 @@ export const editSlideWithInstruction = async <
   } catch (err) {
     if (err instanceof AppError) throw err
     logger.error({ err }, 'ai.editSlide failed')
+    throw new AppError('Lỗi kết nối tới dịch vụ AI của Google', 502)
+  }
+}
+
+export interface AiChatSlideSummary {
+  slideNumber: number
+  id: string
+  title: string
+  bullets: string[]
+  layout: string
+}
+
+export interface AiChatContext {
+  presentationTitle: string
+  totalSlides: number
+  currentSlideIndex: number
+  currentSlide?: Record<string, unknown>
+  surroundingSlides?: {
+    prev?: Record<string, unknown>
+    next?: Record<string, unknown>
+  }
+  slidesCatalog?: AiChatSlideSummary[]
+  outlineOverview?: string
+  contextSummary?: string
+  selectedElement?: Record<string, unknown>
+  sourceMaterial?: string
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>
+  theme?: string
+}
+
+export type AiSlideAction =
+  | 'UPDATE_CURRENT_SLIDE'
+  | 'UPDATE_SLIDE'
+  | 'CREATE_SLIDE'
+  | 'BATCH_CHANGES'
+  | 'CHAT_ONLY'
+
+export interface AiSlideProposal {
+  id?: string
+  action: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
+  targetSlideIndex: number
+  proposedSlide: Record<string, unknown>
+  summary?: string
+}
+
+export interface AiChatResponse {
+  reply: string
+  action: AiSlideAction
+  targetSlideIndex?: number
+  proposedSlide?: Record<string, unknown>
+  proposals?: AiSlideProposal[]
+  updatedSummary?: string
+}
+
+/**
+ * Trò chuyện AI và đề xuất chỉnh sửa/tạo slide dựa trên toàn bộ ngữ cảnh bài giảng.
+ */
+export const chatAndProposeSlideEdit = async (
+  userMessage: string,
+  context: AiChatContext
+): Promise<AiChatResponse> => {
+  const normalizedMessage = userMessage.trim()
+  const ai = getAiClient()
+
+  try {
+    const systemInstruction =
+      'Bạn là một chuyên gia sư phạm, giám đốc sáng tạo và trợ lý thiết kế bài giảng trình chiếu chuyên nghiệp hàng đầu. ' +
+      'Nhiệm vụ của bạn là đồng hành cùng người dùng trong giao diện Slide Editor như một Agent thông minh: hỗ trợ trao đổi, tư vấn, và thực hiện chỉnh sửa / bổ sung / tái cấu trúc bài giảng. ' +
+      'Bạn có đầy đủ nhận thức ngữ cảnh (Context Awareness) bao gồm:\n' +
+      '- Toàn bộ danh mục các slide trong bài giảng (slidesCatalog: gồm số thứ tự slideNumber, id, title, bullets, layout).\n' +
+      '- Slide hiện tại mà người dùng đang mở (currentSlide với đầy đủ components).\n' +
+      '- Tóm tắt cốt lõi bài giảng (contextSummary) duy trì tính nhất quán xuyên suốt.\n' +
+      '- Slide trước/sau (surroundingSlides), thành phần đang chọn (selectedElement), tài liệu tham khảo (sourceMaterial) và lịch sử trò chuyện.\n\n' +
+      'QUY TẮC NHẬN DIỆN PHẠM VI & MỤC TIÊU (SCOPE & TARGET RESOLUTION - BẮT BUỘC TUÂN THỦ):\n' +
+      'Trước khi quyết định hành động, bạn BẮT BUỘC phải phân tích ý định của người dùng thuộc 1 trong 3 trường hợp sau:\n\n' +
+      '1. PHẠM VI TOÀN BÀI HOẶC HÀNG LOẠT (Global / Multi-slide Scope):\n' +
+      '   - Dấu hiệu nhận biết: Câu yêu cầu nhắc đến "các slide...", "sau các khái niệm", "mỗi phần", "tất cả", "toàn bài", "thêm ví dụ code sau định nghĩa", hoặc tác động lên nhiều chủ đề trong bài giảng.\n' +
+      '   - Hành vi BẮT BUỘC: BỎ QUA slide hiện tại (currentSlide)! Hãy quét toàn bộ danh mục "slidesCatalog" để xác định TẤT CẢ các slide liên quan đến khái niệm / lý thuyết / chủ đề đó trong bài giảng.\n' +
+      '   - BẮT BUỘC trả về "action": "BATCH_CHANGES" với mảng "proposals" chứa danh sách TẤT CẢ các slide mới (BẮT BUỘC từ 3 đến 6 slides), mỗi phần tử có "action": "CREATE_SLIDE" và "targetSlideIndex" là vị trí của slide khái niệm tương ứng. TUYỆT ĐỐI KHÔNG được giới hạn thao tác vào mỗi một slide đang mở!\n\n' +
+      '2. PHẠM VI CHỈ ĐỊNH RÕ RÀNG SLIDE ĐÍCH (Explicit Slide / Topic Target Scope):\n' +
+      '   - Dấu hiệu nhận biết: Người dùng nhắc đến số thứ tự slide (ví dụ: "sửa slide 3", "thêm slide sau slide 5", "tạo slide sau slide 2") HOẶC nhắc đến tiêu đề/chủ đề cụ thể (ví dụ: "sửa slide về Ngăn xếp", "thêm ví dụ vào phần Biến và Kiểu dữ liệu", "viết lại phần Con trỏ").\n' +
+      '   - Hành vi BẮT BUỘC: Tra cứu trong "slidesCatalog" để tìm slide có tiêu đề hoặc số thứ tự khớp nhất. Đặt "targetSlideIndex" là vị trí của slide tìm được đó trong bài giảng. TUYỆT ĐỐI KHÔNG mặc định lấy slide hiện tại (currentSlide) nếu slide người dùng nói đến khác với slide hiện tại!\n\n' +
+      '3. PHẠM VI CỤC BỘ TẠI SLIDE ĐANG MỞ (Current Slide Scope):\n' +
+      '   - Dấu hiệu nhận biết: Người dùng dùng từ ngữ chỉ vị trí hiện tại ("slide này", "ở đây", "tiêu đề này", "khối chữ này") HOẶC các câu lệnh chỉnh sửa chung chung ("rút ngắn lại", "viết chi tiết hơn", "đổi sang layout 3 cột", "đổi màu") mà không nhắc tới bất kỳ slide hay chủ đề nào khác.\n' +
+      '   - Hành vi BẮT BUỘC: Lúc này mới áp dụng chỉnh sửa vào slide hiện tại ("targetSlideIndex": currentSlideIndex) và sử dụng các component của currentSlide để tinh chỉnh.\n\n' +
+      'QUY TẮC BẮT BUỘC KHI XÁC ĐỊNH HÀNH ĐỘNG (ACTION) & ĐỀ XUẤT:\n' +
+      '1. "BATCH_CHANGES" (ÁP DỤNG HÀNG LOẠT HOẶC TẠO NHIỀU SLIDE MỚI):\n' +
+      '   - Khi người dùng yêu cầu: thêm/viết các slide ví dụ code sau các slide khái niệm/định nghĩa, thêm slide bài tập sau mỗi phần lý thuyết, tạo slide minh họa cho các chương, hoặc sửa nhiều slide cùng lúc.\n' +
+      '   - CƯỠNG CHẾ SỐ LƯỢNG SLIDE (BẮT BUỘC): Mảng "proposals" BẮT BUỘC PHẢI CHỨA TỪ 3 ĐẾN 6 SLIDE ĐỀ XUẤT MỚI. TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ TRẢ VỀ 1 SLIDE! Nếu chỉ trả về 1 slide là VI PHẠM YÊU CẦU CỦA NGƯỜI DÙNG.\n' +
+      '   - BẮT BUỘC DÙNG "action": "CREATE_SLIDE" cho từng phần tử khi người dùng yêu cầu "thêm/viết thêm slide sau...". TUYỆT ĐỐI KHÔNG DÙNG "UPDATE_SLIDE" vì UPDATE_SLIDE sẽ ghi đè và làm mất slide bài giảng gốc của người dùng!\n' +
+      '   - TUYỆT ĐỐI KHÔNG xuất trường "proposedSlide" ở ngoài cùng JSON khi action là "BATCH_CHANGES". Toàn bộ các slide mới BẮT BUỘC phải nằm trong mảng "proposals".\n' +
+      '   - BẮT BUỘC sắp xếp các phần tử trong "proposals" theo thứ tự targetSlideIndex tăng dần.\n\n' +
+      '2. "CREATE_SLIDE" (ĐÚNG 1 SLIDE MỚI ĐƠN LẺ):\n' +
+      '   - Chỉ dùng khi người dùng yêu cầu thêm đúng 1 slide duy nhất (ví dụ: "thêm 1 slide kết luận ở cuối").\n' +
+      '   - "targetSlideIndex": vị trí slide đứng trước vị trí cần chèn.\n' +
+      '   - "proposedSlide": đối tượng slide mới hoàn chỉnh.\n\n' +
+      '3. "UPDATE_SLIDE" (CẬP NHẬT 1 SLIDE HIỆN CÓ):\n' +
+      '   - Chỉ dùng khi người dùng yêu cầu chỉnh sửa, tóm gọn, viết lại, hoặc thay đổi nội dung của một slide đã có sẵn.\n' +
+      '   - TUYỆT ĐỐI KHÔNG dùng khi người dùng yêu cầu thêm slide mới hoặc viết slide sau slide khác!\n' +
+      '   - "targetSlideIndex": 0-indexed vị trí slide cần cập nhật.\n' +
+      '   - "proposedSlide": đối tượng slide với nội dung sau khi cập nhật.\n\n' +
+      '4. "CHAT_ONLY":\n' +
+      '   - Khi người dùng chỉ hỏi đáp, xin tư vấn mà không yêu cầu thay đổi hay tạo slide.\n\n' +
+      'CẤU TRÚC JSON PHẢN HỒI MẪU CHO BATCH_CHANGES (Khi yêu cầu thêm slide ví dụ code sau các khái niệm/lý thuyết):\n' +
+      '{\n' +
+      '  "reply": "Tôi đã tạo 4 slide ví dụ code minh họa bằng C++ chèn ngay sau các phần lý thuyết trọng tâm của bài giảng.",\n' +
+      '  "action": "BATCH_CHANGES",\n' +
+      '  "proposals": [\n' +
+      '    {\n' +
+      '      "action": "CREATE_SLIDE",\n' +
+      '      "targetSlideIndex": 1,\n' +
+      '      "summary": "Ví dụ Code: Cấu Trúc Node",\n' +
+      '      "proposedSlide": {\n' +
+      '        "header": "VÍ DỤ CODE C++",\n' +
+      '        "title": "Cài Đặt Node và Chèn Đầu Danh Sách",\n' +
+      '        "subtitle": "Thao tác con trỏ và cấp phát động trong C++",\n' +
+      '        "layout": "code",\n' +
+      '        "codeLanguage": "cpp",\n' +
+      '        "codeSnippet": "#include <iostream>\\nusing namespace std;\\n\\nstruct Node {\\n    int data;\\n    Node* next;\\n};\\n\\nvoid pushHead(Node*& head, int val) {\\n    Node* newNode = new Node{val, head};\\n    head = newNode;\\n    cout << \\"Đã thêm: \\" << val << endl;\\n}",\n' +
+      '        "contentItems": [\n' +
+      '          { "title": "Cấu trúc Node", "description": "Lưu dữ liệu và con trỏ next tới phần tử kế." },\n' +
+      '          { "title": "Cấp phát động", "description": "Dùng toán tử new để tạo node trên vùng nhớ Heap." },\n' +
+      '          { "title": "Độ phức tạp O(1)", "description": "Gắn node mới lên đầu giúp tối ưu thời gian O(1)." }\n' +
+      '        ],\n' +
+      '        "bullets": ["Quản lý chặt chẽ con trỏ head", "Giải phóng bộ nhớ bằng delete khi xóa"],\n' +
+      '        "speakerNotes": "Giải thích chi tiết cơ chế cấp phát bộ nhớ động của Node trong danh sách liên kết đơn."\n' +
+      '      }\n' +
+      '    },\n' +
+      '    {\n' +
+      '      "action": "CREATE_SLIDE",\n' +
+      '      "targetSlideIndex": 2,\n' +
+      '      "summary": "Ví dụ Code: Thao Tác Ngăn Xếp",\n' +
+      '      "proposedSlide": {\n' +
+      '        "header": "VÍ DỤ CODE C++",\n' +
+      '        "title": "Thực Thi Ngăn Xếp (Stack) Với Mảng",\n' +
+      '        "subtitle": "Nguyên lý LIFO: Thao tác Push và Pop",\n' +
+      '        "layout": "code",\n' +
+      '        "codeLanguage": "cpp",\n' +
+      '        "codeSnippet": "#include <iostream>\\n#define MAX 100\\nusing namespace std;\\n\\nint top = -1;\\nint stackArr[MAX];\\n\\nvoid push(int val) {\\n    if (top >= MAX - 1) return;\\n    stackArr[++top] = val;\\n}\\n\\nint pop() {\\n    if (top < 0) return -1;\\n    return stackArr[top--];\\n}",\n' +
+      '        "contentItems": [\n' +
+      '          { "title": "Chỉ số top", "description": "Theo dõi vị trí phần tử trên cùng của Stack." },\n' +
+      '          { "title": "Thao tác Push/Pop", "description": "Thêm và lấy phần tử với độ phức tạp tối ưu O(1)." },\n' +
+      '          { "title": "Tràn ngăn xếp", "description": "Kiểm tra giới hạn MAX để tránh tràn bộ đệm." }\n' +
+      '        ],\n' +
+      '        "bullets": ["Quy tắc vào sau ra trước (LIFO)", "Cần kiểm tra mảng rỗng trước khi pop"],\n' +
+      '        "speakerNotes": "Lưu ý học viên về kích thước bộ nhớ và xử lý lỗi tràn ngăn xếp (Stack Overflow)."\n' +
+      '      }\n' +
+      '    },\n' +
+      '    {\n' +
+      '      "action": "CREATE_SLIDE",\n' +
+      '      "targetSlideIndex": 3,\n' +
+      '      "summary": "Ví dụ Code: Tìm Kiếm Nhị Phân",\n' +
+      '      "proposedSlide": {\n' +
+      '        "header": "VÍ DỤ CODE C++",\n' +
+      '        "title": "Thuật Toán Tìm Kiếm Nhị Phân",\n' +
+      '        "subtitle": "Tối ưu hóa tìm kiếm trên mảng đã sắp xếp",\n' +
+      '        "layout": "code",\n' +
+      '        "codeLanguage": "cpp",\n' +
+      '        "codeSnippet": "int binarySearch(int arr[], int n, int x) {\\n    int left = 0, right = n - 1;\\n    while (left <= right) {\\n        int mid = left + (right - left) / 2;\\n        if (arr[mid] == x) return mid;\\n        if (arr[mid] < x) left = mid + 1;\\n        else right = mid - 1;\\n    }\\n    return -1;\\n}",\n' +
+      '        "contentItems": [\n' +
+      '          { "title": "Phân đôi không gian", "description": "Giảm một nửa số phần tử cần xét sau mỗi bước." },\n' +
+      '          { "title": "Độ phức tạp O(log n)", "description": "Vượt trội hoàn toàn so với tìm kiếm tuần tự O(n)." },\n' +
+      '          { "title": "Tránh tràn số", "description": "Tính mid = left + (right - left) / 2 an toàn tuyệt đối." }\n' +
+      '        ],\n' +
+      '        "bullets": ["Điều kiện tiên quyết: Mảng phải được sắp xếp trước", "Thời gian thực thi O(log n)"],\n' +
+      '        "speakerNotes": "Nhắc nhở học viên về lỗi tràn số nguyên khi tính (left + right) / 2."\n' +
+      '      }\n' +
+      '    },\n' +
+      '    {\n' +
+      '      "action": "CREATE_SLIDE",\n' +
+      '      "targetSlideIndex": 4,\n' +
+      '      "summary": "Ví dụ Code: Thuật Toán Sắp Xếp Nổi Bọt",\n' +
+      '      "proposedSlide": {\n' +
+      '        "header": "VÍ DỤ CODE C++",\n' +
+      '        "title": "Cài Đặt Bubble Sort Trong C++",\n' +
+      '        "subtitle": "Đổi chỗ các cặp phần tử liền kề sai thứ tự",\n' +
+      '        "layout": "code",\n' +
+      '        "codeLanguage": "cpp",\n' +
+      '        "codeSnippet": "void bubbleSort(int arr[], int n) {\\n    for (int i = 0; i < n - 1; i++) {\\n        bool swapped = false;\\n        for (int j = 0; j < n - i - 1; j++) {\\n            if (arr[j] > arr[j + 1]) {\\n                swap(arr[j], arr[j + 1]);\\n                swapped = true;\\n            }\\n        }\\n        if (!swapped) break;\\n    }\\n}",\n' +
+      '        "contentItems": [\n' +
+      '          { "title": "Vòng lặp kép", "description": "Duyệt qua mảng và đẩy phần tử lớn nhất về cuối." },\n' +
+      '          { "title": "Tối ưu cờ swapped", "description": "Dừng sớm khi mảng đã có thứ tự, tối ưu trường hợp tốt nhất O(n)." },\n' +
+      '          { "title": "Độ phức tạp O(n^2)", "description": "Dễ hiểu, phù hợp cho tập dữ liệu kích thước nhỏ." }\n' +
+      '        ],\n' +
+      '        "bullets": ["Cơ chế nổi bọt phần tử", "Tối ưu hóa dừng sớm với biến swapped"],\n' +
+      '        "speakerNotes": "Phân tích số phép so sánh và hoán đổi vị trí của Bubble Sort."\n' +
+      '      }\n' +
+      '    }\n' +
+      '  ],\n' +
+      '  "updatedSummary": "Đã cập nhật bài giảng C++ với 4 slide ví dụ code thực hành sau các bài lý thuyết."\n' +
+      '}\n\n' +
+      'QUY TẮC CƯỠNG CHẾ ĐẶC BIỆT KHI VIẾT SLIDE VÍ DỤ CODE:\n' +
+      '- BẮT BUỘC đặt "layout": "code", "codeLanguage": "cpp".\n' +
+      '- BẮT BUỘC cung cấp trường "codeSnippet" chứa mã nguồn C++ thực tế hoàn chỉnh, có khai báo struct/biến/hàm/cout. TUYỆT ĐỐI KHÔNG ĐƯỢC VIẾT VĂN XUÔI LÝ THUYẾT TRONG CODE!\n' +
+      '- Trường "contentItems" chỉ dùng để giải thích 2-3 điểm lưu ý ngắn gọn của đoạn code trên.\n' +
+      '- Phản hồi BẮT BUỘC là JSON thuần túy theo cấu trúc trên. Tuyệt đối không chèn ký tự xuống dòng thô bên trong chuỗi string.'
+
+    const isUserAskingToCreate =
+      /\b(thêm|tạo|bổ sung|viết thêm)\b.*?\b(slide|slides|trang)\b/i.test(
+        normalizedMessage
+      )
+
+    const isUserAskingBatch =
+      /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các)\b/i.test(
+        normalizedMessage
+      )
+
+    // Tự động phân tích các slide lý thuyết/khái niệm trong danh mục để ép targetSlideIndex chính xác
+    let forcedTargetInstructions = ''
+    if (
+      isUserAskingBatch &&
+      context.slidesCatalog &&
+      context.slidesCatalog.length > 1
+    ) {
+      const conceptRegex =
+        /khái niệm|định nghĩa|cấu trúc|thuật toán|tổng quan|nguyên lý|ngăn xếp|hàng đợi|danh sách|cây|đồ thị|con trỏ|mảng|đệ quy|sắp xếp|tìm kiếm|biến|kiểu|vòng lặp|hàm|lớp|struct|class/i
+
+      let targetedSlides = context.slidesCatalog.filter((s) =>
+        conceptRegex.test(s.title)
+      )
+
+      if (targetedSlides.length < 2) {
+        // Nếu không khớp từ khóa thì lấy các slide ở giữa bài giảng (bỏ slide 1 mở đầu)
+        targetedSlides = context.slidesCatalog.filter(
+          (_s, idx) => idx > 0 && idx < context.slidesCatalog!.length - 1
+        )
+      }
+
+      // Giới hạn từ 3 đến 5 slide tiêu biểu
+      const selectedForcedSlides = targetedSlides.slice(0, 5)
+
+      if (selectedForcedSlides.length > 0) {
+        forcedTargetInstructions =
+          `\n⚠️ BẮT BUỘC THỰC HIỆN ĐÚNG DANH SÁCH SLIDE ĐÍCH SAU:\n` +
+          `Người dùng yêu cầu bổ sung các slide ví dụ sau các khái niệm/nội dung đã nêu trong bài giảng.\n` +
+          `Dựa trên danh mục bài giảng, bạn BẮT BUỘC PHẢI TẠO ĐÚNG ${selectedForcedSlides.length} SLIDE VÍ DỤ CODE C++ MỚI ("action": "CREATE_SLIDE"), chèn ngay sau các slide sau:\n` +
+          selectedForcedSlides
+            .map(
+              (s) =>
+                `  + Slide ${s.slideNumber}: "${s.title}" -> BẮT BUỘC tạo 1 slide ví dụ code C++ chèn sau slide này (targetSlideIndex: ${s.slideNumber - 1})`
+            )
+            .join('\n') +
+          `\nTUYỆT ĐỐI KHÔNG ĐƯỢC THIẾU HOẶC CHỈ TRẢ VỀ 1 SLIDE! Mảng "proposals" BẮT BUỘC PHẢI CHỨA ĐỦ ${selectedForcedSlides.length} PHẦN TỬ tương ứng với các targetSlideIndex trên.\n`
+      }
+    }
+
+    const catalogFormatted = (context.slidesCatalog || [])
+      .map(
+        (s) =>
+          `  - Slide ${s.slideNumber} (index: ${s.slideNumber - 1}): "${s.title}" [layout: ${s.layout}]` +
+          (s.bullets && s.bullets.length > 0
+            ? `\n    Ý chính: ${s.bullets.slice(0, 3).join('; ')}`
+            : '')
+      )
+      .join('\n')
+
+    const currentSlideInfo = context.currentSlide
+      ? `  - Đang mở: Slide ${(context.currentSlideIndex ?? 0) + 1}/${context.totalSlides}: "${String(context.currentSlide.title || 'Không có tiêu đề')}"\n` +
+        `  - Chi tiết components:\n${JSON.stringify(context.currentSlide.components || [], null, 2)}`
+      : 'Không có slide nào đang mở'
+
+    const conversationHistoryText = (context.history || [])
+      .slice(-8)
+      .map((h) => `${h.role === 'user' ? 'Người dùng' : 'AI'}: ${h.text}`)
+      .join('\n')
+
+    const userPromptContent =
+      `# THÔNG TIN BÀI GIẢNG: "${context.presentationTitle}" (Tổng: ${context.totalSlides} slides)\n\n` +
+      `## 1. DANH MỤC TOÀN BỘ CÁC SLIDE (slidesCatalog):\n` +
+      `*(BẮT BUỘC tra cứu danh mục này khi người dùng nói về slide khác, chủ đề cụ thể, hoặc khi yêu cầu thao tác trên nhiều slide/toàn bài)*\n` +
+      `${catalogFormatted || '(Trống)'}\n\n` +
+      `## 2. SLIDE NGƯỜI DÙNG ĐANG MỞ TRÊN MÀN HÌNH (Vị trí hiện tại: Slide ${(context.currentSlideIndex ?? 0) + 1}):\n` +
+      `*(CHỈ sử dụng mục này khi người dùng yêu cầu sửa slide hiện tại hoặc không chỉ định slide/chủ đề nào khác)*\n` +
+      `${currentSlideInfo}\n\n` +
+      (context.outlineOverview
+        ? `## 3. DÀN Ý CHUNG:\n${context.outlineOverview}\n\n`
+        : '') +
+      `## 4. TÓM TẮT CỐT LÕI BÀI GIẢNG:\n${context.contextSummary || 'Chưa có'}\n\n` +
+      (conversationHistoryText
+        ? `## 5. LỊCH SỬ HỘI THOẠI GẦN ĐÂY:\n${conversationHistoryText}\n\n`
+        : '') +
+      `# YÊU CẦU MỚI TỪ NGƯỜI DÙNG:\n"${normalizedMessage}"\n\n` +
+      'CHỈ THỊ THỰC HIỆN BẮT BUỘC:\n' +
+      '1. Khi người dùng yêu cầu tạo/thêm các slide sau các khái niệm/lý thuyết (hoặc toàn bài): BẮT BUỘC chọn "action": "BATCH_CHANGES".\n' +
+      '2. MẢNG "proposals" BẮT BUỘC PHẢI CHỨA TỐI THIỂU TỪ 3 ĐẾN 6 SLIDE ĐỀ XUẤT ("action": "CREATE_SLIDE"), TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ TẠO 1 SLIDE.\n' +
+      '3. Duyệt danh mục slidesCatalog và chèn slide ví dụ mới sau các slide lý thuyết tiêu biểu (ví dụ: sau slide 2, 3, 4, 5, 6...).\n' +
+      '4. TUYỆT ĐỐI KHÔNG xuất trường proposedSlide ở ngoài cùng JSON khi là BATCH_CHANGES. Toàn bộ slide mới phải nằm trong mảng proposals.\n' +
+      '5. SLIDE VÍ DỤ CODE PHẢI CÓ CODE C++ THỰC TẾ TRONG "codeSnippet" VỚI LAYOUT "code", TUYỆT ĐỐI KHÔNG VIẾT VĂN XUÔI LÝ THUYẾT!\n' +
+      (forcedTargetInstructions || '') +
+      '6. Trả về đúng 1 JSON object hợp lệ.'
+
+    const response = await ai.models.generateContent({
+      model: DEFAULT_AI_MODEL,
+      contents: userPromptContent,
+      config: {
+        systemInstruction,
+        temperature: 0.5,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json'
+      }
+    })
+
+    const rawText = response.text
+    if (!rawText) {
+      logger.error(
+        { err: 'Không nhận được nội dung từ AI' },
+        'ai.chatAndProposeSlideEdit failed'
+      )
+      throw new AppError(
+        'Dịch vụ AI tạm thời bị gián đoạn. Vui lòng thử lại sau.',
+        502
+      )
+    }
+
+    const parsed = safeParseAiJson<{
+      reply?: string
+      action?: AiSlideAction
+      targetSlideIndex?: number
+      proposedSlide?: Record<string, unknown>
+      proposals?: Array<{
+        action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
+        targetSlideIndex?: number
+        proposedSlide?: Record<string, unknown>
+        summary?: string
+      }>
+      updatedSummary?: string
+    }>(rawText)
+
+    const reply = parsed.reply?.trim() || 'Tôi đã hoàn thành yêu cầu của bạn.'
+    let action: AiSlideAction = parsed.action || 'CHAT_ONLY'
+    if (
+      action !== 'UPDATE_CURRENT_SLIDE' &&
+      action !== 'UPDATE_SLIDE' &&
+      action !== 'CREATE_SLIDE' &&
+      action !== 'BATCH_CHANGES' &&
+      action !== 'CHAT_ONLY'
+    ) {
+      action = 'CHAT_ONLY'
+    }
+
+    let rawProposals = Array.isArray(parsed.proposals) ? parsed.proposals : []
+
+    // Chuẩn hóa nếu AI trả về proposedSlide đơn lẻ nhưng không có proposals
+    if (rawProposals.length === 0 && parsed.proposedSlide) {
+      if (
+        action === 'CREATE_SLIDE' ||
+        action === 'UPDATE_SLIDE' ||
+        action === 'UPDATE_CURRENT_SLIDE'
+      ) {
+        rawProposals = [
+          {
+            action: action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE',
+            targetSlideIndex:
+              parsed.targetSlideIndex ?? context.currentSlideIndex,
+            proposedSlide: parsed.proposedSlide,
+            summary: reply
+          }
+        ]
+      }
+    }
+
+    if (
+      rawProposals.length > 1 ||
+      (isUserAskingBatch && rawProposals.length > 0) ||
+      action === 'BATCH_CHANGES'
+    ) {
+      action = 'BATCH_CHANGES'
+    }
+
+    if (isUserAskingToCreate && action === 'UPDATE_SLIDE') {
+      action = 'CREATE_SLIDE'
+    }
+
+    // Chuẩn hóa từng proposal trong mảng
+    const proposals: AiSlideProposal[] = rawProposals.map((p, idx) => {
+      let pAction: 'CREATE_SLIDE' | 'UPDATE_SLIDE' =
+        p.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
+      if (isUserAskingToCreate || action === 'BATCH_CHANGES') {
+        pAction = 'CREATE_SLIDE'
+      }
+      const pTargetIndex =
+        typeof p.targetSlideIndex === 'number' &&
+        p.targetSlideIndex >= 0 &&
+        p.targetSlideIndex < context.totalSlides
+          ? p.targetSlideIndex
+          : context.currentSlideIndex
+      const slideData = p.proposedSlide || {}
+      const slideTitle = String(slideData.title || '').toLowerCase()
+      const slideHeader = String(slideData.header || '').toLowerCase()
+      const hasCodeSignal =
+        Boolean(slideData.codeSnippet) ||
+        Boolean(slideData.code) ||
+        slideTitle.includes('code') ||
+        slideTitle.includes('cài đặt') ||
+        slideHeader.includes('code')
+
+      const normalizedSlide: Record<string, unknown> = {
+        ...slideData,
+        bullets: Array.isArray(slideData.bullets) ? slideData.bullets : [],
+        layout:
+          (slideData.layout as string) ||
+          (slideData.contentLayout as string) ||
+          (hasCodeSignal ? 'code' : 'cards'),
+        id: (slideData.id as string) || `slide-${crypto.randomUUID()}`
+      }
+      const existingComps = normalizedSlide.components
+      const slideComps =
+        Array.isArray(existingComps) && existingComps.length > 0
+          ? existingComps
+          : buildSlideComponents(normalizedSlide, context.theme)
+
+      return {
+        id: `prop-${Date.now()}-${idx}`,
+        action: pAction,
+        targetSlideIndex: pTargetIndex,
+        proposedSlide: {
+          ...normalizedSlide,
+          components: slideComps
+        },
+        summary: p.summary?.trim() || `Đề xuất cho Slide ${pTargetIndex + 1}`
+      }
+    })
+
+    // Sắp xếp proposals theo targetSlideIndex tăng dần để đảm bảo thứ tự chèn slide chuẩn xác
+    proposals.sort((a, b) => a.targetSlideIndex - b.targetSlideIndex)
+
+    const primaryProposal = proposals[0]
+    const targetSlideIndex = primaryProposal
+      ? primaryProposal.targetSlideIndex
+      : typeof parsed.targetSlideIndex === 'number' &&
+          parsed.targetSlideIndex >= 0 &&
+          parsed.targetSlideIndex < context.totalSlides
+        ? parsed.targetSlideIndex
+        : context.currentSlideIndex
+
+    const proposedSlide = primaryProposal
+      ? primaryProposal.proposedSlide
+      : undefined
+
+    return {
+      reply,
+      action,
+      targetSlideIndex,
+      proposedSlide,
+      proposals,
+      updatedSummary: parsed.updatedSummary?.trim()
+    }
+  } catch (err) {
+    if (err instanceof AppError) throw err
+    logger.error({ err }, 'ai.chatAndProposeSlideEdit failed')
     throw new AppError('Lỗi kết nối tới dịch vụ AI của Google', 502)
   }
 }

@@ -32,6 +32,7 @@ export const generationApi = {
     lectureId?: string
     title: string
     prompt: string
+    theme?: string
     outline: Outline
   }): Promise<CreatedLectureResult> =>
     (await apiClient.post<{ data: CreatedLectureResult }>('/lectures', data))

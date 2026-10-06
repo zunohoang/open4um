@@ -1,40 +1,162 @@
-import type { Slide, SlideComponent, SlideContentItem } from '@/lib/types'
-import { getThemeById } from '../constants/theme-options'
+export interface SlideTheme {
+  id: string
+  name: string
+  description: string
+  background: string
+  cardBackground: string
+  cardBorder: string
+  textPrimary: string
+  textSecondary: string
+  accentColor: string
+  headingFont: string
+  bodyFont: string
+  isDark?: boolean
+}
+
+export const THEME_PRESETS: SlideTheme[] = [
+  {
+    id: 'classic-editorial',
+    name: 'Giấy ngà & Mực đậm',
+    description: 'Biên tập học thuật cổ điển, trang nhã, tương phản dịu mắt',
+    background: '#fbf8f2',
+    cardBackground: '#f3ece0',
+    cardBorder: '#e5d9c7',
+    textPrimary: '#1c1917',
+    textSecondary: '#57534e',
+    accentColor: '#c45b3f',
+    headingFont: 'display',
+    bodyFont: 'sans',
+    isDark: false
+  },
+  {
+    id: 'modern-obsidian',
+    name: 'Dark Mode Công nghệ',
+    description: 'Nền tối cao cấp, màu nhấn Cyan nổi bật, hiện đại và lôi cuốn',
+    background: '#0f172a',
+    cardBackground: '#1e293b',
+    cardBorder: '#334155',
+    textPrimary: '#f8fafc',
+    textSecondary: '#94a3b8',
+    accentColor: '#38bdf8',
+    headingFont: 'jakarta',
+    bodyFont: 'inter',
+    isDark: true
+  },
+  {
+    id: 'clean-minimalist',
+    name: 'Tối giản thanh lịch',
+    description:
+      'Nền trắng thuần khiết, điểm nhấn Indigo sắc sảo, phong cách Apple',
+    background: '#ffffff',
+    cardBackground: '#f8fafc',
+    cardBorder: '#e2e8f0',
+    textPrimary: '#0f172a',
+    textSecondary: '#64748b',
+    accentColor: '#4f46e5',
+    headingFont: 'inter',
+    bodyFont: 'roboto',
+    isDark: false
+  },
+  {
+    id: 'ocean-emerald',
+    name: 'Lục bảo học thuật',
+    description: 'Tone xanh lục bảo quý phái, sư phạm và trang trọng',
+    background: '#072b24',
+    cardBackground: '#0e3830',
+    cardBorder: '#1b564a',
+    textPrimary: '#ffffff',
+    textSecondary: '#a7f3d0',
+    accentColor: '#34d399',
+    headingFont: 'montserrat',
+    bodyFont: 'inter',
+    isDark: true
+  },
+  {
+    id: 'warm-coral',
+    name: 'San hô sáng tạo',
+    description:
+      'Tone ấm áp nhiệt huyết, phù hợp cho workshop và thuyết trình dự án',
+    background: '#fff7ed',
+    cardBackground: '#ffedd5',
+    cardBorder: '#fed7aa',
+    textPrimary: '#431407',
+    textSecondary: '#9a3412',
+    accentColor: '#ea580c',
+    headingFont: 'comfortaa',
+    bodyFont: 'jakarta',
+    isDark: false
+  }
+]
+
+export const DEFAULT_THEME_ID = 'classic-editorial'
+
+export const getThemeById = (id?: string | null): SlideTheme => {
+  return THEME_PRESETS.find((t) => t.id === id) || THEME_PRESETS[0]
+}
+
+export interface ServerSlideComponent {
+  id: string
+  type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote' | 'shape' | 'image'
+  content: string
+  x: number
+  y: number
+  width?: number
+  height?: number
+  fontSize?: number
+  fontWeight?: 'normal' | 'bold'
+  fontStyle?: 'normal' | 'italic'
+  textDecoration?: 'none' | 'underline'
+  textAlign?: 'left' | 'center' | 'right'
+  color?: string
+  fillColor?: string
+  borderColor?: string
+  borderWidth?: number
+  borderRadius?: number
+  shapeType?: string
+  imageUrl?: string
+  fontFamily?: string
+  textCase?: 'none' | 'uppercase'
+}
 
 /**
- * Lấy danh sách components của slide. Nếu slide đã có components lưu trong database,
- * trả về trực tiếp để người dùng chỉnh sửa tự do ("edit từ đầu").
- * Nếu chưa có (hoặc tạo mới), sinh ra các SlideComponent chuẩn theo bố cục của slide
- * và Theme đã chọn cho bài giảng:
- * - Hỗ trợ hệ thống bố cục phong phú: split-highlight, metrics-grid, quad-grid, horizontal-rows, two-column, steps, cards, headline.
- * - Tự động tính toán xếp tầng theo chiều dọc (Dynamic Vertical Stacking) chống đè chữ 100%.
+ * Sinh danh sách components thực tế cho slide dựa trên Theme của bài giảng
+ * và layout trực quan phong phú có các khối hình nền vuông/chữ nhật bo góc (Cards, Two-Column, Steps, Quote, Headline).
+ * Tự động tính toán xếp tầng (Vertical Stacking) chống đè chữ 100%.
  */
-export const getSlideComponents = (
-  slide: Slide,
-  themeId?: string | null
-): SlideComponent[] => {
-  if (Array.isArray(slide.components) && slide.components.length > 0) {
-    return slide.components
+export const buildSlideComponents = (
+  slide: Record<string, unknown>,
+  themeId?: string
+): ServerSlideComponent[] => {
+  const theme = getThemeById(themeId)
+  const comps: ServerSlideComponent[] = []
+  const slideId = (slide.id as string) || `slide-${Date.now()}`
+  const title = ((slide.title as string) || 'Tiêu đề slide').trim()
+  const subtitle = ((slide.subtitle as string) || '').trim()
+  const header = ((slide.header as string) || '').trim()
+  const footer = ((slide.footer as string) || '').trim()
+  const layout = (
+    (slide.layout as string) ||
+    (slide.contentLayout as string) ||
+    'cards'
+  ).toLowerCase()
+  const titleAlign = ((slide.titleAlign as string) ||
+    (layout === 'headline' || layout === 'quote' ? 'center' : 'left')) as
+    'left' | 'center' | 'right'
+  const titleSize =
+    (slide.titleSize as string) || (layout === 'headline' ? 'xl' : 'md')
+
+  type Item = {
+    title: string
+    description: string
+    tag?: string
+    stat?: string
+    code?: string
   }
-
-  const theme = getThemeById(themeId || slide.theme)
-  const comps: SlideComponent[] = []
-  const slideId = slide.id || `slide-${Date.now()}`
-  const title = (slide.title || 'Tiêu đề slide').trim()
-  const subtitle = (slide.subtitle || '').trim()
-  const header = (slide.header || '').trim()
-  const footer = (slide.footer || '').trim()
-  const layout = (slide.layout || slide.contentLayout || 'cards').toLowerCase()
-  const titleAlign =
-    slide.titleAlign || (layout === 'headline' ? 'center' : 'left')
-  const titleSize = slide.titleSize || (layout === 'headline' ? 'xl' : 'md')
-
-  type Item = SlideContentItem
   let items: Item[] = []
   if (Array.isArray(slide.contentItems) && slide.contentItems.length > 0) {
-    items = slide.contentItems
+    items = slide.contentItems as Item[]
   } else if (Array.isArray(slide.bullets) && slide.bullets.length > 0) {
-    items = slide.bullets
+    items = (slide.bullets as string[])
       .filter((b) => Boolean(b && b.trim()))
       .map((b, idx) => {
         const clean = b.trim()
@@ -233,6 +355,8 @@ export const getSlideComponents = (
     )
   )
   const contentHeight = Math.max(38, Math.min(52, 88 - startY))
+
+  // 6. CÁC DẠNG BỐ CỤC HÌNH NỀN HỘP THẺ (CARD SHAPES / BOXES)
 
   // 6. CÁC DẠNG BỐ CỤC HÌNH NỀN HỘP THẺ TRỰC QUAN ĐA DẠNG
 
@@ -1134,7 +1258,7 @@ export const getSlideComponents = (
 
   // H. FALLBACK NẾU KHÔNG CÓ ITEMS
   const bulletsContent = Array.isArray(slide.bullets)
-    ? slide.bullets.join('\n')
+    ? (slide.bullets as string[]).join('\n')
     : ''
   if (bulletsContent.trim()) {
     comps.push({
@@ -1152,95 +1276,4 @@ export const getSlideComponents = (
   }
 
   return comps
-}
-
-/**
- * Đồng bộ màu sắc và font chữ của các component theo Theme mới
- */
-export const syncSlideWithTheme = (slide: Slide, themeId: string): Slide => {
-  const theme = getThemeById(themeId)
-  if (!slide.components || slide.components.length === 0) {
-    return { ...slide, theme: themeId }
-  }
-
-  const updatedComps = slide.components.map((comp) => {
-    if (comp.type === 'title') {
-      return {
-        ...comp,
-        color: theme.textPrimary,
-        fontFamily: theme.headingFont
-      }
-    }
-    if (comp.type === 'subtitle') {
-      return {
-        ...comp,
-        color: theme.textSecondary,
-        fontFamily: theme.bodyFont
-      }
-    }
-    if (comp.type === 'shape') {
-      if (
-        comp.shapeType === 'line' ||
-        comp.id.startsWith('hero-tag-bg-') ||
-        comp.id.startsWith('step-badge-') ||
-        comp.id.startsWith('row-badge-')
-      ) {
-        return {
-          ...comp,
-          fillColor: theme.accentColor,
-          borderColor: theme.accentColor
-        }
-      }
-      if (comp.id.startsWith('hero-bg-')) {
-        return {
-          ...comp,
-          fillColor: theme.cardBackground,
-          borderColor: theme.accentColor
-        }
-      }
-      return {
-        ...comp,
-        fillColor:
-          comp.fillColor === 'transparent'
-            ? 'transparent'
-            : theme.cardBackground,
-        borderColor: theme.cardBorder
-      }
-    }
-    if (comp.type === 'bullets' || comp.type === 'text') {
-      const isHeader = comp.id.startsWith('header-')
-      const isFooter = comp.id.startsWith('footer-')
-      const isMetricNum = comp.id.startsWith('metric-num-')
-      const isBadgeNum =
-        comp.id.startsWith('step-num-') ||
-        comp.id.startsWith('hero-tag-') ||
-        comp.id.startsWith('row-num-')
-
-      if (isBadgeNum) {
-        return { ...comp, color: '#ffffff' }
-      }
-      if (isMetricNum) {
-        return { ...comp, color: theme.accentColor }
-      }
-
-      return {
-        ...comp,
-        color: isHeader
-          ? theme.accentColor
-          : isFooter
-            ? theme.textSecondary
-            : theme.textPrimary,
-        fontFamily: comp.id.includes('title')
-          ? theme.headingFont
-          : theme.bodyFont
-      }
-    }
-    return comp
-  })
-
-  return {
-    ...slide,
-    theme: themeId,
-    components: updatedComps
-  }
 }

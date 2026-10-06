@@ -76,17 +76,46 @@ export interface SlideComponent {
     | string
 }
 
+export type ContentLayoutType =
+  | 'cards'
+  | 'two-column'
+  | 'steps'
+  | 'split-highlight'
+  | 'metrics-grid'
+  | 'quad-grid'
+  | 'horizontal-rows'
+  | 'headline'
+  | 'standard'
+  | 'code'
+
+export interface SlideContentItem {
+  title: string
+  description: string
+  tag?: string
+  icon?: string
+  stat?: string
+  code?: string
+}
+
 export interface Slide {
   id: string
   title: string
-  bullets: string[]
   subtitle?: string
-  layout?: 'standard' | 'two-column' | 'quote' | 'headline'
+  header?: string
+  footer?: string
+  contentLayout?: ContentLayoutType
+  contentItems?: SlideContentItem[]
+  bullets: string[]
+  layout?: ContentLayoutType
+  codeSnippet?: string
+  codeLanguage?: string
   titleAlign?: 'left' | 'center' | 'right'
   titleSize?: 'sm' | 'md' | 'lg' | 'xl'
   bulletStyle?: 'disc' | 'decimal' | 'dash' | 'none'
   components?: SlideComponent[]
   speakerNotes?: string
+  theme?: string
+  backgroundColor?: string
   [key: string]: unknown
 }
 
@@ -96,8 +125,11 @@ export interface Lecture {
   folderId: string | null
   title: string
   prompt: string
+  theme?: string
   outline?: Outline | null
   slides: Slide[]
+  contextSummary?: string
+  sourceMaterial?: string
   deletedAt: string | null
   createdAt: string
   updatedAt: string

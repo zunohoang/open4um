@@ -6,11 +6,13 @@ import { UserModel } from '@/models/user.model'
 import { getCreditConfig } from '@/services/admin.service'
 import { FolderModel } from '@/models/folder.model'
 import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
+import { buildSlideComponents } from '@/constants/theme-options'
 import {
   generateOutlineFromPrompt,
   refineOutlineWithFeedback,
   generateSlidesFromOutline,
   editSlideWithInstruction,
+  chatAndProposeSlideEdit,
   type GeneratedOutline
 } from '@/services/ai.service'
 
@@ -107,6 +109,7 @@ export const createLecture = async (
     lectureId?: string
     title: string
     prompt?: string
+    theme?: string
     folderId?: string | null
     outline: GeneratedOutline
   }
@@ -134,12 +137,17 @@ export const createLecture = async (
   const creditSpent = requiredCredit
   user.creditBalance = Math.max(0, user.creditBalance - creditSpent)
 
+  const selectedTheme = data.theme || 'classic-editorial'
   const payload = {
     userId,
     title: data.title,
     prompt: data.prompt ?? '',
+    theme: selectedTheme,
     outline: data.outline,
-    slides,
+    slides: slides.map((s) => ({
+      ...s,
+      components: buildSlideComponents(s, selectedTheme)
+    })),
     folderId: data.folderId ?? null
   }
 
@@ -170,21 +178,28 @@ export const createLecture = async (
 export const createBlankLecture = async (
   userId: string,
   title: string,
+  theme?: string,
   folderId?: string | null
 ) => {
   if (folderId) {
     const folder = await FolderModel.findOne({ _id: folderId, userId })
     if (!folder) throw new AppError('Không tìm thấy thư mục', 404)
   }
+  const selectedTheme = theme || 'classic-editorial'
+  const blankSlide = {
+    id: `slide-${crypto.randomUUID()}`,
+    title: '',
+    bullets: []
+  }
   return LectureModel.create({
     userId,
     title,
+    theme: selectedTheme,
     folderId: folderId ?? null,
     slides: [
       {
-        id: `slide-${crypto.randomUUID()}`,
-        title: '',
-        bullets: []
+        ...blankSlide,
+        components: buildSlideComponents(blankSlide, selectedTheme)
       }
     ]
   })
@@ -266,7 +281,10 @@ export const updateLecture = async (
   data: {
     title?: string
     slides?: unknown[]
+    theme?: string
     folderId?: string | null
+    contextSummary?: string
+    sourceMaterial?: string
   }
 ) => {
   const lecture = await findOwnedLecture(userId, id)
@@ -278,7 +296,12 @@ export const updateLecture = async (
 
   if (data.title !== undefined) lecture.set('title', data.title)
   if (data.slides !== undefined) lecture.set('slides', data.slides)
+  if (data.theme !== undefined) lecture.set('theme', data.theme)
   if (data.folderId !== undefined) lecture.set('folderId', data.folderId)
+  if (data.contextSummary !== undefined)
+    lecture.set('contextSummary', data.contextSummary)
+  if (data.sourceMaterial !== undefined)
+    lecture.set('sourceMaterial', data.sourceMaterial)
 
   await lecture.save()
   return lecture
@@ -513,5 +536,176 @@ export const exportLecture = async (userId: string, id: string) => {
     title: lecture.title,
     downloadUrl,
     data: exportBundle
+  }
+}
+
+export const aiChatInEditor = async (
+  userId: string,
+  lectureId: string,
+  payload: {
+    message: string
+    slideId?: string
+    selectedCompId?: string
+    sourceMaterial?: string
+    history?: Array<{ role: 'user' | 'assistant'; text: string }>
+  }
+) => {
+  const lecture = await findOwnedLecture(userId, lectureId)
+  if (lecture.deletedAt) throw new AppError('Bài giảng đã bị xóa', 404)
+
+  const config = await getCreditConfig()
+  const user = await UserModel.findById(userId)
+  if (!user) throw new AppError('Tài khoản không tồn tại', 404)
+  if (user.creditBalance < config.pricePerAiEdit) {
+    throw new AppError('Không đủ credit để sử dụng trợ lý AI', 402)
+  }
+
+  const slides = (lecture.slides || []) as Array<Record<string, unknown>>
+  const targetSlideIndex = payload.slideId
+    ? slides.findIndex((s) => s && s.id === payload.slideId)
+    : 0
+
+  const activeIndex = targetSlideIndex >= 0 ? targetSlideIndex : 0
+  const currentSlide = slides[activeIndex] || {}
+  const prevSlide = activeIndex > 0 ? slides[activeIndex - 1] : undefined
+  const nextSlide =
+    activeIndex < slides.length - 1 ? slides[activeIndex + 1] : undefined
+
+  let selectedElement: Record<string, unknown> | undefined
+  if (payload.selectedCompId && Array.isArray(currentSlide.components)) {
+    selectedElement = (
+      currentSlide.components as Array<Record<string, unknown>>
+    ).find((c) => c && c.id === payload.selectedCompId)
+  }
+
+  const outlineOverview = slides
+    .map(
+      (s, idx) => `Slide ${idx + 1}: ${String(s.title || 'Không có tiêu đề')}`
+    )
+    .join('\n')
+
+  const slidesCatalog = slides.map((s, idx) => ({
+    slideNumber: idx + 1,
+    id: String(s.id || `slide-${idx + 1}`),
+    title: String(s.title || 'Không có tiêu đề'),
+    bullets: Array.isArray(s.bullets) ? (s.bullets as string[]) : [],
+    layout: String(s.layout || 'standard')
+  }))
+
+  let initialSummary = (lecture.get('contextSummary') as string) || ''
+  if (!initialSummary && slidesCatalog.length > 0) {
+    initialSummary =
+      `Bài giảng "${lecture.title}" gồm ${slidesCatalog.length} slides: ` +
+      slidesCatalog.map((s) => `Slide ${s.slideNumber}: ${s.title}`).join('; ')
+  }
+
+  if (payload.sourceMaterial !== undefined) {
+    lecture.set('sourceMaterial', payload.sourceMaterial)
+  }
+
+  const aiResult = await chatAndProposeSlideEdit(payload.message, {
+    presentationTitle: lecture.title,
+    totalSlides: slides.length,
+    currentSlideIndex: activeIndex,
+    currentSlide,
+    surroundingSlides: {
+      prev: prevSlide,
+      next: nextSlide
+    },
+    slidesCatalog,
+    outlineOverview,
+    contextSummary: initialSummary,
+    selectedElement,
+    sourceMaterial:
+      payload.sourceMaterial || (lecture.get('sourceMaterial') as string) || '',
+    history: payload.history,
+    theme: (lecture.get('theme') as string) || undefined
+  })
+
+  user.creditBalance -= config.pricePerAiEdit
+
+  if (aiResult.updatedSummary) {
+    lecture.set('contextSummary', aiResult.updatedSummary)
+  }
+
+  await Promise.all([
+    user.save(),
+    lecture.save(),
+    AiUsageLogModel.create({
+      userId,
+      prompt: payload.message,
+      slideCount: 1,
+      creditSpent: config.pricePerAiEdit
+    })
+  ])
+
+  const targetIdx =
+    typeof aiResult.targetSlideIndex === 'number' &&
+    aiResult.targetSlideIndex >= 0 &&
+    aiResult.targetSlideIndex < slides.length
+      ? aiResult.targetSlideIndex
+      : activeIndex
+
+  let proposedSlide = aiResult.proposedSlide
+  if (
+    proposedSlide &&
+    (aiResult.action === 'UPDATE_SLIDE' ||
+      aiResult.action === 'UPDATE_CURRENT_SLIDE')
+  ) {
+    const baseSlide = slides[targetIdx] || {}
+    const baseComps =
+      Array.isArray(baseSlide.components) && baseSlide.components.length > 0
+        ? (baseSlide.components as Array<Record<string, unknown>>)
+        : undefined
+
+    if (baseComps && baseComps.length > 0) {
+      const newTitle =
+        typeof proposedSlide.title === 'string'
+          ? proposedSlide.title
+          : undefined
+      const newSubtitle =
+        typeof proposedSlide.subtitle === 'string'
+          ? proposedSlide.subtitle
+          : undefined
+      const newBullets = Array.isArray(proposedSlide.bullets)
+        ? (proposedSlide.bullets as string[])
+        : undefined
+
+      const updatedComps = baseComps.map((c) => {
+        if (c.type === 'title' && newTitle !== undefined) {
+          return { ...c, content: newTitle }
+        }
+        if (c.type === 'subtitle' && newSubtitle !== undefined) {
+          return { ...c, content: newSubtitle }
+        }
+        if (c.type === 'bullets' && newBullets !== undefined) {
+          return { ...c, content: newBullets.join('\n') }
+        }
+        return c
+      })
+      proposedSlide = {
+        ...baseSlide,
+        ...proposedSlide,
+        id: baseSlide.id || proposedSlide.id,
+        components: updatedComps
+      }
+    } else {
+      proposedSlide = {
+        ...baseSlide,
+        ...proposedSlide,
+        id: baseSlide.id || proposedSlide.id
+      }
+    }
+  }
+
+  return {
+    reply: aiResult.reply,
+    action: aiResult.action,
+    targetSlideIndex: targetIdx,
+    proposedSlide,
+    proposals: aiResult.proposals,
+    updatedSummary: aiResult.updatedSummary,
+    creditSpent: config.pricePerAiEdit,
+    creditBalance: user.creditBalance
   }
 }

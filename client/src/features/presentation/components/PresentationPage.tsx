@@ -1,5 +1,9 @@
 import { editorApi } from '@/features/slide-editor/api/editor.api'
-import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
+import {
+  FONT_MAP,
+  getThemeById
+} from '@/features/slide-editor/constants/theme-options'
+import { getSlideComponents } from '@/features/slide-editor/utils/slide'
 import type { Lecture, SlideComponent } from '@/lib/types'
 import { BrandLogo } from '@/components/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -174,13 +178,22 @@ export const PresentationPage = ({
     )
   }
 
+  const slide = lecture.slides[index]
+  const theme = getThemeById(slide?.theme || lecture.theme)
+  const components =
+    Array.isArray(slide?.components) && slide.components.length > 0
+      ? slide.components
+      : slide
+        ? getSlideComponents(slide, theme.id)
+        : []
+
   const renderShape = (comp: SlideComponent) => {
     const shapeType = comp.shapeType || 'rectangle'
     const fill =
       comp.fillColor === 'transparent'
         ? 'transparent'
-        : comp.fillColor || '#c45b3f'
-    const stroke = comp.borderColor || '#173c39'
+        : comp.fillColor || theme.cardBackground
+    const stroke = comp.borderColor || theme.cardBorder
     const strokeW = comp.borderWidth ?? 0
     const radius = comp.borderRadius ?? 0
 
@@ -263,8 +276,6 @@ export const PresentationPage = ({
     }
   }
 
-  const slide = lecture.slides[index]
-
   return (
     <main
       onClick={handleScreenClick}
@@ -275,11 +286,13 @@ export const PresentationPage = ({
       {/* Khung Slide chuẩn tỷ lệ 16:9 tối đa kích thước màn hình */}
       <div
         ref={slideRef}
-        className='relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150 bg-stone-50 text-emerald-950'
+        className='relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150'
         style={{
           aspectRatio: '16 / 9',
           width: 'min(96vw, calc(96vh * 16 / 9))',
-          height: 'min(96vh, calc(96vw * 9 / 16))'
+          height: 'min(96vh, calc(96vw * 9 / 16))',
+          backgroundColor: slide?.backgroundColor || theme.background,
+          color: theme.textPrimary
         }}
       >
         {/* Số thứ tự slide kín đáo, thanh lịch */}
@@ -287,9 +300,9 @@ export const PresentationPage = ({
           {index + 1} / {lecture.slides.length}
         </span>
 
-        {Array.isArray(slide?.components) ? (
+        {components.length > 0 ? (
           <div className='relative w-full flex-1'>
-            {slide.components.map((comp) => (
+            {components.map((comp) => (
               <div
                 key={comp.id}
                 style={{
@@ -317,7 +330,15 @@ export const PresentationPage = ({
                   fontStyle: comp.fontStyle ?? 'normal',
                   textDecoration: comp.textDecoration ?? 'none',
                   textAlign: comp.textAlign ?? 'left',
-                  color: comp.color || '#064e3b',
+                  color:
+                    comp.color &&
+                    !['#173c39', '#1c1917', '#000000', '#064e3b'].includes(
+                      comp.color.toLowerCase()
+                    )
+                      ? comp.color
+                      : theme.isDark
+                        ? theme.textPrimary
+                        : comp.color || theme.textPrimary,
                   lineHeight: 1.3,
                   fontFamily:
                     FONT_MAP[comp.fontFamily || 'sans'] ||
@@ -345,17 +366,17 @@ export const PresentationPage = ({
                       .split('\n')
                       .filter((s) => s.trim())
                       .map((bullet, idx) => (
-                        <li key={idx} className='break-words'>
+                        <li key={idx} className='wrap-break-word'>
                           {bullet}
                         </li>
                       ))}
                   </ul>
                 ) : comp.type === 'quote' ? (
-                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl break-words'>
+                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl wrap-break-word'>
                     “ {comp.content} ”
                   </div>
                 ) : (
-                  <div className='break-words'>{comp.content}</div>
+                  <div className='wrap-break-word'>{comp.content}</div>
                 )}
               </div>
             ))}
@@ -389,11 +410,7 @@ export const PresentationPage = ({
               )}
             </div>
 
-            {slide?.layout === 'quote' ? (
-              <div className='my-8 border-y border-stone-300/40 py-6 text-center font-display text-2xl italic leading-relaxed sm:text-4xl'>
-                “ {(slide.bullets ?? []).join(' ')} ”
-              </div>
-            ) : slide?.layout === 'two-column' ? (
+            {slide?.layout === 'two-column' ? (
               <div className='mt-8 grid grid-cols-2 gap-8'>
                 <div className='space-y-3 border-r border-stone-300/30 pr-4'>
                   {(slide?.bullets ?? [])
@@ -403,7 +420,10 @@ export const PresentationPage = ({
                         key={idx}
                         className='flex items-start gap-3 font-sans text-base sm:text-xl'
                       >
-                        <span className='font-bold text-orange-700'>
+                        <span
+                          className='font-bold'
+                          style={{ color: theme.accentColor }}
+                        >
                           {slide?.bulletStyle === 'decimal'
                             ? `${idx + 1}.`
                             : slide?.bulletStyle === 'dash'
@@ -422,7 +442,10 @@ export const PresentationPage = ({
                         key={idx}
                         className='flex items-start gap-3 font-sans text-base sm:text-xl'
                       >
-                        <span className='font-bold text-orange-700'>
+                        <span
+                          className='font-bold'
+                          style={{ color: theme.accentColor }}
+                        >
                           {slide?.bulletStyle === 'decimal'
                             ? `${Math.ceil((slide?.bullets ?? []).length / 2) + idx + 1}.`
                             : slide?.bulletStyle === 'dash'
@@ -456,7 +479,12 @@ export const PresentationPage = ({
                   <div className='space-y-3 font-sans text-base sm:text-xl'>
                     {(slide?.bullets ?? []).map((bullet, idx) => (
                       <div key={idx} className='flex items-start gap-3'>
-                        <span className='font-bold text-orange-700'>—</span>
+                        <span
+                          className='font-bold'
+                          style={{ color: theme.accentColor }}
+                        >
+                          —
+                        </span>
                         <span>{bullet}</span>
                       </div>
                     ))}
