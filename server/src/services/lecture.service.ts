@@ -6,7 +6,7 @@ import { UserModel } from '@/models/user.model'
 import { getCreditConfig } from '@/services/admin.service'
 import { FolderModel } from '@/models/folder.model'
 import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
-import { buildSlideComponents } from '@/constants/theme-options'
+import { buildSlideComponents, THEME_PRESETS } from '@/constants/theme-options'
 import {
   generateOutlineFromPrompt,
   refineOutlineWithFeedback,
@@ -181,11 +181,23 @@ export const createBlankLecture = async (
   theme?: string,
   folderId?: string | null
 ) => {
-  if (folderId) {
-    const folder = await FolderModel.findOne({ _id: folderId, userId })
+  let selectedTheme = 'classic-editorial'
+  let targetFolderId = folderId ?? null
+
+  if (folderId === undefined && theme) {
+    if (THEME_PRESETS.some((t) => t.id === theme)) {
+      selectedTheme = theme
+    } else {
+      targetFolderId = theme
+    }
+  } else if (theme) {
+    selectedTheme = theme
+  }
+
+  if (targetFolderId) {
+    const folder = await FolderModel.findOne({ _id: targetFolderId, userId })
     if (!folder) throw new AppError('Không tìm thấy thư mục', 404)
   }
-  const selectedTheme = theme || 'classic-editorial'
   const blankSlide = {
     id: `slide-${crypto.randomUUID()}`,
     title: '',
@@ -195,7 +207,7 @@ export const createBlankLecture = async (
     userId,
     title,
     theme: selectedTheme,
-    folderId: folderId ?? null,
+    folderId: targetFolderId,
     slides: [
       {
         ...blankSlide,
