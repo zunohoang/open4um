@@ -26,6 +26,7 @@ const lectureSchema = new Schema(
     contextSummary: { type: String, default: '' },
     sourceMaterial: { type: String, default: '' },
     theme: { type: String, default: 'classic-editorial' },
+    aiChatHistory: { type: [Schema.Types.Mixed], default: [] },
     deletedAt: {
       type: Date,
       default: null,

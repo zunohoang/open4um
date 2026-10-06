@@ -38,7 +38,8 @@ export const updateLectureSchema = z.object({
   theme: z.string().optional(),
   folderId: z.string().nullable().optional(),
   contextSummary: z.string().optional(),
-  sourceMaterial: z.string().optional()
+  sourceMaterial: z.string().optional(),
+  aiChatHistory: z.array(z.record(z.string(), z.unknown())).optional()
 })
 
 export const aiEditSlideSchema = z.object({

@@ -29,6 +29,7 @@ export interface AiChatResponseData {
   proposedSlide?: Slide
   proposals?: AiSlideProposalData[]
   updatedSummary?: string
+  aiChatHistory?: Array<Record<string, unknown>>
   creditSpent: number
   creditBalance: number
 }
@@ -46,7 +47,8 @@ export const editorApi = {
           slides: lecture.slides,
           theme: lecture.theme,
           contextSummary: lecture.contextSummary,
-          sourceMaterial: lecture.sourceMaterial
+          sourceMaterial: lecture.sourceMaterial,
+          aiChatHistory: lecture.aiChatHistory
         }
       )
     ).data.data,

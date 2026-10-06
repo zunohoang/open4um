@@ -285,6 +285,7 @@ export const updateLecture = async (
     folderId?: string | null
     contextSummary?: string
     sourceMaterial?: string
+    aiChatHistory?: unknown[]
   }
 ) => {
   const lecture = await findOwnedLecture(userId, id)
@@ -302,6 +303,8 @@ export const updateLecture = async (
     lecture.set('contextSummary', data.contextSummary)
   if (data.sourceMaterial !== undefined)
     lecture.set('sourceMaterial', data.sourceMaterial)
+  if (data.aiChatHistory !== undefined)
+    lecture.set('aiChatHistory', data.aiChatHistory)
 
   await lecture.save()
   return lecture
@@ -630,7 +633,6 @@ export const aiChatInEditor = async (
 
   await Promise.all([
     user.save(),
-    lecture.save(),
     AiUsageLogModel.create({
       userId,
       prompt: payload.message,
@@ -698,12 +700,47 @@ export const aiChatInEditor = async (
     }
   }
 
+  const now = new Date()
+  const timeString = now.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+
+  const userMsg = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    role: 'user',
+    text: payload.message,
+    timestamp: timeString
+  }
+
+  const assistantMsg = {
+    id: `msg-${Date.now() + 1}-${Math.random().toString(36).slice(2, 6)}`,
+    role: 'assistant',
+    text: aiResult.reply,
+    action: aiResult.action,
+    targetSlideIndex: targetIdx,
+    proposedSlide,
+    proposals: aiResult.proposals,
+    status:
+      proposedSlide || (aiResult.proposals && aiResult.proposals.length > 0)
+        ? 'pending'
+        : undefined,
+    timestamp: timeString
+  }
+
+  const existingHistory =
+    (lecture.get('aiChatHistory') as Array<Record<string, unknown>>) || []
+  const updatedHistory = [...existingHistory, userMsg, assistantMsg]
+  lecture.set('aiChatHistory', updatedHistory)
+  await lecture.save()
+
   return {
     reply: aiResult.reply,
     action: aiResult.action,
     targetSlideIndex: targetIdx,
     proposedSlide,
     proposals: aiResult.proposals,
+    aiChatHistory: updatedHistory,
     updatedSummary: aiResult.updatedSummary,
     creditSpent: config.pricePerAiEdit,
     creditBalance: user.creditBalance

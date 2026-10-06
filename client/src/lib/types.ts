@@ -130,6 +130,7 @@ export interface Lecture {
   slides: Slide[]
   contextSummary?: string
   sourceMaterial?: string
+  aiChatHistory?: Array<Record<string, unknown>>
   deletedAt: string | null
   createdAt: string
   updatedAt: string

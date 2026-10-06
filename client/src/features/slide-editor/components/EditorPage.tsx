@@ -13,7 +13,11 @@ import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { getThemeById } from '../constants/theme-options'
-import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
+import {
+  AiChatMessage,
+  useEditorStore,
+  type AiSlideProposalItem
+} from '../store/editor.store'
 import {
   clearOfflineDraft,
   getOfflineDraft,
@@ -55,6 +59,7 @@ export const EditorPage = ({
     undo,
     redo,
     addAiMessage,
+    setAiMessages,
     updateAiMessageStatus,
     aiMessages,
     previewSlide,
@@ -114,6 +119,11 @@ export const EditorPage = ({
     lectureRef.current = lecture
   }, [lecture])
 
+  const aiMessagesRef = useRef(aiMessages)
+  useEffect(() => {
+    aiMessagesRef.current = aiMessages
+  }, [aiMessages])
+
   const clearCountdownTimers = useCallback(() => {
     if (countdownTimerRef.current) {
       clearTimeout(countdownTimerRef.current)
@@ -148,9 +158,19 @@ export const EditorPage = ({
       setSaveStatus('saving')
       clearCountdownTimers()
 
+      const payload: Lecture = {
+        ...toSave,
+        aiChatHistory:
+          toSave.aiChatHistory && toSave.aiChatHistory.length > 0
+            ? toSave.aiChatHistory
+            : (aiMessagesRef.current as unknown as Array<
+                Record<string, unknown>
+              >)
+      }
+
       // 1. Nếu không có kết nối mạng: lưu tạm vào localStorage
       if (!navigator.onLine) {
-        saveOfflineDraft(toSave)
+        saveOfflineDraft(payload)
         setSaveStatus('offline_saved')
         if (!isAuto) {
           showToast(
@@ -163,15 +183,15 @@ export const EditorPage = ({
 
       // 2. Nếu có mạng: gửi lên server
       try {
-        await editorApi.autosave(toSave)
-        clearOfflineDraft(toSave._id)
+        await editorApi.autosave(payload)
+        clearOfflineDraft(payload._id)
         setSaveStatus('saved')
         if (!isAuto) {
           showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
         }
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
-        saveOfflineDraft(toSave)
+        saveOfflineDraft(payload)
         setSaveStatus('offline_saved')
         showToast(
           'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
@@ -227,6 +247,20 @@ export const EditorPage = ({
         if (draft) clearOfflineDraft(params.id)
       }
 
+      // Khôi phục lịch sử chat AI từ dữ liệu bài giảng trên máy chủ
+      const chatHistory = draft?.lecture.aiChatHistory || loaded.aiChatHistory
+      if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
+        setAiMessages(chatHistory as unknown as AiChatMessage[])
+        try {
+          localStorage.setItem(
+            `abslider_chat_${loaded._id}`,
+            JSON.stringify(chatHistory)
+          )
+        } catch {
+          // ignore
+        }
+      }
+
       // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
       const savedIndexStr = sessionStorage.getItem(
         `open4um_last_slide_${loaded._id}`
@@ -261,13 +295,55 @@ export const EditorPage = ({
     } finally {
       setIsLoading(false)
     }
-  }, [params.id, user, setActiveSlideIndex, showToast])
+  }, [params.id, user, setActiveSlideIndex, setAiMessages, showToast])
 
   useEffect(() => {
     if (params.id) {
       void loadLecture()
     }
   }, [params.id, loadLecture])
+
+  // Khôi phục nhanh lịch sử chat AI từ localStorage ngay khi mở bài giảng
+  useEffect(() => {
+    if (!lectureId) return
+    try {
+      const cached = localStorage.getItem(`abslider_chat_${lectureId}`)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAiMessages(parsed)
+          return
+        }
+      }
+      setAiMessages([
+        {
+          id: 'welcome-msg',
+          role: 'assistant',
+          text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
+          timestamp: new Date().toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        }
+      ])
+    } catch {
+      // ignore
+    }
+  }, [lectureId, setAiMessages])
+
+  // Tự động lưu lịch sử chat vào localStorage mỗi khi có tin nhắn mới hoặc cập nhật trạng thái
+  useEffect(() => {
+    if (!lectureId || aiMessages.length === 0) return
+    if (aiMessages.length === 1 && aiMessages[0].id === 'welcome-msg') return
+    try {
+      localStorage.setItem(
+        `abslider_chat_${lectureId}`,
+        JSON.stringify(aiMessages)
+      )
+    } catch {
+      // ignore
+    }
+  }, [lectureId, aiMessages])
 
   // Đồng bộ vị trí slide đang xem vào sessionStorage
   useEffect(() => {
@@ -864,19 +940,30 @@ export const EditorPage = ({
         status: 'pending' as const
       }))
 
-      addAiMessage({
-        role: 'assistant',
-        text: response.reply,
-        action: response.action,
-        targetSlideIndex: targetIndex,
-        proposedSlide: response.proposedSlide,
-        proposals: formattedProposals,
-        status:
-          response.proposedSlide ||
-          (formattedProposals && formattedProposals.length > 0)
-            ? 'pending'
-            : undefined
-      })
+      if (
+        response.aiChatHistory &&
+        Array.isArray(response.aiChatHistory) &&
+        response.aiChatHistory.length > 0
+      ) {
+        setAiMessages(response.aiChatHistory as unknown as AiChatMessage[])
+        setLecture((prev) =>
+          prev ? { ...prev, aiChatHistory: response.aiChatHistory } : prev
+        )
+      } else {
+        addAiMessage({
+          role: 'assistant',
+          text: response.reply,
+          action: response.action,
+          targetSlideIndex: targetIndex,
+          proposedSlide: response.proposedSlide,
+          proposals: formattedProposals,
+          status:
+            response.proposedSlide ||
+            (formattedProposals && formattedProposals.length > 0)
+              ? 'pending'
+              : undefined
+        })
+      }
 
       if (response.proposals && response.proposals.length > 1) {
         // Nhiều đề xuất (BATCH_CHANGES): preview slide đầu tiên
@@ -941,6 +1028,10 @@ export const EditorPage = ({
     updateAiMessageStatus(messageId, 'accepted')
     recordHistory(lecture.slides)
 
+    const updatedMessages = aiMessages.map((m) =>
+      m.id === messageId ? { ...m, status: 'accepted' as const } : m
+    )
+
     const targetIdx =
       typeof targetSlideIndex === 'number' &&
       targetSlideIndex >= 0 &&
@@ -962,14 +1053,26 @@ export const EditorPage = ({
       nextSlides = [...lecture.slides]
       const insertIdx = targetIdx + 1
       nextSlides.splice(insertIdx, 0, finalizedSlide)
-      mutateLecture({ ...lecture, slides: nextSlides })
+      mutateLecture({
+        ...lecture,
+        slides: nextSlides,
+        aiChatHistory: updatedMessages as unknown as Array<
+          Record<string, unknown>
+        >
+      })
       setActiveSlideIndex(insertIdx)
       showToast('Đã thêm slide mới từ đề xuất của AI', 'success')
     } else {
       nextSlides = lecture.slides.map((s, idx) =>
         idx === targetIdx ? finalizedSlide : s
       )
-      mutateLecture({ ...lecture, slides: nextSlides })
+      mutateLecture({
+        ...lecture,
+        slides: nextSlides,
+        aiChatHistory: updatedMessages as unknown as Array<
+          Record<string, unknown>
+        >
+      })
       setActiveSlideIndex(targetIdx)
       showToast(`Đã áp dụng chỉnh sửa AI vào Slide ${targetIdx + 1}`, 'success')
     }
@@ -986,6 +1089,20 @@ export const EditorPage = ({
     if (!lecture || proposals.length === 0) return
     updateAiMessageStatus(messageId, 'accepted')
     recordHistory(lecture.slides)
+
+    const updatedMessages = aiMessages.map((m) => {
+      if (m.id === messageId) {
+        return {
+          ...m,
+          status: 'accepted' as const,
+          proposals: m.proposals?.map((p) => ({
+            ...p,
+            status: 'accepted' as const
+          }))
+        }
+      }
+      return m
+    })
 
     const nextSlides = [...lecture.slides]
 
@@ -1026,7 +1143,13 @@ export const EditorPage = ({
       insertedOffset++
     })
 
-    mutateLecture({ ...lecture, slides: nextSlides })
+    mutateLecture({
+      ...lecture,
+      slides: nextSlides,
+      aiChatHistory: updatedMessages as unknown as Array<
+        Record<string, unknown>
+      >
+    })
     setPreviewSlide(null)
     setSelectedCompId(null)
     showToast(
@@ -1040,6 +1163,20 @@ export const EditorPage = ({
     updateAiMessageStatus(messageId, 'rejected')
     if (previewSlide) {
       setPreviewSlide(null)
+    }
+    const updatedMessages = aiMessages.map((m) =>
+      m.id === messageId ? { ...m, status: 'rejected' as const } : m
+    )
+    if (lecture) {
+      mutateLecture(
+        {
+          ...lecture,
+          aiChatHistory: updatedMessages as unknown as Array<
+            Record<string, unknown>
+          >
+        },
+        false
+      )
     }
     showToast('Đã từ chối đề xuất', 'info')
   }

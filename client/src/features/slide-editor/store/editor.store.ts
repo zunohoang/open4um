@@ -86,6 +86,7 @@ interface EditorStoreState {
     roleOrMsg: 'user' | 'assistant' | Omit<AiChatMessage, 'id' | 'timestamp'>,
     text?: string
   ) => string
+  setAiMessages: (messages: AiChatMessage[]) => void
   updateAiMessageStatus: (id: string, status: 'accepted' | 'rejected') => void
   clearAiMessages: () => void
   setPreviewSlide: (
@@ -275,6 +276,8 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     set((state) => ({ aiMessages: [...state.aiMessages, msg] }))
     return id
   },
+
+  setAiMessages: (messages: AiChatMessage[]) => set({ aiMessages: messages }),
 
   updateAiMessageStatus: (id: string, status: 'accepted' | 'rejected') => {
     set((state) => ({
