@@ -301,7 +301,10 @@ export const PresentationPage = ({
         </span>
 
         {components.length > 0 ? (
-          <div className='relative w-full flex-1' style={{ containerType: 'inline-size' }}>
+          <div
+            className='relative w-full flex-1'
+            style={{ containerType: 'inline-size' }}
+          >
             {components.map((comp) => (
               <div
                 key={comp.id}
@@ -376,7 +379,9 @@ export const PresentationPage = ({
                     “ {comp.content} ”
                   </div>
                 ) : (
-                  <div className='break-words whitespace-pre-wrap'>{comp.content}</div>
+                  <div className='break-words whitespace-pre-wrap'>
+                    {comp.content}
+                  </div>
                 )}
               </div>
             ))}

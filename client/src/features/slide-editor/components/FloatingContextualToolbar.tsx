@@ -180,7 +180,10 @@ export const FloatingContextualToolbar = ({
 
     return (
       <div className='flex h-10 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-3 shadow-md backdrop-blur-xs select-none max-w-full overflow-x-auto no-scrollbar shrink-0'>
-        <span className='flex items-center gap-1 rounded-full bg-brand-rust/10 px-2 py-0.5 text-xs font-bold text-brand-rust' title='Hình ảnh'>
+        <span
+          className='flex items-center gap-1 rounded-full bg-brand-rust/10 px-2 py-0.5 text-xs font-bold text-brand-rust'
+          title='Hình ảnh'
+        >
           <ImageIcon size={14} />
           <span className='hidden sm:inline'>Hình ảnh</span>
         </span>
@@ -400,7 +403,9 @@ export const FloatingContextualToolbar = ({
 
         {/* 3. Độ dày viền (Border Width) */}
         <div className='flex items-center gap-0.5' title='Độ dày đường viền'>
-          <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>Viền:</span>
+          <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>
+            Viền:
+          </span>
           <select
             value={borderWidth}
             onChange={(e) =>
@@ -420,7 +425,9 @@ export const FloatingContextualToolbar = ({
         {/* 4. Bo góc (Border Radius - cho chữ nhật / vuông) */}
         {['rectangle', 'square', 'rounded-rect'].includes(shapeType) && (
           <div className='flex items-center gap-0.5' title='Độ bo tròn góc'>
-            <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>Góc:</span>
+            <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>
+              Góc:
+            </span>
             <select
               value={borderRadius}
               onChange={(e) =>

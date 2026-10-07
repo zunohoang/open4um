@@ -982,7 +982,7 @@ export const EditorPage = ({
 
       if (response.proposals && response.proposals.length > 1) {
         // Nhiều đề xuất (BATCH_CHANGES): preview slide đầu tiên
-        setPreviewSlide(slideToPreview, slideAction)
+        setPreviewSlide(slideToPreview ?? null, slideAction)
         showToast(
           `AI đã đề xuất ${response.proposals.length} slide mới. Bạn có thể xem trước hoặc chấp nhận tất cả.`,
           'info'
@@ -1248,8 +1248,8 @@ export const EditorPage = ({
     try {
       const prompt = lecture.title || 'Bài giảng trình chiếu'
       const result = await generationApi.outline(prompt, {
-        sourceMaterial: lecture.sourceMaterial || undefined,
-        currentOutline: lecture.outline || undefined
+        currentOutline: lecture.outline || undefined,
+        lectureId: lecture._id
       })
       if (result.outline) {
         mutateLecture({ ...lecture, outline: result.outline })

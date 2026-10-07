@@ -10,7 +10,6 @@ import {
   FileText,
   FileUp,
   GitCommit,
-  GitCompare,
   Layers,
   Lightbulb,
   Loader2,
@@ -22,15 +21,6 @@ import {
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
-
-interface ChangedSlideItem {
-  messageId: string
-  slideIndex: number
-  slideTitle: string
-  action?: string
-  status?: 'pending' | 'accepted' | 'rejected'
-  proposedSlide: Slide
-}
 
 interface AiCopilotPanelProps {
   onApplyAiPrompt: (instruction: string) => Promise<void>
@@ -70,7 +60,7 @@ const AI_COPILOT_LOADING_STEPS = [
   'Đang kết xuất đề xuất trực quan...'
 ]
 
-type PromptToolbarTab = 'suggestions' | 'context' | 'changedSlides' | null
+type PromptToolbarTab = 'suggestions' | 'context' | null
 
 export const AiCopilotPanel = ({
   onApplyAiPrompt,
@@ -101,7 +91,9 @@ export const AiCopilotPanel = ({
   const [activePromptTab, setActivePromptTab] = useState<PromptToolbarTab>(null)
   const [attachedFileName, setAttachedFileName] = useState<string | null>(null)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
-  const [expandedProposals, setExpandedProposals] = useState<Record<string, boolean>>({})
+  const [expandedProposals, setExpandedProposals] = useState<
+    Record<string, boolean>
+  >({})
   const [copilotLoadingStepIdx, setCopilotLoadingStepIdx] = useState(0)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -143,21 +135,6 @@ export const AiCopilotPanel = ({
   }, [isAttachmentMenuOpen])
 
   if (!isAiPanelOpen) return null
-
-  // Tìm danh sách các slide đã có đề xuất hoặc thay đổi trong lịch sử
-  const changedSlides: ChangedSlideItem[] = aiMessages
-    .filter((m) => Boolean(m.proposedSlide))
-    .map((m) => ({
-      messageId: m.id,
-      slideIndex:
-        typeof m.targetSlideIndex === 'number'
-          ? m.targetSlideIndex
-          : currentSlideIndex,
-      slideTitle: m.proposedSlide?.title || 'Slide đề xuất',
-      action: m.action,
-      status: m.status,
-      proposedSlide: m.proposedSlide!
-    }))
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -212,11 +189,16 @@ export const AiCopilotPanel = ({
     } else {
       reader.onload = (event) => {
         const text = (event.target?.result as string) || ''
-        const cleaned = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ').trim()
+        const cleaned = text
+          // eslint-disable-next-line no-control-regex
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+          .trim()
         if (cleaned.length > 50) {
           setSourceMaterial(cleaned.slice(0, 50000))
         } else {
-          setSourceMaterial(`[Tệp đính kèm: ${file.name} (${Math.round(file.size / 1024)} KB)]`)
+          setSourceMaterial(
+            `[Tệp đính kèm: ${file.name} (${Math.round(file.size / 1024)} KB)]`
+          )
         }
       }
       reader.readAsText(file)
@@ -356,7 +338,18 @@ export const AiCopilotPanel = ({
                           {msg.proposals.length} slides changed
                         </span>
                         <span className='rounded bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-mono text-stone-600 font-medium'>
-                          +{msg.proposals.filter((p) => p.action === 'CREATE_SLIDE').length} ~{msg.proposals.filter((p) => p.action !== 'CREATE_SLIDE').length}
+                          +
+                          {
+                            msg.proposals.filter(
+                              (p) => p.action === 'CREATE_SLIDE'
+                            ).length
+                          }{' '}
+                          ~
+                          {
+                            msg.proposals.filter(
+                              (p) => p.action !== 'CREATE_SLIDE'
+                            ).length
+                          }
                         </span>
                       </div>
                       <button
@@ -364,7 +357,8 @@ export const AiCopilotPanel = ({
                         onClick={() =>
                           setExpandedProposals((prev) => ({
                             ...prev,
-                            [msg.id]: prev[msg.id] === undefined ? false : !prev[msg.id]
+                            [msg.id]:
+                              prev[msg.id] === undefined ? false : !prev[msg.id]
                           }))
                         }
                         className='flex items-center gap-1 text-[11px] font-medium text-stone-600 hover:text-stone-900 px-2 py-0.5 rounded hover:bg-stone-200/60 transition cursor-pointer'
@@ -403,12 +397,18 @@ export const AiCopilotPanel = ({
                                       ? 'bg-emerald-100 text-emerald-700'
                                       : 'bg-amber-100 text-amber-700'
                                   }`}
-                                  title={isCreate ? 'Tạo slide mới' : 'Chỉnh sửa slide'}
+                                  title={
+                                    isCreate
+                                      ? 'Tạo slide mới'
+                                      : 'Chỉnh sửa slide'
+                                  }
                                 >
                                   {isCreate ? '+' : '~'}
                                 </span>
                                 <span className='font-medium text-stone-800 truncate text-[11px]'>
-                                  Slide {prop.targetSlideIndex + 1}: {prop.proposedSlide.title || '(Chưa có tiêu đề)'}
+                                  Slide {prop.targetSlideIndex + 1}:{' '}
+                                  {prop.proposedSlide.title ||
+                                    '(Chưa có tiêu đề)'}
                                 </span>
                               </div>
 
@@ -441,23 +441,24 @@ export const AiCopilotPanel = ({
                                   <span>{isPropPreviewing ? 'Xem' : ''}</span>
                                 </button>
 
-                                {!isPropAccepted && msg.status !== 'accepted' && (
-                                  <button
-                                    type='button'
-                                    onClick={() =>
-                                      onAcceptProposal(
-                                        msg.id,
-                                        prop.proposedSlide,
-                                        prop.action,
-                                        prop.targetSlideIndex
-                                      )
-                                    }
-                                    className='rounded p-1 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer'
-                                    title='Chấp nhận slide này'
-                                  >
-                                    <Check size={12} />
-                                  </button>
-                                )}
+                                {!isPropAccepted &&
+                                  msg.status !== 'accepted' && (
+                                    <button
+                                      type='button'
+                                      onClick={() =>
+                                        onAcceptProposal(
+                                          msg.id,
+                                          prop.proposedSlide,
+                                          prop.action,
+                                          prop.targetSlideIndex
+                                        )
+                                      }
+                                      className='rounded p-1 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer'
+                                      title='Chấp nhận slide này'
+                                    >
+                                      <Check size={12} />
+                                    </button>
+                                  )}
                                 {isPropAccepted && (
                                   <span className='text-[10px] font-medium text-emerald-600'>
                                     ✓
@@ -557,12 +558,13 @@ export const AiCopilotPanel = ({
                           {singleSlide.subtitle}
                         </div>
                       )}
-                      {singleSlide.bullets && singleSlide.bullets.length > 0 && (
-                        <div className='text-stone-600 text-[10px] line-clamp-2'>
-                          • {singleSlide.bullets.slice(0, 2).join(' • ')}
-                          {singleSlide.bullets.length > 2 && ' ...'}
-                        </div>
-                      )}
+                      {singleSlide.bullets &&
+                        singleSlide.bullets.length > 0 && (
+                          <div className='text-stone-600 text-[10px] line-clamp-2'>
+                            • {singleSlide.bullets.slice(0, 2).join(' • ')}
+                            {singleSlide.bullets.length > 2 && ' ...'}
+                          </div>
+                        )}
                     </div>
 
                     {/* Bottom Actions Bar */}
@@ -770,7 +772,9 @@ export const AiCopilotPanel = ({
           <div className='space-y-1.5 text-[11px]'>
             <div className='rounded bg-white p-1.5 border border-blue-100'>
               <span className='font-bold text-stone-700'>Bài giảng: </span>
-              <span className='text-stone-900'>{lectureTitle || 'Bài giảng'}</span>
+              <span className='text-stone-900'>
+                {lectureTitle || 'Bài giảng'}
+              </span>
             </div>
 
             <div className='rounded bg-white p-1.5 border border-blue-100'>
@@ -786,7 +790,9 @@ export const AiCopilotPanel = ({
             </div>
 
             <div className='rounded bg-white p-1.5 border border-blue-100'>
-              <span className='font-bold text-stone-700'>Thành phần chọn: </span>
+              <span className='font-bold text-stone-700'>
+                Thành phần chọn:{' '}
+              </span>
               <span className='text-stone-800'>
                 {selectedComponentName || 'Toàn bộ slide'}
               </span>
@@ -794,7 +800,9 @@ export const AiCopilotPanel = ({
 
             {contextSummary && (
               <div className='rounded bg-white p-1.5 border border-blue-100'>
-                <span className='font-bold text-stone-700'>Tóm tắt cốt lõi: </span>
+                <span className='font-bold text-stone-700'>
+                  Tóm tắt cốt lõi:{' '}
+                </span>
                 <p className='text-stone-600 text-[10px] leading-relaxed mt-0.5'>
                   {contextSummary}
                 </p>
@@ -836,7 +844,8 @@ export const AiCopilotPanel = ({
             <div className='mb-2 flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] text-stone-700 shadow-2xs w-fit max-w-full'>
               <FileText size={12} className='text-brand-rust shrink-0' />
               <span className='truncate font-medium'>
-                {attachedFileName || `Tài liệu nguồn (${sourceMaterial.length} ký tự)`}
+                {attachedFileName ||
+                  `Tài liệu nguồn (${sourceMaterial.length} ký tự)`}
               </span>
               <button
                 type='button'

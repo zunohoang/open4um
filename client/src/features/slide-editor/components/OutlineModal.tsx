@@ -1,6 +1,6 @@
 import { Modal } from '@/components/ui/Modal'
 import type { Outline } from '@/lib/types'
-import { FileText, ListTree, Sparkles, Loader2, RefreshCw } from 'lucide-react'
+import { FileText, ListTree, Sparkles, Loader2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 interface OutlineModalProps {
@@ -72,7 +72,11 @@ export const OutlineModal = ({
               title='Yêu cầu AI phân tích và tạo lại dàn ý'
             >
               <Sparkles size={13} className='text-brand-rust' />
-              <span>{outline?.sections?.length ? 'Tạo lại với AI' : 'Tạo dàn ý với AI'}</span>
+              <span>
+                {outline?.sections?.length
+                  ? 'Tạo lại với AI'
+                  : 'Tạo dàn ý với AI'}
+              </span>
             </button>
           )}
         </div>
@@ -134,7 +138,9 @@ export const OutlineModal = ({
                   {/* Skeleton Header: Badge số + Tiêu đề section */}
                   <div className='flex items-center gap-2.5'>
                     <div className='flex h-5 w-5 items-center justify-center rounded-full bg-stone-300 text-[10px] font-mono text-white shrink-0' />
-                    <div className={`h-4 ${item.titleWidth} rounded-full bg-stone-300/80`} />
+                    <div
+                      className={`h-4 ${item.titleWidth} rounded-full bg-stone-300/80`}
+                    />
                   </div>
 
                   {/* Skeleton Bullets */}
@@ -167,7 +173,9 @@ export const OutlineModal = ({
                   <span className='flex h-5 w-5 items-center justify-center rounded-full bg-brand-rust/15 text-[10px] text-brand-rust font-mono shrink-0'>
                     {idx + 1}
                   </span>
-                  <span className='text-xs leading-snug'>{section.heading}</span>
+                  <span className='text-xs leading-snug'>
+                    {section.heading}
+                  </span>
                 </div>
                 {section.bullets && section.bullets.length > 0 && (
                   <ul className='space-y-1.5 pl-7 list-disc text-stone-600 text-[11px] leading-relaxed'>
@@ -190,7 +198,8 @@ export const OutlineModal = ({
                 Bài giảng này chưa có dữ liệu dàn ý dạng cây
               </p>
               <p className='text-[11px] text-stone-400 mt-0.5'>
-                Bạn có thể yêu cầu AI tự động phân tích và tạo dàn ý bài giảng logic ngay bây giờ.
+                Bạn có thể yêu cầu AI tự động phân tích và tạo dàn ý bài giảng
+                logic ngay bây giờ.
               </p>
             </div>
             {onRegenerateOutline && (

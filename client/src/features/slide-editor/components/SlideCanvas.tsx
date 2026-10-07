@@ -59,7 +59,9 @@ export const SlideCanvas = ({
 }: SlideCanvasProps) => {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
-  const [previewMode, setPreviewMode] = useState<'proposed' | 'original'>('proposed')
+  const [previewMode, setPreviewMode] = useState<'proposed' | 'original'>(
+    'proposed'
+  )
   const hasRecordedHistoryRef = useRef(false)
 
   // Tự động chuyển về bản đề xuất khi slide đề xuất thay đổi
@@ -475,7 +477,8 @@ export const SlideCanvas = ({
 
   const isViewingOriginal =
     isPreview && Boolean(originalSlide) && previewMode === 'original'
-  const activeSlideData = isViewingOriginal && originalSlide ? originalSlide : slide
+  const activeSlideData =
+    isViewingOriginal && originalSlide ? originalSlide : slide
   const theme = getThemeById(activeSlideData?.theme || themeId)
   const components: SlideComponent[] =
     isViewingOriginal && originalSlide

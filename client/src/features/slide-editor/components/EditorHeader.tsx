@@ -225,8 +225,6 @@ export const EditorHeader = ({
           </button>
         )}
 
-
-
         {/* Toggle AI Copilot Panel */}
         <button
           type='button'

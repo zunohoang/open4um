@@ -600,7 +600,12 @@ export interface AiChatSlideSummary {
   title: string
   bullets: string[]
   layout: string
-  contentItems?: Array<{ title?: string; description?: string }>
+  contentItems?: Array<{
+    title?: string
+    description?: string
+    stat?: string
+    tag?: string
+  }>
 }
 
 export interface AiChatContext {
@@ -975,7 +980,9 @@ export const chatAndProposeSlideEdit = async (
         `  - Header: "${cs.header || ''}"\n` +
         `  - Tiêu đề: "${cs.title || 'Không có tiêu đề'}"\n` +
         `  - Bố cục hiện tại: "${cs.layout || cs.contentLayout || 'cards'}"\n` +
-        (itemsSummary ? `  - Các khối nội dung trên slide:\n${itemsSummary}\n` : '') +
+        (itemsSummary
+          ? `  - Các khối nội dung trên slide:\n${itemsSummary}\n`
+          : '') +
         (Array.isArray(cs.bullets) && cs.bullets.length > 0
           ? `  - Các ý chính: ${(cs.bullets as string[]).join('; ')}\n`
           : '')
@@ -1013,7 +1020,7 @@ export const chatAndProposeSlideEdit = async (
       const slideNumMatch = normalizedMessage.match(/\bslide\s*(\d+)\b/i)
       const targetIndexHint = slideNumMatch
         ? parseInt(slideNumMatch[1], 10) - 1
-        : context.currentSlideIndex ?? 0
+        : (context.currentSlideIndex ?? 0)
 
       executionDirectives.push(
         'Người dùng yêu cầu chỉnh sửa slide: Chọn "action": "UPDATE_SLIDE".',

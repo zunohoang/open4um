@@ -316,13 +316,7 @@ export const buildSlideComponents = (
     Math.ceil(title.length / charsPerLine)
   )
   const lineHeightPercent =
-    titleSize === 'xl'
-      ? 11
-      : titleSize === 'sm'
-        ? 6.5
-        : isLongTitle
-          ? 9.5
-          : 10
+    titleSize === 'xl' ? 11 : titleSize === 'sm' ? 6.5 : isLongTitle ? 9.5 : 10
   const titleHeight = estimatedTitleLines * lineHeightPercent
 
   comps.push({
@@ -533,7 +527,6 @@ export const buildSlideComponents = (
     return comps
   }
 
-
   // B. DẠNG METRICS-GRID (Các con số / chỉ số thống kê khổng lồ ấn tượng)
   if (layout === 'metrics-grid' && items.length > 0) {
     const count = Math.min(3, Math.max(2, items.length))
@@ -568,7 +561,8 @@ export const buildSlideComponents = (
       // Con số khổng lồ (Chỉ số nổi bật: tự động thích ứng kích thước & số dòng để không bao giờ đè chữ)
       const statLen = (statVal || '').length
       const isLongStat = statLen > 6
-      const statFontSize = count === 2 ? (isLongStat ? 22 : 36) : (isLongStat ? 20 : 32)
+      const statFontSize =
+        count === 2 ? (isLongStat ? 22 : 36) : isLongStat ? 20 : 32
       const charsPerLine = isLongStat ? (count === 2 ? 18 : 12) : 6
       const statLines = Math.max(1, Math.ceil(statLen / charsPerLine))
       const statH = statLines * (isLongStat ? 5.2 : 8.5)
@@ -807,7 +801,6 @@ export const buildSlideComponents = (
 
       // Tiêu đề thanh ngang
       const rTitleLen = (item.title || '').length
-      const rTitleLines = Math.max(1, Math.ceil(rTitleLen / 20))
       const rTitleY = curY + (rowH > 14 ? 3 : 2)
 
       comps.push({
@@ -829,7 +822,13 @@ export const buildSlideComponents = (
         const rDesc = item.description
         const rDescLen = rDesc.length
         const rDescFontSize =
-          rDescLen > 150 ? 10.5 : rDescLen > 110 ? 11.5 : rDescLen > 65 ? 12.5 : 13.5
+          rDescLen > 150
+            ? 10.5
+            : rDescLen > 110
+              ? 11.5
+              : rDescLen > 65
+                ? 12.5
+                : 13.5
         const rDescY = curY + (rowH > 14 ? 2.5 : 1.8)
 
         comps.push({
