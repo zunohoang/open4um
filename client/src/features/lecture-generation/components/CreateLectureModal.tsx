@@ -391,23 +391,36 @@ export const CreateLectureModal = ({
                           className='group/sec border border-stone-200 bg-stone-50/50 p-3.5 transition hover:border-stone-300 hover:bg-stone-50/80'
                         >
                           {/* Dòng tiêu đề phần */}
-                          <div className='flex items-center gap-2'>
-                            <span className='font-mono text-xs font-bold text-orange-700 shrink-0'>
+                          <div className='flex items-start gap-2'>
+                            <span className='font-mono text-xs font-bold text-orange-700 shrink-0 mt-1 select-none'>
                               {String(secIdx + 1).padStart(2, '0')}.
                             </span>
-                            <input
-                              type='text'
+                            <textarea
+                              rows={1}
                               value={sec.heading}
-                              onChange={(e) =>
+                              ref={(el) => {
+                                if (el) {
+                                  el.style.height = 'auto'
+                                  el.style.height = `${el.scrollHeight}px`
+                                }
+                              }}
+                              onChange={(e) => {
                                 handleUpdateHeading(secIdx, e.target.value)
-                              }
-                              className='flex-1 border-b border-transparent bg-transparent text-sm font-semibold text-emerald-950 font-display transition hover:border-stone-300 focus:border-orange-700 focus:bg-white focus:px-2 focus:py-1 outline-hidden'
+                                e.target.style.height = 'auto'
+                                e.target.style.height = `${e.target.scrollHeight}px`
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                }
+                              }}
+                              className='flex-1 resize-none overflow-hidden border-b border-transparent bg-transparent text-sm font-semibold text-emerald-950 font-display transition hover:border-stone-300 focus:border-orange-700 focus:bg-white focus:px-2 focus:py-1 outline-hidden leading-snug break-words'
                               placeholder='Nhập tiêu đề phần...'
                             />
                             <button
                               type='button'
                               onClick={() => handleDeleteSection(secIdx)}
-                              className='opacity-0 group-hover/sec:opacity-100 text-stone-400 hover:text-red-700 p-1 text-xs transition'
+                              className='opacity-0 group-hover/sec:opacity-100 text-stone-400 hover:text-red-700 p-1 text-xs transition mt-0.5 cursor-pointer'
                               title='Xóa phần này'
                             >
                               🗑️
@@ -419,22 +432,43 @@ export const CreateLectureModal = ({
                             {sec.bullets.map((b, bIdx) => (
                               <div
                                 key={bIdx}
-                                className='group/bullet flex items-center gap-2'
+                                className='group/bullet flex items-start gap-2'
                               >
-                                <span className='text-stone-400 text-xs shrink-0 select-none'>
+                                <span className='text-stone-400 text-xs shrink-0 select-none mt-1'>
                                   •
                                 </span>
-                                <input
-                                  type='text'
+                                <textarea
+                                  rows={1}
                                   value={b}
-                                  onChange={(e) =>
+                                  ref={(el) => {
+                                    if (el) {
+                                      el.style.height = 'auto'
+                                      el.style.height = `${el.scrollHeight}px`
+                                    }
+                                  }}
+                                  onChange={(e) => {
                                     handleUpdateBullet(
                                       secIdx,
                                       bIdx,
                                       e.target.value
                                     )
-                                  }
-                                  className='flex-1 border-b border-transparent bg-transparent text-xs text-stone-700 transition hover:border-stone-300 focus:border-orange-700 focus:bg-white focus:px-2 focus:py-0.5 outline-hidden'
+                                    e.target.style.height = 'auto'
+                                    e.target.style.height = `${e.target.scrollHeight}px`
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault()
+                                      handleAddBullet(secIdx)
+                                    } else if (
+                                      e.key === 'Backspace' &&
+                                      !b &&
+                                      sec.bullets.length > 1
+                                    ) {
+                                      e.preventDefault()
+                                      handleDeleteBullet(secIdx, bIdx)
+                                    }
+                                  }}
+                                  className='flex-1 resize-none overflow-hidden border-b border-transparent bg-transparent text-xs text-stone-700 transition hover:border-stone-300 focus:border-orange-700 focus:bg-white focus:px-2 focus:py-1 outline-hidden leading-relaxed break-words'
                                   placeholder='Nhập nội dung ý chính...'
                                 />
                                 <button
@@ -442,7 +476,7 @@ export const CreateLectureModal = ({
                                   onClick={() =>
                                     handleDeleteBullet(secIdx, bIdx)
                                   }
-                                  className='opacity-0 group-hover/bullet:opacity-100 text-stone-300 hover:text-red-600 px-1 text-xs transition'
+                                  className='opacity-0 group-hover/bullet:opacity-100 text-stone-300 hover:text-red-600 px-1 text-xs transition mt-0.5 cursor-pointer'
                                   title='Xóa ý này'
                                 >
                                   ✕

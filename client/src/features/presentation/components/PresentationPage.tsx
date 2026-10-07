@@ -301,7 +301,7 @@ export const PresentationPage = ({
         </span>
 
         {components.length > 0 ? (
-          <div className='relative w-full flex-1'>
+          <div className='relative w-full flex-1' style={{ containerType: 'inline-size' }}>
             {components.map((comp) => (
               <div
                 key={comp.id}
@@ -325,7 +325,7 @@ export const PresentationPage = ({
                       ? `${comp.height}%`
                       : undefined,
                   maxWidth: '100%',
-                  fontSize: `${Math.round((comp.fontSize ?? 20) * 1.3)}px`,
+                  fontSize: `clamp(10px, ${((comp.fontSize ?? 20) / 9.6).toFixed(3)}cqw, 80px)`,
                   fontWeight: comp.fontWeight ?? 'normal',
                   fontStyle: comp.fontStyle ?? 'normal',
                   textDecoration: comp.textDecoration ?? 'none',
@@ -366,17 +366,17 @@ export const PresentationPage = ({
                       .split('\n')
                       .filter((s) => s.trim())
                       .map((bullet, idx) => (
-                        <li key={idx} className='wrap-break-word'>
+                        <li key={idx} className='break-words'>
                           {bullet}
                         </li>
                       ))}
                   </ul>
                 ) : comp.type === 'quote' ? (
-                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl wrap-break-word'>
+                  <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl break-words'>
                     “ {comp.content} ”
                   </div>
                 ) : (
-                  <div className='wrap-break-word'>{comp.content}</div>
+                  <div className='break-words whitespace-pre-wrap'>{comp.content}</div>
                 )}
               </div>
             ))}

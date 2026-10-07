@@ -32,6 +32,7 @@ import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
 import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
+import { generationApi } from '@/features/lecture-generation/api/generation.api'
 
 interface EditorPageProps {
   initialLecture?: Lecture
@@ -90,6 +91,7 @@ export const EditorPage = ({
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
   const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
+  const [isOutlineLoading, setIsOutlineLoading] = useState(false)
 
   // Trạng thái Bật/Tắt Tự động lưu (mặc định Bật, lưu vào localStorage)
   const [isAutoSave, setIsAutoSave] = useState<boolean>(() => {
@@ -965,32 +967,35 @@ export const EditorPage = ({
         })
       }
 
+      const activeProp =
+        response.proposals && response.proposals.length > 0
+          ? response.proposals[0]
+          : undefined
+      const slideToPreview = activeProp?.proposedSlide || response.proposedSlide
+      const slideAction =
+        activeProp?.action ||
+        (response.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE')
+      const pTargetIdx =
+        activeProp?.targetSlideIndex !== undefined
+          ? activeProp.targetSlideIndex
+          : targetIndex
+
       if (response.proposals && response.proposals.length > 1) {
         // Nhiều đề xuất (BATCH_CHANGES): preview slide đầu tiên
-        const firstProp = response.proposals[0]
-        setPreviewSlide(
-          firstProp.proposedSlide,
-          firstProp.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
-        )
+        setPreviewSlide(slideToPreview, slideAction)
         showToast(
           `AI đã đề xuất ${response.proposals.length} slide mới. Bạn có thể xem trước hoặc chấp nhận tất cả.`,
           'info'
         )
-      } else if (response.proposedSlide) {
-        if (
-          targetIndex !== activeSlideIndex &&
-          response.action !== 'CREATE_SLIDE'
-        ) {
-          setActiveSlideIndex(targetIndex)
+      } else if (slideToPreview) {
+        if (pTargetIdx !== activeSlideIndex && slideAction !== 'CREATE_SLIDE') {
+          setActiveSlideIndex(pTargetIdx)
         }
-        setPreviewSlide(
-          response.proposedSlide,
-          response.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
-        )
+        setPreviewSlide(slideToPreview, slideAction)
         showToast(
-          response.action === 'CREATE_SLIDE'
+          slideAction === 'CREATE_SLIDE'
             ? 'AI đã đề xuất tạo slide mới. Bạn có thể xem trước trên Canvas.'
-            : `AI đã đề xuất thay đổi cho Slide ${targetIndex + 1}. Bạn có thể xem trước trên Canvas.`,
+            : `AI đã đề xuất thay đổi cho Slide ${pTargetIdx + 1}. Bạn có thể xem trước trên Canvas.`,
           'info'
         )
       } else {
@@ -1041,11 +1046,7 @@ export const EditorPage = ({
 
     const finalizedSlide: Slide = {
       ...proposedSlide,
-      components:
-        Array.isArray(proposedSlide.components) &&
-        proposedSlide.components.length > 0
-          ? proposedSlide.components
-          : getSlideComponents(proposedSlide, lecture.theme)
+      components: getSlideComponents(proposedSlide, lecture.theme)
     }
 
     let nextSlides: Slide[]
@@ -1113,11 +1114,7 @@ export const EditorPage = ({
         if (p.targetSlideIndex >= 0 && p.targetSlideIndex < nextSlides.length) {
           const slideWithComps: Slide = {
             ...p.proposedSlide,
-            components:
-              Array.isArray(p.proposedSlide.components) &&
-              p.proposedSlide.components.length > 0
-                ? p.proposedSlide.components
-                : getSlideComponents(p.proposedSlide, lecture.theme)
+            components: getSlideComponents(p.proposedSlide, lecture.theme)
           }
           nextSlides[p.targetSlideIndex] = slideWithComps
         }
@@ -1133,11 +1130,7 @@ export const EditorPage = ({
       )
       const slideWithComps: Slide = {
         ...p.proposedSlide,
-        components:
-          Array.isArray(p.proposedSlide.components) &&
-          p.proposedSlide.components.length > 0
-            ? p.proposedSlide.components
-            : getSlideComponents(p.proposedSlide, lecture.theme)
+        components: getSlideComponents(p.proposedSlide, lecture.theme)
       }
       nextSlides.splice(insertAt, 0, slideWithComps)
       insertedOffset++
@@ -1248,6 +1241,27 @@ export const EditorPage = ({
     else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
   }
 
+  // Tự động tạo lại Dàn ý bài giảng bằng AI khi người dùng yêu cầu
+  const handleRegenerateOutline = async () => {
+    if (!lecture) return
+    setIsOutlineLoading(true)
+    try {
+      const prompt = lecture.title || 'Bài giảng trình chiếu'
+      const result = await generationApi.outline(prompt, {
+        sourceMaterial: lecture.sourceMaterial || undefined,
+        currentOutline: lecture.outline || undefined
+      })
+      if (result.outline) {
+        mutateLecture({ ...lecture, outline: result.outline })
+        showToast('Đã tạo dàn ý bài giảng mới thành công', 'success')
+      }
+    } catch {
+      showToast('Không thể tạo lại dàn ý lúc này', 'error')
+    } finally {
+      setIsOutlineLoading(false)
+    }
+  }
+
   // MÀN HÌNH ĐANG TẢI
   if (isLoading) {
     return (
@@ -1334,27 +1348,27 @@ export const EditorPage = ({
         countdown={countdown}
         isAutoSave={isAutoSave}
         onToggleAutoSave={handleToggleAutoSave}
-        currentThemeId={lecture.theme}
-        onThemeChange={handleThemeChange}
       />
 
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
       <div className='flex flex-1 overflow-hidden'>
-        {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Upload ảnh / Mẫu slide */}
+        {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Hình khối / Upload ảnh / Mẫu slide / Giao diện */}
         <LeftSidebarRail
           onAddTextComponent={handleAddTextComponent}
           onAddImageComponent={handleAddImageComponent}
           onAddShapeComponent={handleAddShapeComponent}
           onApplyContentLayout={handleApplyContentLayout}
           outline={lecture.outline}
+          currentThemeId={lecture.theme}
+          onThemeChange={handleThemeChange}
         />
 
         {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
         <main className='relative flex min-w-0 flex-1 flex-col overflow-hidden bg-brand-paper'>
           {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
           {selectedComponent && (
-            <div className='absolute top-3 left-0 right-0 z-40 flex justify-center pointer-events-none transition-all'>
-              <div className='pointer-events-auto'>
+            <div className='absolute top-2 left-3 right-3 z-30 flex justify-center pointer-events-none transition-all'>
+              <div className='pointer-events-auto max-w-full overflow-x-auto no-scrollbar'>
                 <FloatingContextualToolbar
                   selectedComponent={selectedComponent}
                   onUpdateComponent={(patch) => {
@@ -1449,6 +1463,8 @@ export const EditorPage = ({
         onClose={() => setIsOutlineModalOpen(false)}
         outline={lecture.outline}
         lectureTitle={lecture.title}
+        isLoading={isOutlineLoading}
+        onRegenerateOutline={handleRegenerateOutline}
       />
     </div>
   )
