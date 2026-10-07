@@ -1,14 +1,19 @@
 import { useToast } from '@/components/ui/Toast'
-import type { Outline, ShapeType, Slide } from '@/lib/types'
+import type { ContentLayoutType, Outline, ShapeType } from '@/lib/types'
 import {
   AlignLeft,
-  FileText,
+  BarChart3,
+  Columns,
+  Grid2X2,
   Heading1,
   Heading2,
+  LayoutGrid,
   LayoutTemplate,
   List,
-  Quote,
+  ListOrdered,
+  Rows3,
   Shapes,
+  Sparkles,
   Trash2,
   Type,
   UploadCloud
@@ -17,12 +22,10 @@ import { useRef, useState } from 'react'
 import { useEditorStore } from '../store/editor.store'
 
 interface LeftSidebarRailProps {
-  onAddTextComponent: (
-    type: 'title' | 'subtitle' | 'text' | 'bullets' | 'quote'
-  ) => void
+  onAddTextComponent: (type: 'title' | 'subtitle' | 'text' | 'bullets') => void
   onAddImageComponent: (imageUrl: string) => void
   onAddShapeComponent: (shapeType: ShapeType) => void
-  onApplyTemplate: (layout: Slide['layout']) => void
+  onApplyContentLayout?: (layout: ContentLayoutType) => void
   outline?: Outline | null
 }
 
@@ -104,8 +107,7 @@ export const LeftSidebarRail = ({
   onAddTextComponent,
   onAddImageComponent,
   onAddShapeComponent,
-  onApplyTemplate,
-  outline
+  onApplyContentLayout
 }: LeftSidebarRailProps) => {
   const { showToast } = useToast()
   const {
@@ -236,19 +238,6 @@ export const LeftSidebarRail = ({
           <LayoutTemplate size={20} />
           <span className='mt-1 text-[10px] font-medium'>Mẫu slide</span>
         </button>
-
-        {/* Tab Dàn ý nếu có */}
-        {outline && (
-          <button
-            type='button'
-            onClick={() => setLeftRailTab('templates')}
-            className='group mt-auto flex w-15 flex-col items-center justify-center rounded-lg py-2 transition hover:bg-stone-900 hover:text-stone-200'
-            title='Xem dàn ý'
-          >
-            <FileText size={18} />
-            <span className='mt-1 text-[9px] font-medium'>Dàn ý</span>
-          </button>
-        )}
       </nav>
 
       {/* 2. DRAWER MỞ RỘNG BÊN CẠNH RAIL (EXPANDABLE DRAWER) */}
@@ -322,21 +311,6 @@ export const LeftSidebarRail = ({
                   </div>
                   <span className='text-[10px] font-mono text-stone-400'>
                     List
-                  </span>
-                </button>
-
-                {/* Trích dẫn Quote */}
-                <button
-                  type='button'
-                  onClick={() => onAddTextComponent('quote')}
-                  className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3 text-left font-serif text-xs italic text-stone-700 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
-                >
-                  <div className='flex items-center gap-2.5'>
-                    <Quote size={16} className='text-stone-500' />
-                    <span>“ Khung trích dẫn ”</span>
-                  </div>
-                  <span className='text-[10px] font-mono text-stone-400 font-normal'>
-                    Quote
                   </span>
                 </button>
               </div>
@@ -467,66 +441,165 @@ export const LeftSidebarRail = ({
           {leftRailTab === 'templates' && (
             <div className='flex flex-1 flex-col overflow-y-auto p-4'>
               <div className='mb-4'>
-                <h3 className='text-sm font-bold text-stone-900'>Mẫu bố cục</h3>
+                <h3 className='text-sm font-bold text-stone-900'>
+                  Mẫu bố cục trực quan
+                </h3>
                 <p className='text-xs text-stone-500'>
-                  Chọn bố cục để áp dụng vào slide hiện tại
+                  Chọn kiểu bố cục hiện đại để áp dụng vào slide hiện tại
                 </p>
               </div>
 
-              <div className='space-y-3'>
-                {/* Mẫu tiêu đề lớn */}
+              <div className='space-y-2.5'>
+                {/* 1. Mẫu Trọng tâm & Bổ trợ (Split Highlight) */}
                 <button
                   type='button'
-                  onClick={() => onApplyTemplate('headline')}
-                  className='w-full rounded-lg border border-stone-200 bg-stone-50 p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5'
+                  onClick={() => onApplyContentLayout?.('split-highlight')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
                 >
-                  <strong className='block text-xs font-bold text-stone-900 font-serif'>
-                    Tiêu đề nổi bật (Headline)
-                  </strong>
-                  <span className='mt-1 block text-[11px] text-stone-500'>
-                    Dành cho trang bìa hoặc thông điệp then chốt
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Sparkles size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Trọng tâm & Bổ trợ (Split)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    1 thẻ Hero nổi bật bên trái và 2 thẻ con xếp chồng bên phải
                   </span>
                 </button>
 
-                {/* Mẫu 2 cột */}
+                {/* 2. Mẫu Số liệu & Thống kê (Metrics Grid) */}
                 <button
                   type='button'
-                  onClick={() => onApplyTemplate('two-column')}
-                  className='w-full rounded-lg border border-stone-200 bg-stone-50 p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5'
+                  onClick={() => onApplyContentLayout?.('metrics-grid')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
                 >
-                  <strong className='block text-xs font-bold text-stone-900'>
-                    Hai cột đối xứng (Two Column)
-                  </strong>
-                  <span className='mt-1 block text-[11px] text-stone-500'>
-                    So sánh hoặc chia nội dung thành 2 phần cân đối
+                  <div className='flex items-center gap-2 mb-1'>
+                    <BarChart3 size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Số liệu thống kê (Metrics)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    Các con số đo lường kích thước lớn kèm nhãn và phân tích
                   </span>
                 </button>
 
-                {/* Mẫu trích dẫn */}
+                {/* 3. Mẫu Lưới 4 ô (Quad Grid 2x2) */}
                 <button
                   type='button'
-                  onClick={() => onApplyTemplate('quote')}
-                  className='w-full rounded-lg border border-stone-200 bg-stone-50 p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5'
+                  onClick={() => onApplyContentLayout?.('quad-grid')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
                 >
-                  <strong className='block text-xs font-bold text-stone-900 font-serif italic'>
-                    Trích dẫn câu nói (Quote)
-                  </strong>
-                  <span className='mt-1 block text-[11px] text-stone-500'>
-                    Nhấn mạnh trích dẫn của nhân vật hoặc bài học
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Grid2X2 size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Lưới 4 ô cân xứng (Quad Grid)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    4 ô vuông vức bo góc phân bố 2x2 (mô hình SWOT, 4 trụ cột)
                   </span>
                 </button>
 
-                {/* Mẫu chuẩn */}
+                {/* 4. Mẫu Hàng ngang xếp tầng (Horizontal Rows) */}
                 <button
                   type='button'
-                  onClick={() => onApplyTemplate('standard')}
-                  className='w-full rounded-lg border border-stone-200 bg-stone-50 p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5'
+                  onClick={() => onApplyContentLayout?.('horizontal-rows')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
                 >
-                  <strong className='block text-xs font-bold text-stone-900'>
-                    Chuẩn (Tiêu đề + Ý chính)
-                  </strong>
-                  <span className='mt-1 block text-[11px] text-stone-500'>
-                    Bố cục thông dụng nhất cho bài thuyết trình
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Rows3 size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Thanh ngang xếp tầng (Rows)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    3 thanh thẻ trải dài ngang với huy hiệu thứ tự ở đầu
+                  </span>
+                </button>
+
+                {/* 5. Mẫu Thẻ cột (Cards) */}
+                <button
+                  type='button'
+                  onClick={() => onApplyContentLayout?.('cards')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
+                >
+                  <div className='flex items-center gap-2 mb-1'>
+                    <LayoutGrid size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Thẻ cột song song (Cards)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    3 khối thẻ song song với nền bo góc, tiêu đề và mô tả
+                  </span>
+                </button>
+
+                {/* 6. Mẫu Tiến trình từng bước (Steps) */}
+                <button
+                  type='button'
+                  onClick={() => onApplyContentLayout?.('steps')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
+                >
+                  <div className='flex items-center gap-2 mb-1'>
+                    <ListOrdered size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Quy trình tuần tự (Steps)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    Các bước 01, 02, 03 đánh số thứ tự trực quan cho quy trình
+                  </span>
+                </button>
+
+                {/* 7. Mẫu Hai cột (Two Column) */}
+                <button
+                  type='button'
+                  onClick={() => onApplyContentLayout?.('two-column')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
+                >
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Columns size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Hai cột đối xứng (Two Column)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    So sánh đối xứng hoặc chia nội dung thành 2 phần cân đối
+                  </span>
+                </button>
+
+                {/* 8. Mẫu Tiêu đề lớn / Bìa (Headline) */}
+                <button
+                  type='button'
+                  onClick={() => onApplyContentLayout?.('headline')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
+                >
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Heading1 size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Tiêu đề lớn & Bìa (Headline)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    Slide mở đầu hoặc phân chia chương mới căn giữa trang trọng
+                  </span>
+                </button>
+
+                {/* 9. Mẫu Tiêu chuẩn (Standard) */}
+                <button
+                  type='button'
+                  onClick={() => onApplyContentLayout?.('standard')}
+                  className='w-full rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-brand-rust hover:bg-brand-rust/5 shadow-2xs group cursor-pointer'
+                >
+                  <div className='flex items-center gap-2 mb-1'>
+                    <AlignLeft size={15} className='text-brand-rust' />
+                    <strong className='text-xs font-bold text-stone-900 group-hover:text-brand-rust transition'>
+                      Ý chính tiêu chuẩn (Standard)
+                    </strong>
+                  </div>
+                  <span className='block text-[11px] text-stone-500'>
+                    Các ý chính phân cấp rõ ràng theo phong cách truyền thống
                   </span>
                 </button>
               </div>

@@ -23,6 +23,10 @@ const lectureSchema = new Schema(
     prompt: { type: String, default: '' },
     outline: { type: Schema.Types.Mixed, default: null },
     slides: { type: [Schema.Types.Mixed], default: [] },
+    contextSummary: { type: String, default: '' },
+    sourceMaterial: { type: String, default: '' },
+    theme: { type: String, default: 'classic-editorial' },
+    aiChatHistory: { type: [Schema.Types.Mixed], default: [] },
     deletedAt: {
       type: Date,
       default: null,

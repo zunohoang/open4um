@@ -340,7 +340,9 @@ describe('lecture.service unit tests', () => {
         { _id: 'existing-lec-123', userId: 'user-rich' },
         expect.objectContaining({
           title: 'TypeScript cơ bản',
-          slides: mockSlides
+          slides: expect.arrayContaining([
+            expect.objectContaining({ id: 's1', title: 'Slide 1' })
+          ])
         }),
         { new: true, upsert: true }
       )

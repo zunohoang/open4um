@@ -11,11 +11,30 @@ export interface UploadedImage {
   createdAt: string
 }
 
+export interface AiSlideProposalItem {
+  id: string
+  action: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
+  targetSlideIndex: number
+  proposedSlide: Slide
+  summary?: string
+  status?: 'pending' | 'accepted' | 'rejected'
+}
+
 export interface AiChatMessage {
   id: string
   role: 'user' | 'assistant'
   text: string
   timestamp: string
+  action?:
+    | 'UPDATE_CURRENT_SLIDE'
+    | 'UPDATE_SLIDE'
+    | 'CREATE_SLIDE'
+    | 'BATCH_CHANGES'
+    | 'CHAT_ONLY'
+  targetSlideIndex?: number
+  proposedSlide?: Slide
+  proposals?: AiSlideProposalItem[]
+  status?: 'pending' | 'accepted' | 'rejected'
 }
 
 interface EditorStoreState {
@@ -34,8 +53,12 @@ interface EditorStoreState {
   // Uploaded Media Gallery
   uploadedImages: UploadedImage[]
 
-  // AI Chat History
+  // AI Chat & Context State
   aiMessages: AiChatMessage[]
+  previewSlide: Slide | null
+  previewSlideAction: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+  sourceMaterial: string
+  isSourceMaterialModalOpen: boolean
 
   // Actions
   setActiveSlideIndex: (index: number) => void
@@ -59,8 +82,19 @@ interface EditorStoreState {
   removeUploadedImage: (id: string) => void
 
   // AI Actions
-  addAiMessage: (role: 'user' | 'assistant', text: string) => void
+  addAiMessage: (
+    roleOrMsg: 'user' | 'assistant' | Omit<AiChatMessage, 'id' | 'timestamp'>,
+    text?: string
+  ) => string
+  setAiMessages: (messages: AiChatMessage[]) => void
+  updateAiMessageStatus: (id: string, status: 'accepted' | 'rejected') => void
   clearAiMessages: () => void
+  setPreviewSlide: (
+    slide: Slide | null,
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+  ) => void
+  setSourceMaterial: (material: string) => void
+  setIsSourceMaterialModalOpen: (open: boolean) => void
 }
 
 const STORAGE_KEY_UPLOADS = 'open4um_user_uploaded_images'
@@ -99,13 +133,17 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     {
       id: 'welcome-msg',
       role: 'assistant',
-      text: 'Xin chào! Tôi là trợ lý slide AI. Bạn có thể chọn các gợi ý nhanh hoặc nhập chỉ dẫn để tôi hoàn thiện nội dung slide.',
+      text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
       timestamp: new Date().toLocaleTimeString('vi-VN', {
         hour: '2-digit',
         minute: '2-digit'
       })
     }
   ],
+  previewSlide: null,
+  previewSlideAction: null,
+  sourceMaterial: '',
+  isSourceMaterialModalOpen: false,
 
   setActiveSlideIndex: (index: number) => {
     set({ activeSlideIndex: Math.max(0, index), selectedCompId: null })
@@ -220,18 +258,45 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     saveUploadsToStorage(nextList)
   },
 
-  addAiMessage: (role, text) => {
-    const msg: AiChatMessage = {
-      id: `msg-${Date.now()}`,
-      role,
-      text,
-      timestamp: new Date().toLocaleTimeString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    }
+  addAiMessage: (roleOrMsg, text) => {
+    const isObject = typeof roleOrMsg === 'object'
+    const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const timestamp = new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    const msg: AiChatMessage = isObject
+      ? { ...roleOrMsg, id, timestamp }
+      : {
+          id,
+          role: roleOrMsg,
+          text: text || '',
+          timestamp
+        }
     set((state) => ({ aiMessages: [...state.aiMessages, msg] }))
+    return id
   },
 
-  clearAiMessages: () => set({ aiMessages: [] })
+  setAiMessages: (messages: AiChatMessage[]) => set({ aiMessages: messages }),
+
+  updateAiMessageStatus: (id: string, status: 'accepted' | 'rejected') => {
+    set((state) => ({
+      aiMessages: state.aiMessages.map((m) =>
+        m.id === id ? { ...m, status } : m
+      )
+    }))
+  },
+
+  clearAiMessages: () => set({ aiMessages: [] }),
+  setPreviewSlide: (
+    slide: Slide | null,
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+  ) =>
+    set({
+      previewSlide: slide,
+      previewSlideAction: action ?? (slide ? 'UPDATE_SLIDE' : null)
+    }),
+  setSourceMaterial: (sourceMaterial: string) => set({ sourceMaterial }),
+  setIsSourceMaterialModalOpen: (open: boolean) =>
+    set({ isSourceMaterialModalOpen: open })
 }))
