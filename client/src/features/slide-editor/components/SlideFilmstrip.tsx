@@ -262,7 +262,7 @@ export const SlideFilmstrip = ({
             <button
               type='button'
               onClick={() => onAddSlide(slides.length)}
-              className='flex h-20 w-28 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-stone-400 bg-stone-50 text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust cursor-pointer'
+              className='flex h-20 w-34 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-stone-400 bg-stone-50 text-stone-600 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust cursor-pointer'
               title='Thêm slide mới vào cuối bài giảng'
             >
               <Plus size={20} className='font-bold' />

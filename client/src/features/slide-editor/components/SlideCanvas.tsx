@@ -27,6 +27,18 @@ interface SlideCanvasProps {
   onExitPreview?: () => void
 }
 
+/**
+ * Chuyển đổi fontSize px sang đơn vị cqw (Container Query Width) để font chữ
+ * luôn co giãn tỷ lệ thuận 100% với kích thước khung hình Canvas 16:9.
+ * Chuẩn cơ sở: 960px chiều rộng (chuẩn slide 16:9 960x540).
+ * Ví dụ: 32px trên canvas 960px = 3.333cqw.
+ * Khi thu nhỏ canvas do mở sidebar AI, chữ tự thu nhỏ tương ứng để không bao giờ đè lên nhau.
+ */
+const getResponsiveFontSize = (fontSize: number = 20): string => {
+  const cqw = (fontSize / 9.6).toFixed(3)
+  return `clamp(8px, ${cqw}cqw, ${fontSize * 1.6}px)`
+}
+
 export const SlideCanvas = ({
   slide,
   originalSlide,
@@ -47,7 +59,15 @@ export const SlideCanvas = ({
 }: SlideCanvasProps) => {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState<'proposed' | 'original'>(
+    'proposed'
+  )
   const hasRecordedHistoryRef = useRef(false)
+
+  // Tự động chuyển về bản đề xuất khi slide đề xuất thay đổi
+  useEffect(() => {
+    setPreviewMode('proposed')
+  }, [slide?.id])
 
   // Quản lý gõ tiếng Việt (IME composition), phiên sửa văn bản (Session-based Undo) và auto-expand
   const isComposingRef = useRef(false)
@@ -90,19 +110,6 @@ export const SlideCanvas = ({
   const handleStartMove = (e: React.MouseEvent, comp: SlideComponent) => {
     // Không di chuyển nếu đang trong chế độ soạn thảo văn bản
     if (editingTextId === comp.id) return
-
-    const target = e.target as HTMLElement
-    const isText = comp.type !== 'image' && comp.type !== 'shape'
-
-    // Nếu là text và đã được chọn: nếu người dùng click vào vùng chữ (text content),
-    // không kích hoạt di chuyển để người dùng có thể bôi đen văn bản tự nhiên
-    if (
-      comp.id === selectedCompId &&
-      isText &&
-      target.closest("[data-text-content='true']")
-    ) {
-      return
-    }
 
     e.stopPropagation()
     onSelectComponent(comp.id)
@@ -468,9 +475,15 @@ export const SlideCanvas = ({
     }
   }, [dragState, onUpdateComponent])
 
-  const theme = getThemeById(slide?.theme || themeId)
+  const isViewingOriginal =
+    isPreview && Boolean(originalSlide) && previewMode === 'original'
+  const activeSlideData =
+    isViewingOriginal && originalSlide ? originalSlide : slide
+  const theme = getThemeById(activeSlideData?.theme || themeId)
   const components: SlideComponent[] =
-    passedComponents ?? (slide ? getSlideComponents(slide, theme.id) : [])
+    isViewingOriginal && originalSlide
+      ? getSlideComponents(originalSlide, theme.id)
+      : (passedComponents ?? (slide ? getSlideComponents(slide, theme.id) : []))
 
   // Helper tính toán màu chữ đảm bảo độ tương phản cao tuyệt đối theo theme
   const getRenderTextColor = (comp: SlideComponent) => {
@@ -658,8 +671,9 @@ export const SlideCanvas = ({
       <div
         ref={canvasRef}
         style={{
-          backgroundColor: slide?.backgroundColor || theme.background,
-          color: theme.textPrimary
+          backgroundColor: activeSlideData?.backgroundColor || theme.background,
+          color: theme.textPrimary,
+          containerType: 'inline-size'
         }}
         className={`relative aspect-video w-full max-w-4xl overflow-hidden rounded-md border shadow-xl select-none transition-all ${
           isPreview
@@ -669,17 +683,51 @@ export const SlideCanvas = ({
               : 'border-stone-200'
         }`}
       >
-        {/* Banner chế độ xem trước đề xuất AI */}
+        {/* Banner chế độ xem trước đề xuất AI với nút gạt Before / After */}
         {isPreview && (
-          <div className='absolute inset-x-0 top-0 z-40 flex items-center justify-between bg-amber-500 px-4 py-2 text-white shadow-md'>
-            <div className='flex items-center gap-2 text-xs font-bold'>
-              <Sparkles size={14} className='animate-pulse' />
-              <span>
-                {originalSlide
-                  ? `Đang xem trước chỉnh sửa Slide ${(slideIndex ?? 0) + 1}`
-                  : 'Đang xem trước slide mới tạo từ AI'}
-              </span>
+          <div className='absolute inset-x-0 top-0 z-40 flex items-center justify-between bg-amber-500/95 backdrop-blur-xs px-3.5 py-1.5 text-white shadow-md'>
+            <div className='flex items-center gap-3'>
+              <div className='flex items-center gap-1.5 text-xs font-bold'>
+                <Sparkles size={14} className='animate-pulse' />
+                <span className='hidden sm:inline'>
+                  {originalSlide
+                    ? `Slide ${(slideIndex ?? 0) + 1}:`
+                    : 'Slide mới tạo từ AI'}
+                </span>
+              </div>
+
+              {/* Nút gạt chuyển đổi Before / After xem thay đổi trực quan */}
+              {originalSlide && (
+                <div className='flex items-center rounded-lg bg-black/25 p-0.5 text-[11px] font-semibold'>
+                  <button
+                    type='button'
+                    onClick={() => setPreviewMode('original')}
+                    className={`rounded-md px-2.5 py-1 transition cursor-pointer ${
+                      previewMode === 'original'
+                        ? 'bg-white text-stone-900 shadow-xs font-bold'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                    title='Xem slide hiện tại (trước khi AI chỉnh sửa)'
+                  >
+                    Bản hiện tại
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setPreviewMode('proposed')}
+                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 transition cursor-pointer ${
+                      previewMode === 'proposed'
+                        ? 'bg-amber-600 text-white shadow-xs font-bold'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                    title='Xem đề xuất mới từ AI'
+                  >
+                    <Sparkles size={11} />
+                    <span>Bản AI đề xuất</span>
+                  </button>
+                </div>
+              )}
             </div>
+
             <div className='flex items-center gap-2'>
               {onExitPreview && (
                 <button
@@ -696,7 +744,7 @@ export const SlideCanvas = ({
                   onClick={onAcceptPreview}
                   className='flex items-center gap-1 rounded bg-white px-3 py-1 text-[11px] font-bold text-amber-900 shadow-xs hover:bg-amber-50 transition cursor-pointer'
                 >
-                  <Check size={12} />
+                  <Check size={12} strokeWidth={2.5} />
                   <span>
                     {originalSlide
                       ? 'Áp dụng đề xuất'
@@ -759,8 +807,8 @@ export const SlideCanvas = ({
               }}
               className={`group/comp cursor-move transition-shadow ${
                 isSelected
-                  ? 'ring-2 ring-brand-rust ring-offset-2 ring-offset-white z-30'
-                  : 'hover:ring-1 hover:ring-brand-rust/50 z-20'
+                  ? 'ring-2 ring-brand-rust ring-offset-2 ring-offset-white'
+                  : 'hover:ring-1 hover:ring-brand-rust/50'
               }`}
             >
               {/* KHUNG BOUNDING BOX VÀ CÁC NÚT ĐIỀU KHIỂN CANVA KHI ĐƯỢC CHỌN */}
@@ -1000,13 +1048,17 @@ export const SlideCanvas = ({
                       isTextSessionRecordedRef.current = false
                     }
                   }}
-                  onBlur={() => {
+                  onBlur={(e) => {
                     isTextSessionRecordedRef.current = false
                     isComposingRef.current = false
                     setEditingTextId(null)
+                    // TC-18: Tự động xóa phần tử khỏi mảng components khi người dùng xóa hết nội dung và blur
+                    if (!comp.content.trim() || !e.target.value.trim()) {
+                      onDeleteComponent(comp.id)
+                    }
                   }}
                   style={{
-                    fontSize: `${comp.fontSize ?? 20}px`,
+                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
                     textAlign: comp.textAlign ?? 'left',
@@ -1017,21 +1069,17 @@ export const SlideCanvas = ({
                       'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
-                    lineHeight: 1.3
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere'
                   }}
-                  className='w-full resize-none overflow-hidden rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none wrap-break-word'
+                  className='w-full resize-none overflow-hidden rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none break-words'
                 />
               ) : (
                 /* Hiển thị văn bản bình thường */
                 <div
-                  data-text-content='true'
-                  onMouseDown={(e) => {
-                    if (isSelected) {
-                      e.stopPropagation()
-                    }
-                  }}
                   style={{
-                    fontSize: `${comp.fontSize ?? 20}px`,
+                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
                     textDecoration: comp.textDecoration ?? 'none',
@@ -1043,9 +1091,11 @@ export const SlideCanvas = ({
                       'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
-                    lineHeight: 1.3
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere'
                   }}
-                  className={`w-full wrap-break-word ${isSelected ? 'select-text cursor-text' : 'select-none'}`}
+                  className='w-full select-none break-words'
                 >
                   {comp.type === 'bullets' ? (
                     <ul className='space-y-1.5 list-disc pl-5'>
@@ -1053,17 +1103,17 @@ export const SlideCanvas = ({
                         .split('\n')
                         .filter((s) => s.trim())
                         .map((bullet, idx) => (
-                          <li key={idx} className='wrap-break-word'>
+                          <li key={idx} className='break-words'>
                             {bullet}
                           </li>
                         ))}
                     </ul>
                   ) : comp.type === 'quote' ? (
-                    <div className='italic border-y border-stone-300 py-3 px-2 wrap-break-word'>
+                    <div className='italic border-y border-stone-300 py-3 px-2 break-words'>
                       “ {comp.content} ”
                     </div>
                   ) : (
-                    <div className='whitespace-pre-wrap wrap-break-word'>
+                    <div className='whitespace-pre-wrap break-words'>
                       {comp.content}
                     </div>
                   )}

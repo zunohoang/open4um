@@ -13,7 +13,7 @@ export const getSlideComponents = (
   slide: Slide,
   themeId?: string | null
 ): SlideComponent[] => {
-  if (Array.isArray(slide.components) && slide.components.length > 0) {
+  if (Array.isArray(slide.components)) {
     return slide.components
   }
 
@@ -174,15 +174,27 @@ export const getSlideComponents = (
     })
   }
 
-  // 4. TIÊU ĐỀ SLIDE (Tính toán số dòng chính xác để không bao giờ đè chữ)
-  const titleY = header ? 12 : 8
-  const charsPerLine = titleSize === 'xl' ? 24 : titleSize === 'sm' ? 42 : 32
+  // 4. TIÊU ĐỀ SLIDE (Tính toán số dòng và font size thích ứng chống đè chữ 100%)
+  const titleY = header ? 10.5 : 7.5
+  const isLongTitle = title.length > 28
+  const titleFontSize =
+    titleSize === 'xl'
+      ? 42
+      : titleSize === 'sm'
+        ? 24
+        : title.length > 45
+          ? 25
+          : title.length > 28
+            ? 27.5
+            : 32
+  const charsPerLine =
+    titleSize === 'xl' ? 20 : titleSize === 'sm' ? 36 : isLongTitle ? 32 : 26
   const estimatedTitleLines = Math.max(
     1,
     Math.ceil(title.length / charsPerLine)
   )
   const lineHeightPercent =
-    titleSize === 'xl' ? 9.5 : titleSize === 'sm' ? 6 : 7.5
+    titleSize === 'xl' ? 11 : titleSize === 'sm' ? 6.5 : isLongTitle ? 9.5 : 10
   const titleHeight = estimatedTitleLines * lineHeightPercent
 
   comps.push({
@@ -192,7 +204,7 @@ export const getSlideComponents = (
     x: 8,
     y: titleY,
     width: 84,
-    fontSize: titleSize === 'xl' ? 44 : titleSize === 'sm' ? 26 : 34,
+    fontSize: titleFontSize,
     fontWeight: 'bold',
     fontStyle: 'normal',
     textDecoration: 'none',
@@ -205,7 +217,7 @@ export const getSlideComponents = (
   let subtitleHeight = 0
   const subtitleY = titleY + titleHeight + 2
   if (subtitle) {
-    const subLines = Math.max(1, Math.ceil(subtitle.length / 55))
+    const subLines = Math.max(1, Math.ceil(subtitle.length / 48))
     subtitleHeight = subLines * 4.5
     comps.push({
       id: `sub-${slideId}`,
@@ -214,7 +226,7 @@ export const getSlideComponents = (
       x: 8,
       y: subtitleY,
       width: 84,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: 'normal',
       fontStyle: 'italic',
       textDecoration: 'none',
@@ -225,14 +237,12 @@ export const getSlideComponents = (
   }
 
   // Tọa độ bắt đầu vùng nội dung thẻ card (Content Box Area)
-  const startY = Math.min(
-    50,
-    Math.max(
-      28,
-      subtitle ? subtitleY + subtitleHeight + 3.5 : titleY + titleHeight + 3.5
-    )
-  )
-  const contentHeight = Math.max(38, Math.min(52, 88 - startY))
+  // Đảm bảo khoảng cách an toàn tối thiểu 4.5% bên dưới dòng cuối cùng của tiêu đề/phụ đề
+  const minSafeY = subtitle
+    ? subtitleY + subtitleHeight + 4.5
+    : titleY + titleHeight + 4.5
+  const startY = Math.min(54, Math.max(28, Math.ceil(minSafeY)))
+  const contentHeight = Math.max(38, Math.min(58, 89 - startY))
 
   // 6. CÁC DẠNG BỐ CỤC HÌNH NỀN HỘP THẺ TRỰC QUAN ĐA DẠNG
 
@@ -241,7 +251,8 @@ export const getSlideComponents = (
     const heroWidth = 38
     const subWidth = 43
     const subX = 49
-    const subCardH = (contentHeight - 3) / 2
+    const subGap = 2.5
+    const subCardH = (contentHeight - subGap) / 2
 
     // 1. Thẻ Hero bên trái (Viền accentColor nổi bật)
     comps.push({
@@ -269,10 +280,10 @@ export const getSlideComponents = (
       borderColor: theme.accentColor,
       borderWidth: 0,
       borderRadius: 5,
-      x: 11,
-      y: startY + 3.5,
+      x: 10.5,
+      y: startY + 3,
       width: 14,
-      height: 4.5,
+      height: 4.2,
       content: ''
     })
 
@@ -280,8 +291,8 @@ export const getSlideComponents = (
       id: `hero-tag-${slideId}`,
       type: 'text',
       content: heroTag.toUpperCase(),
-      x: 11,
-      y: startY + 4,
+      x: 10.5,
+      y: startY + 3.5,
       width: 14,
       fontSize: 10,
       fontWeight: 'bold',
@@ -290,31 +301,41 @@ export const getSlideComponents = (
       color: '#ffffff'
     })
 
-    // Tiêu đề Hero
+    // Tiêu đề Hero (tính chiều cao thực tế)
+    const heroTitleLen = (items[0].title || '').length
+    const heroTitleLines = Math.max(1, Math.ceil(heroTitleLen / 20))
+    const heroTitleH = heroTitleLines * 4.8
+    const heroTitleY = startY + 9.5
+
     comps.push({
       id: `hero-title-${slideId}`,
       type: 'text',
       content: items[0].title,
-      x: 11,
-      y: startY + 11,
-      width: heroWidth - 6,
-      fontSize: 21,
+      x: 10.5,
+      y: heroTitleY,
+      width: heroWidth - 5,
+      fontSize: heroTitleLen > 28 ? 18 : 20,
       fontWeight: 'bold',
       textAlign: 'left',
       fontFamily: theme.headingFont,
       color: theme.textPrimary
     })
 
-    // Mô tả Hero
+    // Mô tả Hero (Xếp tầng động bên dưới tiêu đề + Font thích ứng theo độ dài)
     if (items[0].description) {
+      const heroDesc = items[0].description
+      const heroDescY = heroTitleY + heroTitleH + 2
+      const heroDescFontSize =
+        heroDesc.length > 180 ? 11.5 : heroDesc.length > 120 ? 12.5 : 13.5
+
       comps.push({
         id: `hero-desc-${slideId}`,
         type: 'text',
-        content: items[0].description,
-        x: 11,
-        y: startY + 23,
-        width: heroWidth - 6,
-        fontSize: 14,
+        content: heroDesc,
+        x: 10.5,
+        y: heroDescY,
+        width: heroWidth - 5,
+        fontSize: heroDescFontSize,
         textAlign: 'left',
         fontFamily: theme.bodyFont,
         color: theme.textSecondary
@@ -324,7 +345,7 @@ export const getSlideComponents = (
     // 2. Hai thẻ con bên phải xếp chồng
     const subItems = items.slice(1, 3)
     subItems.forEach((item, subIdx) => {
-      const curY = startY + subIdx * (subCardH + 3)
+      const curY = startY + subIdx * (subCardH + subGap)
 
       comps.push({
         id: `sub-bg-${slideId}-${subIdx}`,
@@ -341,14 +362,19 @@ export const getSlideComponents = (
         content: ''
       })
 
+      const subTitleLen = (item.title || '').length
+      const subTitleLines = Math.max(1, Math.ceil(subTitleLen / 24))
+      const subTitleH = subTitleLines * 4.2
+      const subTitleY = curY + 2.5
+
       comps.push({
         id: `sub-title-${slideId}-${subIdx}`,
         type: 'text',
         content: item.title,
         x: subX + 3,
-        y: curY + 3.5,
+        y: subTitleY,
         width: subWidth - 6,
-        fontSize: 16,
+        fontSize: subTitleLen > 25 ? 14.5 : 16,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
@@ -356,14 +382,19 @@ export const getSlideComponents = (
       })
 
       if (item.description) {
+        const subDesc = item.description
+        const subDescY = subTitleY + subTitleH + 1.5
+        const subDescFontSize =
+          subDesc.length > 110 ? 11 : subDesc.length > 60 ? 12 : 13
+
         comps.push({
           id: `sub-desc-${slideId}-${subIdx}`,
           type: 'text',
-          content: item.description,
+          content: subDesc,
           x: subX + 3,
-          y: curY + 11,
+          y: subDescY,
           width: subWidth - 6,
-          fontSize: 13,
+          fontSize: subDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -405,28 +436,37 @@ export const getSlideComponents = (
         content: ''
       })
 
-      // Con số khổng lồ (Chỉ số nổi bật)
+      // Con số khổng lồ (Chỉ số nổi bật: tự động thích ứng kích thước & số dòng để không bao giờ đè chữ)
+      const statLen = (statVal || '').length
+      const isLongStat = statLen > 6
+      const statFontSize =
+        count === 2 ? (isLongStat ? 22 : 36) : isLongStat ? 20 : 32
+      const charsPerLine = isLongStat ? (count === 2 ? 18 : 12) : 6
+      const statLines = Math.max(1, Math.ceil(statLen / charsPerLine))
+      const statH = statLines * (isLongStat ? 5.2 : 8.5)
+
       comps.push({
         id: `metric-num-${slideId}-${idx}`,
         type: 'text',
         content: statVal,
         x: colX + 3,
-        y: startY + 4,
+        y: startY + 3.5,
         width: colWidth - 6,
-        fontSize: count === 2 ? 38 : 34,
+        fontSize: statFontSize,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: 'mono',
         color: theme.accentColor
       })
 
-      // Line ngăn cách trang nhã
+      // Line ngăn cách trang nhã (tọa độ động xếp tầng bên dưới chỉ số)
+      const dividerY = startY + 3.5 + statH + 1.5
       comps.push({
         id: `metric-divider-${slideId}-${idx}`,
         type: 'shape',
         shapeType: 'line',
         x: colX + 3,
-        y: startY + 16,
+        y: dividerY,
         width: colWidth - 6,
         height: 1,
         fillColor: theme.cardBorder,
@@ -435,31 +475,40 @@ export const getSlideComponents = (
         content: ''
       })
 
-      // Tiêu đề chỉ số
+      // Tiêu đề chỉ số (tọa độ động xếp tầng bên dưới đường ngăn cách)
+      const mTitleLen = (item.title || '').length
+      const mTitleLines = Math.max(1, Math.ceil(mTitleLen / 18))
+      const mTitleH = mTitleLines * 4.5
+      const mTitleY = dividerY + 2
+
       comps.push({
         id: `metric-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
         x: colX + 3,
-        y: startY + 18,
+        y: mTitleY,
         width: colWidth - 6,
-        fontSize: count === 2 ? 17 : 15,
+        fontSize: count === 2 ? 16 : 14.5,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
         color: theme.textPrimary
       })
 
-      // Mô tả chỉ số
+      // Mô tả chỉ số (tọa độ động xếp tầng bên dưới tiêu đề)
       if (item.description) {
+        const mDesc = item.description
+        const mDescY = mTitleY + mTitleH + 1.5
+        const mDescFontSize = mDesc.length > 90 ? 11.5 : 12.5
+
         comps.push({
           id: `metric-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
+          content: mDesc,
           x: colX + 3,
-          y: startY + 26,
+          y: mDescY,
           width: colWidth - 6,
-          fontSize: 13,
+          fontSize: mDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -530,14 +579,19 @@ export const getSlideComponents = (
       })
 
       // Tiêu đề ô
+      const qTitleLen = (item.title || '').length
+      const qTitleLines = Math.max(1, Math.ceil(qTitleLen / 18))
+      const qTitleH = qTitleLines * 4.2
+      const qTitleY = curY + 2.5
+
       comps.push({
         id: `quad-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
         x: curX + 10,
-        y: curY + 2.5,
+        y: qTitleY,
         width: colWidth - 12,
-        fontSize: 15,
+        fontSize: qTitleLen > 22 ? 13.5 : 15,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
@@ -546,14 +600,18 @@ export const getSlideComponents = (
 
       // Mô tả ô
       if (item.description) {
+        const qDesc = item.description
+        const qDescY = Math.max(curY + 8, qTitleY + qTitleH + 1.5)
+        const qDescFontSize = qDesc.length > 90 ? 11 : 12
+
         comps.push({
           id: `quad-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
+          content: qDesc,
           x: curX + 2.5,
-          y: curY + 9,
+          y: qDescY,
           width: colWidth - 5,
-          fontSize: 12.5,
+          fontSize: qDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -620,30 +678,45 @@ export const getSlideComponents = (
       })
 
       // Tiêu đề thanh ngang
+      const rTitleLen = (item.title || '').length
+      const rTitleY = curY + (rowH > 14 ? 3 : 2)
+
       comps.push({
         id: `row-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
-        x: 18,
-        y: curY + (rowH > 14 ? 3 : 2),
-        width: 26,
-        fontSize: 16,
+        x: 17.5,
+        y: rTitleY,
+        width: 23,
+        fontSize: rTitleLen > 24 ? 14 : 15.5,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
         color: theme.textPrimary
       })
 
-      // Mô tả thanh ngang
+      // Mô tả thanh ngang (mở rộng width và font thích ứng chống tràn)
       if (item.description) {
+        const rDesc = item.description
+        const rDescLen = rDesc.length
+        const rDescFontSize =
+          rDescLen > 150
+            ? 10.5
+            : rDescLen > 110
+              ? 11.5
+              : rDescLen > 65
+                ? 12.5
+                : 13.5
+        const rDescY = curY + (rowH > 14 ? 2.5 : 1.8)
+
         comps.push({
           id: `row-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
-          x: 46,
-          y: curY + (rowH > 14 ? 3 : 2),
-          width: 44,
-          fontSize: 13,
+          content: rDesc,
+          x: 42,
+          y: rDescY,
+          width: 48,
+          fontSize: rDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -679,14 +752,19 @@ export const getSlideComponents = (
       })
 
       // Tiêu đề cột
+      const cTitleLen = (item.title || '').length
+      const cTitleLines = Math.max(1, Math.ceil(cTitleLen / 26))
+      const cTitleH = cTitleLines * 4.8
+      const cTitleY = startY + 4
+
       comps.push({
         id: `col-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
         x: colX + 3,
-        y: startY + 4,
+        y: cTitleY,
         width: colWidth - 6,
-        fontSize: 18,
+        fontSize: cTitleLen > 28 ? 16 : 18,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
@@ -695,14 +773,18 @@ export const getSlideComponents = (
 
       // Nội dung mô tả cột
       if (item.description) {
+        const cDesc = item.description
+        const cDescY = cTitleY + cTitleH + 2
+        const cDescFontSize = cDesc.length > 150 ? 12 : 13.5
+
         comps.push({
           id: `col-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
+          content: cDesc,
           x: colX + 3,
-          y: startY + 16,
+          y: cDescY,
           width: colWidth - 6,
-          fontSize: 14,
+          fontSize: cDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -771,14 +853,19 @@ export const getSlideComponents = (
       })
 
       // Tiêu đề bước
+      const sTitleLen = (item.title || '').length
+      const sTitleLines = Math.max(1, Math.ceil(sTitleLen / 20))
+      const sTitleH = sTitleLines * 4.5
+      const sTitleY = startY + 11
+
       comps.push({
         id: `step-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
         x: colX + 3,
-        y: startY + 12,
+        y: sTitleY,
         width: colWidth - 6,
-        fontSize: count === 3 ? 16 : 18,
+        fontSize: count === 3 ? 15.5 : 17.5,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
@@ -787,14 +874,18 @@ export const getSlideComponents = (
 
       // Mô tả bước
       if (item.description) {
+        const sDesc = item.description
+        const sDescY = sTitleY + sTitleH + 2
+        const sDescFontSize = sDesc.length > 110 ? 11.5 : 12.5
+
         comps.push({
           id: `step-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
+          content: sDesc,
           x: colX + 3,
-          y: startY + 22,
+          y: sDescY,
           width: colWidth - 6,
-          fontSize: 13,
+          fontSize: sDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary
@@ -1098,14 +1189,22 @@ export const getSlideComponents = (
       })
 
       // Tiêu đề thẻ
+      const cardTitleLen = (item.title || '').length
+      const cardTitleLines = Math.max(
+        1,
+        Math.ceil(cardTitleLen / (count === 3 ? 18 : 24))
+      )
+      const cardTitleH = cardTitleLines * 4.5
+      const cardTitleY = startY + 4
+
       comps.push({
         id: `card-title-${slideId}-${idx}`,
         type: 'text',
         content: item.title,
         x: colX + 2.5,
-        y: startY + 4,
+        y: cardTitleY,
         width: colWidth - 5,
-        fontSize: count === 3 ? 16 : 18,
+        fontSize: count === 3 ? (cardTitleLen > 24 ? 14.5 : 16) : 18,
         fontWeight: 'bold',
         textAlign: 'left',
         fontFamily: theme.headingFont,
@@ -1114,14 +1213,19 @@ export const getSlideComponents = (
 
       // Nội dung mô tả thẻ
       if (item.description) {
+        const cardDesc = item.description
+        const cardDescY = cardTitleY + cardTitleH + 2
+        const cardDescFontSize =
+          cardDesc.length > 140 ? 11.5 : cardDesc.length > 80 ? 12.5 : 13.5
+
         comps.push({
           id: `card-desc-${slideId}-${idx}`,
           type: 'text',
-          content: item.description,
+          content: cardDesc,
           x: colX + 2.5,
-          y: startY + 16,
+          y: cardDescY,
           width: colWidth - 5,
-          fontSize: count === 3 ? 13 : 14,
+          fontSize: cardDescFontSize,
           textAlign: 'left',
           fontFamily: theme.bodyFont,
           color: theme.textSecondary

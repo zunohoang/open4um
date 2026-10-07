@@ -3,6 +3,7 @@ import type { ContentLayoutType, Outline, ShapeType } from '@/lib/types'
 import {
   AlignLeft,
   BarChart3,
+  Check,
   Columns,
   Grid2X2,
   Heading1,
@@ -11,6 +12,7 @@ import {
   LayoutTemplate,
   List,
   ListOrdered,
+  Palette,
   Rows3,
   Shapes,
   Sparkles,
@@ -19,6 +21,7 @@ import {
   UploadCloud
 } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { THEME_PRESETS } from '../constants/theme-options'
 import { useEditorStore } from '../store/editor.store'
 
 interface LeftSidebarRailProps {
@@ -27,6 +30,8 @@ interface LeftSidebarRailProps {
   onAddShapeComponent: (shapeType: ShapeType) => void
   onApplyContentLayout?: (layout: ContentLayoutType) => void
   outline?: Outline | null
+  currentThemeId?: string | null
+  onThemeChange?: (themeId: string) => void
 }
 
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
@@ -107,7 +112,9 @@ export const LeftSidebarRail = ({
   onAddTextComponent,
   onAddImageComponent,
   onAddShapeComponent,
-  onApplyContentLayout
+  onApplyContentLayout,
+  currentThemeId,
+  onThemeChange
 }: LeftSidebarRailProps) => {
   const { showToast } = useToast()
   const {
@@ -228,7 +235,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('templates')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'templates' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -237,6 +244,21 @@ export const LeftSidebarRail = ({
         >
           <LayoutTemplate size={20} />
           <span className='mt-1 text-[10px] font-medium'>Mẫu slide</span>
+        </button>
+
+        {/* Tab Giao diện / Theme */}
+        <button
+          type='button'
+          onClick={() => setLeftRailTab('theme')}
+          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+            leftRailTab === 'theme' && isDrawerOpen
+              ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
+              : 'hover:bg-emerald-900/40 hover:text-white'
+          }`}
+          title='Đổi bộ giao diện bài giảng (Theme)'
+        >
+          <Palette size={20} />
+          <span className='mt-1 text-[10px] font-medium'>Giao diện</span>
         </button>
       </nav>
 
@@ -602,6 +624,73 @@ export const LeftSidebarRail = ({
                     Các ý chính phân cấp rõ ràng theo phong cách truyền thống
                   </span>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB GIAO DIỆN (THEME) */}
+          {leftRailTab === 'theme' && (
+            <div className='flex flex-1 flex-col overflow-y-auto p-4'>
+              <div className='mb-4'>
+                <h3 className='text-sm font-bold text-stone-900'>
+                  Bộ giao diện bài giảng
+                </h3>
+                <p className='text-xs text-stone-500'>
+                  Chọn bộ phong cách, bảng màu và phông chữ cho toàn bài giảng
+                </p>
+              </div>
+
+              <div className='space-y-2.5'>
+                {THEME_PRESETS.map((t) => {
+                  const isSelected =
+                    (currentThemeId || 'classic-editorial') === t.id
+                  return (
+                    <button
+                      key={t.id}
+                      type='button'
+                      onClick={() => onThemeChange?.(t.id)}
+                      className={`w-full flex items-center justify-between gap-3 rounded-xl p-3 text-left transition border cursor-pointer ${
+                        isSelected
+                          ? 'border-brand-rust bg-brand-paper shadow-sm ring-1 ring-brand-rust'
+                          : 'border-stone-200 hover:border-stone-300 hover:bg-stone-50'
+                      }`}
+                    >
+                      <div className='flex items-center gap-3 min-w-0'>
+                        {/* Bảng màu đại diện */}
+                        <div className='flex -space-x-1.5 shrink-0'>
+                          <div
+                            className='h-6 w-6 rounded-full border border-stone-300 shadow-2xs'
+                            style={{ backgroundColor: t.background }}
+                            title={`Nền: ${t.background}`}
+                          />
+                          <div
+                            className='h-6 w-6 rounded-full border border-stone-300 shadow-2xs'
+                            style={{ backgroundColor: t.textPrimary }}
+                            title={`Chữ: ${t.textPrimary}`}
+                          />
+                          <div
+                            className='h-6 w-6 rounded-full border border-stone-300 shadow-2xs'
+                            style={{ backgroundColor: t.accentColor }}
+                            title={`Nhấn: ${t.accentColor}`}
+                          />
+                        </div>
+                        <div className='min-w-0'>
+                          <div className='text-xs font-bold text-stone-900 truncate'>
+                            {t.name}
+                          </div>
+                          <div className='text-[11px] text-stone-500 line-clamp-1'>
+                            {t.description}
+                          </div>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <div className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-rust text-white'>
+                          <Check size={12} strokeWidth={3} />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}

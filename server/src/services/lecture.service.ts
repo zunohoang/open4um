@@ -599,13 +599,51 @@ export const aiChatInEditor = async (
     )
     .join('\n')
 
-  const slidesCatalog = slides.map((s, idx) => ({
-    slideNumber: idx + 1,
-    id: String(s.id || `slide-${idx + 1}`),
-    title: String(s.title || 'Không có tiêu đề'),
-    bullets: Array.isArray(s.bullets) ? (s.bullets as string[]) : [],
-    layout: String(s.layout || 'standard')
-  }))
+  const slidesCatalog = slides.map((s, idx) => {
+    type RawItem = {
+      title?: string
+      description?: string
+      stat?: string
+      tag?: string
+    }
+    let rawItems: RawItem[] = []
+    if (Array.isArray(s.contentItems) && s.contentItems.length > 0) {
+      rawItems = (s.contentItems as RawItem[]).map((it) => ({
+        title: it.title || '',
+        description: it.description || '',
+        stat: it.stat || undefined,
+        tag: it.tag || undefined
+      }))
+    } else if (Array.isArray(s.components)) {
+      const comps = s.components as Array<{ id?: string; content?: string }>
+      const titleComps = comps.filter(
+        (c) => c.id?.includes('title-') && !c.id.startsWith('title-')
+      )
+      const descComps = comps.filter((c) => c.id?.includes('desc-'))
+      const statComps = comps.filter(
+        (c) => c.id?.includes('metric-num-') || c.id?.includes('tl-year-')
+      )
+      const tagComps = comps.filter(
+        (c) => c.id?.includes('tag-') && !c.id.includes('tag-bg-')
+      )
+      rawItems = titleComps.map((tc, i) => ({
+        title: tc.content || '',
+        description: descComps[i]?.content || '',
+        stat: statComps[i]?.content || undefined,
+        tag: tagComps[i]?.content || undefined
+      }))
+    }
+
+    return {
+      slideNumber: idx + 1,
+      id: String(s.id || `slide-${idx + 1}`),
+      header: String(s.header || ''),
+      title: String(s.title || 'Không có tiêu đề'),
+      bullets: Array.isArray(s.bullets) ? (s.bullets as string[]) : [],
+      layout: String(s.layout || 'standard'),
+      contentItems: rawItems
+    }
+  })
 
   let initialSummary = (lecture.get('contextSummary') as string) || ''
   if (!initialSummary && slidesCatalog.length > 0) {
@@ -667,48 +705,13 @@ export const aiChatInEditor = async (
       aiResult.action === 'UPDATE_CURRENT_SLIDE')
   ) {
     const baseSlide = slides[targetIdx] || {}
-    const baseComps =
-      Array.isArray(baseSlide.components) && baseSlide.components.length > 0
-        ? (baseSlide.components as Array<Record<string, unknown>>)
-        : undefined
-
-    if (baseComps && baseComps.length > 0) {
-      const newTitle =
-        typeof proposedSlide.title === 'string'
-          ? proposedSlide.title
-          : undefined
-      const newSubtitle =
-        typeof proposedSlide.subtitle === 'string'
-          ? proposedSlide.subtitle
-          : undefined
-      const newBullets = Array.isArray(proposedSlide.bullets)
-        ? (proposedSlide.bullets as string[])
-        : undefined
-
-      const updatedComps = baseComps.map((c) => {
-        if (c.type === 'title' && newTitle !== undefined) {
-          return { ...c, content: newTitle }
-        }
-        if (c.type === 'subtitle' && newSubtitle !== undefined) {
-          return { ...c, content: newSubtitle }
-        }
-        if (c.type === 'bullets' && newBullets !== undefined) {
-          return { ...c, content: newBullets.join('\n') }
-        }
-        return c
-      })
-      proposedSlide = {
-        ...baseSlide,
-        ...proposedSlide,
-        id: baseSlide.id || proposedSlide.id,
-        components: updatedComps
-      }
-    } else {
-      proposedSlide = {
-        ...baseSlide,
-        ...proposedSlide,
-        id: baseSlide.id || proposedSlide.id
-      }
+    // Giữ nguyên ID của slide cũ để không mất liên kết, nhưng BẮT BUỘC dùng components mới do AI & Layout Engine vừa sinh ra
+    // TUYỆT ĐỐI không ghi đè lại baseComps cũ vì sẽ làm sống lại lỗi đè chữ / layout cũ!
+    proposedSlide = {
+      ...baseSlide,
+      ...proposedSlide,
+      id: (baseSlide.id as string) || (proposedSlide.id as string),
+      components: proposedSlide.components || baseSlide.components
     }
   }
 

@@ -1,7 +1,8 @@
 import type { Slide } from '@/lib/types'
 import { create } from 'zustand'
 
-export type LeftRailTab = 'text' | 'shapes' | 'uploads' | 'templates' | null
+export type LeftRailTab =
+  'text' | 'shapes' | 'uploads' | 'templates' | 'theme' | null
 
 export interface UploadedImage {
   id: string

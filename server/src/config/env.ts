@@ -79,6 +79,11 @@ const envSchema = z
     REDIS_URL: z.string().url(),
     JWT_SECRET: z.string().min(16),
     GEMINI_API_KEY: z.string(),
+    GEMINI_BASE_URL: optionalUrl,
+    GEMINI_MODEL: z.preprocess(
+      emptyStringToUndefined,
+      z.string().trim().default('gemini-3.8-flash')
+    ),
     MINIO_ENDPOINT: z.string(),
     MINIO_USE_SSL: booleanString,
     MINIO_PUBLIC_ENDPOINT: optionalUrl,

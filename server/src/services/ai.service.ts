@@ -4,8 +4,7 @@ import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { AppError } from '@/utils/AppError'
 
-const AI_API_BASE = 'https://api.shopaikey.com'
-const DEFAULT_AI_MODEL = 'gemini-2.5-flash'
+const DEFAULT_AI_MODEL = env.GEMINI_MODEL || 'gemini-2.0-flash'
 
 const getAiClient = (): GoogleGenAI => {
   const apiKey = env.GEMINI_API_KEY
@@ -17,12 +16,22 @@ const getAiClient = (): GoogleGenAI => {
     )
   }
 
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      baseUrl: AI_API_BASE
+  const options: {
+    apiKey: string
+    httpOptions?: {
+      baseUrl: string
     }
-  })
+  } = {
+    apiKey
+  }
+
+  if (env.GEMINI_BASE_URL) {
+    options.httpOptions = {
+      baseUrl: env.GEMINI_BASE_URL
+    }
+  }
+
+  return new GoogleGenAI(options)
 }
 
 /**
@@ -356,10 +365,10 @@ export const generateSlidesFromOutline = async (
       '3. BẮT BUỘC VỀ DỮ LIỆU NỘI DUNG (QUAN TRỌNG NHẤT - KHÔNG ĐƯỢC BỎ TRỐNG):\n' +
       '   - MỌI slide nội dung (trừ slide mở đầu headline) BẮT BUỘC PHẢI CÓ TỪ 2 ĐẾN 4 PHẦN TỬ TRONG "contentItems" VÀ "bullets".\n' +
       '   - TUYỆT ĐỐI KHÔNG ĐƯỢC trả về mảng rỗng [] hay null cho contentItems hay bullets.\n' +
-      '   - Mỗi phần tử trong "contentItems" phải có "title" (tiêu đề khối ngắn gọn) và "description" (nội dung phân tích, kiến thức thực tế sâu sắc, từ 1-3 câu hoàn chỉnh).\n' +
+      '   - Mỗi phần tử trong "contentItems" phải có "title" (tiêu đề khối súc tích từ 3 đến 7 từ) và "description" (nội dung phân tích cô đọng chuẩn slide từ 15 đến 25 từ, đi thẳng vào trọng tâm, TUYỆT ĐỐI KHÔNG viết đoạn văn dài lê thê làm tràn hộp thẻ slide).\n' +
       '   - Với layout "split-highlight", "cards", "horizontal-rows", "steps": bắt buộc sinh 3 items.\n' +
       '   - Với layout "two-column": bắt buộc sinh 2 items đối chiếu.\n' +
-      '   - Với layout "quad-grid": bắt buộc sinh 4 items.\n' +
+      '   - Với layout "quad-grid": bắt buộc sinh 4 items (mỗi item description tối đa 15 từ).\n' +
       '   - Với layout "metrics-grid": bắt buộc sinh 2-3 items có "stat" (chỉ số, độ phức tạp Big-O, phần trăm hoặc số lượng) kèm "title" và "description".\n' +
       '4. Slide tổng kết (Summary): Đúc kết các điểm then chốt cần ghi nhớ (Key takeaways).\n\n' +
       'Mỗi slide trả về các trường:\n' +
@@ -587,9 +596,16 @@ export const editSlideWithInstruction = async <
 export interface AiChatSlideSummary {
   slideNumber: number
   id: string
+  header?: string
   title: string
   bullets: string[]
   layout: string
+  contentItems?: Array<{
+    title?: string
+    description?: string
+    stat?: string
+    tag?: string
+  }>
 }
 
 export interface AiChatContext {
@@ -626,6 +642,7 @@ export interface AiSlideProposal {
 }
 
 export interface AiChatResponse {
+  thought?: string
   reply: string
   action: AiSlideAction
   targetSlideIndex?: number
@@ -656,9 +673,19 @@ export const chatAndProposeSlideEdit = async (
       'QUY TẮC NHẬN DIỆN PHẠM VI & MỤC TIÊU (SCOPE & TARGET RESOLUTION - BẮT BUỘC TUÂN THỦ):\n' +
       'Trước khi quyết định hành động, bạn BẮT BUỘC phải phân tích ý định của người dùng thuộc 1 trong 3 trường hợp sau:\n\n' +
       '1. PHẠM VI TOÀN BÀI HOẶC HÀNG LOẠT (Global / Multi-slide Scope):\n' +
-      '   - Dấu hiệu nhận biết: Câu yêu cầu nhắc đến "các slide...", "sau các khái niệm", "mỗi phần", "tất cả", "toàn bài", "thêm ví dụ code sau định nghĩa", hoặc tác động lên nhiều chủ đề trong bài giảng.\n' +
-      '   - Hành vi BẮT BUỘC: BỎ QUA slide hiện tại (currentSlide)! Hãy quét toàn bộ danh mục "slidesCatalog" để xác định TẤT CẢ các slide liên quan đến khái niệm / lý thuyết / chủ đề đó trong bài giảng.\n' +
-      '   - BẮT BUỘC trả về "action": "BATCH_CHANGES" với mảng "proposals" chứa danh sách TẤT CẢ các slide mới (BẮT BUỘC từ 3 đến 6 slides), mỗi phần tử có "action": "CREATE_SLIDE" và "targetSlideIndex" là vị trí của slide khái niệm tương ứng. TUYỆT ĐỐI KHÔNG được giới hạn thao tác vào mỗi một slide đang mở!\n\n' +
+      '   - Dấu hiệu nhận biết: Câu yêu cầu nhắc đến "các slide...", "toàn bộ slide", "sau các khái niệm", "mỗi phần", "tất cả", "toàn bài", "thêm ví dụ code sau định nghĩa", "đọc lại toàn bộ", hoặc tác động lên nhiều chủ đề trong bài giảng.\n' +
+      '   - BẮT BUỘC phân biệt rõ 2 loại yêu cầu hàng loạt:\n' +
+      '     + LOẠI 1 - CHỈNH SỬA / CẬP NHẬT HÀNG LOẠT SLIDE HIỆN CÓ (Batch Update):\n' +
+      '       Khi người dùng yêu cầu: "Đọc lại toàn bộ slide, chỉnh sửa layout sao cho không bị đè chữ", "chỉnh sửa các slide", "rút gọn nội dung tất cả các slide", "đổi bố cục các slide"...\n' +
+      '       -> BẮT BUỘC trả về "action": "BATCH_CHANGES".\n' +
+      '       -> Mảng "proposals" chứa các đề xuất với "action": "UPDATE_SLIDE" cho từng slide tương ứng trong "slidesCatalog".\n' +
+      '       -> "targetSlideIndex": là 0-indexed vị trí của chính slide cần cập nhật (Slide 1: index 0, Slide 2: index 1,...).\n' +
+      '       -> TUYỆT ĐỐI KHÔNG DÙNG "CREATE_SLIDE" trong trường hợp này, vì nếu dùng CREATE_SLIDE sẽ nhân đôi slide và giữ nguyên các slide cũ bị lỗi!\n' +
+      '     + LOẠI 2 - THÊM / TẠO MỚI HÀNG LOẠT SLIDE MỚI (Batch Create):\n' +
+      '       Khi người dùng yêu cầu: "thêm/viết các slide ví dụ code sau các slide khái niệm", "tạo slide bài tập cho mỗi chương"...\n' +
+      '       -> BẮT BUỘC trả về "action": "BATCH_CHANGES".\n' +
+      '       -> Mảng "proposals" chứa các slide mới với "action": "CREATE_SLIDE" (từ 3 đến 6 slides).\n' +
+      '       -> "targetSlideIndex": là vị trí của slide đứng trước vị trí cần chèn.\n\n' +
       '2. PHẠM VI CHỈ ĐỊNH RÕ RÀNG SLIDE ĐÍCH (Explicit Slide / Topic Target Scope):\n' +
       '   - Dấu hiệu nhận biết: Người dùng nhắc đến số thứ tự slide (ví dụ: "sửa slide 3", "thêm slide sau slide 5", "tạo slide sau slide 2") HOẶC nhắc đến tiêu đề/chủ đề cụ thể (ví dụ: "sửa slide về Ngăn xếp", "thêm ví dụ vào phần Biến và Kiểu dữ liệu", "viết lại phần Con trỏ").\n' +
       '   - Hành vi BẮT BUỘC: Tra cứu trong "slidesCatalog" để tìm slide có tiêu đề hoặc số thứ tự khớp nhất. Đặt "targetSlideIndex" là vị trí của slide tìm được đó trong bài giảng. TUYỆT ĐỐI KHÔNG mặc định lấy slide hiện tại (currentSlide) nếu slide người dùng nói đến khác với slide hiện tại!\n\n' +
@@ -666,11 +693,9 @@ export const chatAndProposeSlideEdit = async (
       '   - Dấu hiệu nhận biết: Người dùng dùng từ ngữ chỉ vị trí hiện tại ("slide này", "ở đây", "tiêu đề này", "khối chữ này") HOẶC các câu lệnh chỉnh sửa chung chung ("rút ngắn lại", "viết chi tiết hơn", "đổi sang layout 3 cột", "đổi màu") mà không nhắc tới bất kỳ slide hay chủ đề nào khác.\n' +
       '   - Hành vi BẮT BUỘC: Lúc này mới áp dụng chỉnh sửa vào slide hiện tại ("targetSlideIndex": currentSlideIndex) và sử dụng các component của currentSlide để tinh chỉnh.\n\n' +
       'QUY TẮC BẮT BUỘC KHI XÁC ĐỊNH HÀNH ĐỘNG (ACTION) & ĐỀ XUẤT:\n' +
-      '1. "BATCH_CHANGES" (ÁP DỤNG HÀNG LOẠT HOẶC TẠO NHIỀU SLIDE MỚI):\n' +
-      '   - Khi người dùng yêu cầu: thêm/viết các slide ví dụ code sau các slide khái niệm/định nghĩa, thêm slide bài tập sau mỗi phần lý thuyết, tạo slide minh họa cho các chương, hoặc sửa nhiều slide cùng lúc.\n' +
-      '   - CƯỠNG CHẾ SỐ LƯỢNG SLIDE (BẮT BUỘC): Mảng "proposals" BẮT BUỘC PHẢI CHỨA TỪ 3 ĐẾN 6 SLIDE ĐỀ XUẤT MỚI. TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ TRẢ VỀ 1 SLIDE! Nếu chỉ trả về 1 slide là VI PHẠM YÊU CẦU CỦA NGƯỜI DÙNG.\n' +
-      '   - BẮT BUỘC DÙNG "action": "CREATE_SLIDE" cho từng phần tử khi người dùng yêu cầu "thêm/viết thêm slide sau...". TUYỆT ĐỐI KHÔNG DÙNG "UPDATE_SLIDE" vì UPDATE_SLIDE sẽ ghi đè và làm mất slide bài giảng gốc của người dùng!\n' +
-      '   - TUYỆT ĐỐI KHÔNG xuất trường "proposedSlide" ở ngoài cùng JSON khi action là "BATCH_CHANGES". Toàn bộ các slide mới BẮT BUỘC phải nằm trong mảng "proposals".\n' +
+      '1. "BATCH_CHANGES" (ÁP DỤNG HÀNG LOẠT):\n' +
+      '   - Phục vụ cả 2 mục đích: Cập nhật nhiều slide đã có ("action": "UPDATE_SLIDE" cho từng phần tử) HOẶC tạo thêm nhiều slide mới ("action": "CREATE_SLIDE" cho từng phần tử).\n' +
+      '   - TUYỆT ĐỐI KHÔNG xuất trường "proposedSlide" ở ngoài cùng JSON khi action là "BATCH_CHANGES". Toàn bộ các slide BẮT BUỘC phải nằm trong mảng "proposals".\n' +
       '   - BẮT BUỘC sắp xếp các phần tử trong "proposals" theo thứ tự targetSlideIndex tăng dần.\n\n' +
       '2. "CREATE_SLIDE" (ĐÚNG 1 SLIDE MỚI ĐƠN LẺ):\n' +
       '   - Chỉ dùng khi người dùng yêu cầu thêm đúng 1 slide duy nhất (ví dụ: "thêm 1 slide kết luận ở cuối").\n' +
@@ -771,26 +796,81 @@ export const chatAndProposeSlideEdit = async (
       '  ],\n' +
       '  "updatedSummary": "Đã cập nhật bài giảng C++ với 4 slide ví dụ code thực hành sau các bài lý thuyết."\n' +
       '}\n\n' +
+      'QUY TẮC BỐ CỤC (LAYOUTS) & CHỐNG TRÀN CHỮ, ĐÈ CHỮ (BẮT BUỘC TUÂN THỦ):\n' +
+      '1. Layout "metrics-grid" (Lưới chỉ số thống kê nổi bật):\n' +
+      '   - Dùng cho 2-3 số liệu thống kê lớn (Big Numbers), tỷ lệ, Big-O, kết quả đo lường.\n' +
+      '   - Mỗi item trong "contentItems" có: "stat", "title", "description".\n' +
+      '   - "stat": BẮT BUỘC LÀ SỐ LIỆU SIÊU NGẮN (tối đa 4-6 ký tự, ví dụ: "500+", "95%", "10x", "Top 1", "O(1)", "$2M").\n' +
+      '   - TUYỆT ĐỐI KHÔNG để câu văn hoặc cụm từ dài (như "Ứng dụng Rộng rãi", "Nghiên cứu khoa học") vào trường "stat". Nếu nội dung mang tính định tính/mô tả khái niệm, BẮT BUỘC chuyển layout sang "cards" hoặc chuyển "stat" thành số liệu ngắn gọn (ví dụ: "100%", "Top 1")!\n' +
+      '   - KHI NGƯỜI DÙNG PHÀN NÀN "TRÀN CHỮ / ĐÈ CHỮ / CHỮ CHỒNG LÊN NHAU" Ở SLIDE DÙNG "metrics-grid":\n' +
+      '     + Kiểm tra ngay slide đích: Nếu có "stat" là văn bản dài, BẮT BUỘC rút gọn "stat" thành con số (<= 5 ký tự) HOẶC đổi "layout": "cards"!\n' +
+      '     + Rút gọn "description" còn 12-16 từ súc tích.\n' +
+      '2. Layout "cards" (Lưới thẻ thông dụng): Bố cục an toàn nhất cho mọi nội dung lý thuyết, định nghĩa, đặc điểm. Thẻ tự động co giãn, không bao giờ đè chữ.\n' +
+      '3. Layout "split-highlight": 1 Thẻ Hero lớn bên trái + 2 Thẻ con bên phải. Dùng khi có 1 ý quan trọng hàng đầu.\n' +
+      'BẢNG MẪU NHẬN DIỆN KHẨU NGỮ TIẾNG VIỆT & HÀNH ĐỘNG CHUẨN (FEW-SHOT EXAMPLES):\n' +
+      '1. Khẩu ngữ: "Phần [Tên cụm từ] cơ mà" / "Chỗ này bị lỗi cơ mà" / "Sửa phần [Tên] cơ mà":\n' +
+      '   - Ý định thực sự: Người dùng đang nhấn mạnh vào thành phần [Tên] vì thành phần đó đang bị lỗi hiển thị, tràn chữ hoặc đè chữ, KHÔNG PHẢI người dùng yêu cầu viết văn dài dòng về chủ đề đó!\n' +
+      '   - Hành động chuẩn: Kiểm tra xem cụm từ đó đang nằm ở đâu. Nếu nằm ở ô "stat" của layout "metrics-grid", BẮT BUỘC đổi layout sang "cards" hoặc rút gọn thành số ngắn (<= 5 ký tự). Trong "reply", giải thích rõ: "Tôi nhận thấy cụm từ [...] đang gây tràn/đè chữ ở ô số liệu nên tôi đã chuyển layout sang thẻ Cards để hiển thị thông thoáng và hoàn toàn hết đè chữ."\n' +
+      '2. Khẩu ngữ: "Bị đè chữ rồi" / "Chữ chồng lên nhau" / "Vỡ khung rồi":\n' +
+      '   - Ý định thực sự: Khắc phục lỗi bố cục vật lý.\n' +
+      '   - Hành động chuẩn: Chuyển sang layout "cards", rút gọn "description" còn 12-14 từ.\n' +
+      '3. Khẩu ngữ: "Rút gọn lại" / "Dài quá":\n' +
+      '   - Ý định thực sự: Rút gọn văn bản description còn 1-2 câu ngắn (10-14 từ).\n\n' +
       'QUY TẮC CƯỠNG CHẾ ĐẶC BIỆT KHI VIẾT SLIDE VÍ DỤ CODE:\n' +
       '- BẮT BUỘC đặt "layout": "code", "codeLanguage": "cpp".\n' +
-      '- BẮT BUỘC cung cấp trường "codeSnippet" chứa mã nguồn C++ thực tế hoàn chỉnh, có khai báo struct/biến/hàm/cout. TUYỆT ĐỐI KHÔNG ĐƯỢC VIẾT VĂN XUÔI LÝ THUYẾT TRONG CODE!\n' +
-      '- Trường "contentItems" chỉ dùng để giải thích 2-3 điểm lưu ý ngắn gọn của đoạn code trên.\n' +
+      '- BẮT BUỘC cung cấp trường "codeSnippet" chứa mã nguồn C++ thực tế hoàn chỉnh, có khai báo struct/biến/hàm/cout. TUYỆT ĐỐI KHÔNG ĐƯỢC VIẾT VĂN XUÔI LÝ THUYẾT TRONG CODE!\n\n' +
+      'QUY TẮC ĐỘ DÀI VĂN BẢN (CHỐNG TRÀN CHỮ - BẮT BUỘC):\n' +
+      '- Tiêu đề chính của slide (title): Ngắn gọn từ 4 đến 8 từ. Tránh tiêu đề quá dài làm tràn 3-4 dòng.\n' +
+      '- Tiêu đề con của mỗi khối (item title): Súc tích từ 3 đến 6 từ.\n' +
+      '- Nội dung mô tả (description) của mỗi khối: BẮT BUỘC KHÔNG VƯỢT QUÁ 14 ĐẾN 18 TỪ (tối đa 1-2 câu súc tích). TUYỆT ĐỐI KHÔNG VIẾT ĐOẠN VĂN DÀI (trên 22 từ) vì sẽ làm vỡ khung thẻ và tràn ra ngoài đường viền slide!\n' +
+      '- BẤT KỲ KHI NÀO người dùng yêu cầu "sửa slide", "đẹp và gọn gàng", "rút gọn", "sửa layout", "chống đè chữ": Bạn BẮT BUỘC phải biên tập lại toàn bộ các câu văn dài dòng thành các câu cô đọng, giàu giá trị thông tin, chỉ dài 12-16 từ mỗi thẻ!\n\n' +
+      'QUY TẮC PHẢN HỒI JSON:\n' +
+      '- Cung cấp trường "thought" (Chuỗi suy luận): Phân tích ngắn gọn ý định người dùng (Sửa nội dung hay Lỗi hiển thị đồ họa) và giải pháp bố cục được chọn trước khi xuất JSON.\n' +
       '- Phản hồi BẮT BUỘC là JSON thuần túy theo cấu trúc trên. Tuyệt đối không chèn ký tự xuống dòng thô bên trong chuỗi string.'
 
     const isUserAskingToCreate =
-      /\b(thêm|tạo|bổ sung|viết thêm)\b.*?\b(slide|slides|trang)\b/i.test(
+      /\b(thêm|tạo|bổ sung|viết thêm|chèn thêm)\b.*?\b(slide|slides|trang)\b/i.test(
+        normalizedMessage
+      ) ||
+      /\b(thêm|tạo|bổ sung)\b.*?\b(ví dụ|code|bài tập|minh họa)\b.*?\b(sau|cho)\b/i.test(
+        normalizedMessage
+      )
+
+    const isUserAskingToEdit =
+      /\b(sửa|chỉnh sửa|điều chỉnh|đổi|thay đổi|cập nhật|rút gọn|viết lại|format|bố cục|layout|đè chữ|tràn chữ|chống đè|đọc lại|xem lại|khắc phục|sắp xếp)\b/i.test(
         normalizedMessage
       )
 
     const isUserAskingBatch =
-      /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các)\b/i.test(
+      /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các|hàng loạt|toàn bài)\b/i.test(
         normalizedMessage
       )
+
+    const isAskingNewCodeExamples =
+      isUserAskingToCreate &&
+      /\b(code|ví dụ|c\+\+|thực hành|minh họa)\b/i.test(normalizedMessage)
 
     // Tự động phân tích các slide lý thuyết/khái niệm trong danh mục để ép targetSlideIndex chính xác
     let forcedTargetInstructions = ''
     if (
       isUserAskingBatch &&
+      isUserAskingToEdit &&
+      !isUserAskingToCreate &&
+      context.slidesCatalog &&
+      context.slidesCatalog.length > 0
+    ) {
+      forcedTargetInstructions =
+        `\n⚠️ BẮT BUỘC CHỈNH SỬA TRỰC TIẾP TRÊN CÁC SLIDE HIỆN CÓ ("action": "UPDATE_SLIDE"):\n` +
+        `Người dùng yêu cầu đọc lại toàn bộ bài giảng và chỉnh sửa layout/rút gọn văn bản để chống đè chữ.\n` +
+        `BẮT BUỘC THỰC HIỆN ĐÚNG CÁC NGUYÊN TẮC SAU:\n` +
+        `1. Chọn "action": "BATCH_CHANGES".\n` +
+        `2. Mảng "proposals" BẮT BUỘC chứa các đề xuất cập nhật cho tất cả các slide trong bài giảng.\n` +
+        `3. Mỗi phần tử trong "proposals" BẮT BUỘC DÙNG "action": "UPDATE_SLIDE". TUYỆT ĐỐI KHÔNG DÙNG "CREATE_SLIDE" vì người dùng không yêu cầu thêm slide mới, nếu dùng CREATE_SLIDE sẽ nhân đôi slide và giữ nguyên các slide cũ bị lỗi!\n` +
+        `4. "targetSlideIndex": là 0-indexed vị trí của từng slide hiện có trong bài giảng (Slide 1: index 0, Slide 2: index 1, Slide 3: index 2,...).\n` +
+        `5. "proposedSlide": đối tượng slide với tiêu đề và các "contentItems" được viết lại súc tích (12-18 từ mỗi mô tả), bố cục thông thoáng, tuyệt đối không bị đè chữ.\n`
+    } else if (
+      isUserAskingBatch &&
+      isAskingNewCodeExamples &&
       context.slidesCatalog &&
       context.slidesCatalog.length > 1
     ) {
@@ -813,7 +893,7 @@ export const chatAndProposeSlideEdit = async (
 
       if (selectedForcedSlides.length > 0) {
         forcedTargetInstructions =
-          `\n⚠️ BẮT BUỘC THỰC HIỆN ĐÚNG DANH SÁCH SLIDE ĐÍCH SAU:\n` +
+          `\n⚠️ BẮT BUỘC TẠO SLIDE VÍ DỤ CODE C++ MỚI SAU CÁC KHÁI NIỆM:\n` +
           `Người dùng yêu cầu bổ sung các slide ví dụ sau các khái niệm/nội dung đã nêu trong bài giảng.\n` +
           `Dựa trên danh mục bài giảng, bạn BẮT BUỘC PHẢI TẠO ĐÚNG ${selectedForcedSlides.length} SLIDE VÍ DỤ CODE C++ MỚI ("action": "CREATE_SLIDE"), chèn ngay sau các slide sau:\n` +
           selectedForcedSlides
@@ -827,24 +907,128 @@ export const chatAndProposeSlideEdit = async (
     }
 
     const catalogFormatted = (context.slidesCatalog || [])
-      .map(
-        (s) =>
-          `  - Slide ${s.slideNumber} (index: ${s.slideNumber - 1}): "${s.title}" [layout: ${s.layout}]` +
-          (s.bullets && s.bullets.length > 0
-            ? `\n    Ý chính: ${s.bullets.slice(0, 3).join('; ')}`
-            : '')
-      )
+      .map((s) => {
+        let lines = `  - Slide ${s.slideNumber} (index: ${s.slideNumber - 1}): "${s.title}" [layout: ${s.layout}]`
+        if (s.header) lines += ` [header: "${s.header}"]`
+        if (s.contentItems && s.contentItems.length > 0) {
+          const itemsStr = s.contentItems
+            .map((it, idx) => {
+              let str = `      + Mục ${idx + 1}: `
+              if (it.stat) str += `[Chỉ số/Stat: "${it.stat}"] `
+              if (it.tag) str += `[Tag: "${it.tag}"] `
+              str += `"${it.title}": "${it.description}"`
+              return str
+            })
+            .join('\n')
+          lines += `\n    Nội dung hiện tại:\n${itemsStr}`
+        } else if (s.bullets && s.bullets.length > 0) {
+          lines += `\n    Ý chính: ${s.bullets.slice(0, 3).join('; ')}`
+        }
+        return lines
+      })
       .join('\n')
 
-    const currentSlideInfo = context.currentSlide
-      ? `  - Đang mở: Slide ${(context.currentSlideIndex ?? 0) + 1}/${context.totalSlides}: "${String(context.currentSlide.title || 'Không có tiêu đề')}"\n` +
-        `  - Chi tiết components:\n${JSON.stringify(context.currentSlide.components || [], null, 2)}`
-      : 'Không có slide nào đang mở'
+    let currentSlideInfo = 'Không có slide nào đang mở'
+    if (context.currentSlide) {
+      const cs = context.currentSlide
+      type RawItem = {
+        title?: string
+        description?: string
+        tag?: string
+        stat?: string
+      }
+      let rawItems: RawItem[] = []
+      if (Array.isArray(cs.contentItems) && cs.contentItems.length > 0) {
+        rawItems = (cs.contentItems as RawItem[]).map((it) => ({
+          title: it.title || '',
+          description: it.description || '',
+          stat: it.stat || undefined,
+          tag: it.tag || undefined
+        }))
+      } else if (Array.isArray(cs.components)) {
+        const comps = cs.components as Array<{ id?: string; content?: string }>
+        const titleComps = comps.filter(
+          (c) => c.id?.includes('title-') && !c.id.startsWith('title-')
+        )
+        const descComps = comps.filter((c) => c.id?.includes('desc-'))
+        const statComps = comps.filter(
+          (c) => c.id?.includes('metric-num-') || c.id?.includes('tl-year-')
+        )
+        const tagComps = comps.filter(
+          (c) => c.id?.includes('tag-') && !c.id.includes('tag-bg-')
+        )
+        rawItems = titleComps.map((tc, idx) => ({
+          title: tc.content || '',
+          description: descComps[idx]?.content || '',
+          stat: statComps[idx]?.content || undefined,
+          tag: tagComps[idx]?.content || undefined
+        }))
+      }
+      const itemsSummary = rawItems
+        .filter((it) => it.title || it.description || it.stat)
+        .map((it, i) => {
+          let str = `    ${i + 1}. `
+          if (it.stat) str += `[Chỉ số/Stat: "${it.stat}"] `
+          if (it.tag) str += `[Tag: "${it.tag}"] `
+          str += `"${it.title}": "${it.description}"`
+          return str
+        })
+        .join('\n')
+
+      currentSlideInfo =
+        `  - Đang mở: Slide ${(context.currentSlideIndex ?? 0) + 1}/${context.totalSlides}\n` +
+        `  - Header: "${cs.header || ''}"\n` +
+        `  - Tiêu đề: "${cs.title || 'Không có tiêu đề'}"\n` +
+        `  - Bố cục hiện tại: "${cs.layout || cs.contentLayout || 'cards'}"\n` +
+        (itemsSummary
+          ? `  - Các khối nội dung trên slide:\n${itemsSummary}\n`
+          : '') +
+        (Array.isArray(cs.bullets) && cs.bullets.length > 0
+          ? `  - Các ý chính: ${(cs.bullets as string[]).join('; ')}\n`
+          : '')
+    }
 
     const conversationHistoryText = (context.history || [])
       .slice(-8)
       .map((h) => `${h.role === 'user' ? 'Người dùng' : 'AI'}: ${h.text}`)
       .join('\n')
+
+    const executionDirectives: string[] = []
+    if (isUserAskingBatch && isUserAskingToEdit && !isUserAskingToCreate) {
+      executionDirectives.push(
+        'Người dùng yêu cầu chỉnh sửa/chống đè chữ toàn bộ bài giảng: BẮT BUỘC chọn "action": "BATCH_CHANGES" với các phần tử trong "proposals" có "action": "UPDATE_SLIDE".',
+        'Duyệt qua từng slide trong slidesCatalog, đặt "targetSlideIndex" là vị trí 0-indexed tương ứng (0, 1, 2, ...).',
+        'TUYỆT ĐỐI KHÔNG DÙNG "CREATE_SLIDE" vì người dùng không yêu cầu thêm slide, dùng CREATE_SLIDE sẽ nhân bản bài giảng và làm hỏng bài của người dùng!',
+        'Viết lại nội dung description của từng item thật súc tích (12-18 từ), chọn bố cục layout thích hợp để không bao giờ bị đè chữ hay tràn chữ.',
+        'TUYỆT ĐỐI KHÔNG xuất trường proposedSlide ở ngoài cùng JSON khi là BATCH_CHANGES. Toàn bộ các slide phải nằm trong mảng proposals.'
+      )
+    } else if (isAskingNewCodeExamples) {
+      executionDirectives.push(
+        'Khi người dùng yêu cầu tạo/thêm các slide sau các khái niệm/lý thuyết: BẮT BUỘC chọn "action": "BATCH_CHANGES".',
+        'MẢNG "proposals" BẮT BUỘC PHẢI CHỨA TỐI THIỂU TỪ 3 ĐẾN 6 SLIDE ĐỀ XUẤT ("action": "CREATE_SLIDE"), TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ TẠO 1 SLIDE.',
+        'Duyệt danh mục slidesCatalog và chèn slide ví dụ mới sau các slide lý thuyết tiêu biểu (ví dụ: sau slide 2, 3, 4, 5, 6...).',
+        'TUYỆT ĐỐI KHÔNG xuất trường proposedSlide ở ngoài cùng JSON khi là BATCH_CHANGES. Toàn bộ slide mới phải nằm trong mảng proposals.',
+        'SLIDE VÍ DỤ CODE PHẢI CÓ CODE C++ THỰC TẾ TRONG "codeSnippet" VỚI LAYOUT "code", TUYỆT ĐỐI KHÔNG VIẾT VĂN XUÔI LÝ THUYẾT!'
+      )
+    } else if (isUserAskingToCreate) {
+      executionDirectives.push(
+        'Người dùng yêu cầu tạo slide mới: Chọn "action": "CREATE_SLIDE" (hoặc "BATCH_CHANGES" nếu tạo nhiều slide).',
+        '"targetSlideIndex": Vị trí slide đứng trước vị trí cần chèn.',
+        'Sinh nội dung slide mới hoàn chỉnh theo bố cục phù hợp.'
+      )
+    } else {
+      const slideNumMatch = normalizedMessage.match(/\bslide\s*(\d+)\b/i)
+      const targetIndexHint = slideNumMatch
+        ? parseInt(slideNumMatch[1], 10) - 1
+        : (context.currentSlideIndex ?? 0)
+
+      executionDirectives.push(
+        'Người dùng yêu cầu chỉnh sửa slide: Chọn "action": "UPDATE_SLIDE".',
+        `"targetSlideIndex": Vị trí 0-indexed của slide cần chỉnh sửa (người dùng nhắc đích danh: ${slideNumMatch ? `Slide ${slideNumMatch[1]} -> index ${targetIndexHint}` : `Slide hiện tại -> index ${targetIndexHint}`}).`,
+        'Nếu slide bị tràn chữ hoặc đè chữ: Kiểm tra layout của slide đó. Nếu là "metrics-grid" mà có "stat" là câu chữ dài (như "Ứng dụng Rộng rãi"), BẮT BUỘC rút ngắn "stat" thành số liệu ngắn gọn (<= 5 ký tự như "100%", "Top 1", "500+") HOẶC chuyển "layout": "cards", đồng thời rút gọn "description" còn 12-16 từ súc tích.',
+        'Trả về đối tượng proposedSlide hoàn chỉnh với nội dung mới đã khắc phục triệt để lỗi đè chữ.'
+      )
+    }
 
     const userPromptContent =
       `# THÔNG TIN BÀI GIẢNG: "${context.presentationTitle}" (Tổng: ${context.totalSlides} slides)\n\n` +
@@ -863,13 +1047,9 @@ export const chatAndProposeSlideEdit = async (
         : '') +
       `# YÊU CẦU MỚI TỪ NGƯỜI DÙNG:\n"${normalizedMessage}"\n\n` +
       'CHỈ THỊ THỰC HIỆN BẮT BUỘC:\n' +
-      '1. Khi người dùng yêu cầu tạo/thêm các slide sau các khái niệm/lý thuyết (hoặc toàn bài): BẮT BUỘC chọn "action": "BATCH_CHANGES".\n' +
-      '2. MẢNG "proposals" BẮT BUỘC PHẢI CHỨA TỐI THIỂU TỪ 3 ĐẾN 6 SLIDE ĐỀ XUẤT ("action": "CREATE_SLIDE"), TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ TẠO 1 SLIDE.\n' +
-      '3. Duyệt danh mục slidesCatalog và chèn slide ví dụ mới sau các slide lý thuyết tiêu biểu (ví dụ: sau slide 2, 3, 4, 5, 6...).\n' +
-      '4. TUYỆT ĐỐI KHÔNG xuất trường proposedSlide ở ngoài cùng JSON khi là BATCH_CHANGES. Toàn bộ slide mới phải nằm trong mảng proposals.\n' +
-      '5. SLIDE VÍ DỤ CODE PHẢI CÓ CODE C++ THỰC TẾ TRONG "codeSnippet" VỚI LAYOUT "code", TUYỆT ĐỐI KHÔNG VIẾT VĂN XUÔI LÝ THUYẾT!\n' +
+      executionDirectives.map((d, i) => `${i + 1}. ${d}`).join('\n') +
       (forcedTargetInstructions || '') +
-      '6. Trả về đúng 1 JSON object hợp lệ.'
+      `\n${executionDirectives.length + 1}. Trả về đúng 1 JSON object hợp lệ.`
 
     const response = await ai.models.generateContent({
       model: DEFAULT_AI_MODEL,
@@ -895,6 +1075,7 @@ export const chatAndProposeSlideEdit = async (
     }
 
     const parsed = safeParseAiJson<{
+      thought?: string
       reply?: string
       action?: AiSlideAction
       targetSlideIndex?: number
@@ -957,8 +1138,10 @@ export const chatAndProposeSlideEdit = async (
     const proposals: AiSlideProposal[] = rawProposals.map((p, idx) => {
       let pAction: 'CREATE_SLIDE' | 'UPDATE_SLIDE' =
         p.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
-      if (isUserAskingToCreate || action === 'BATCH_CHANGES') {
+      if (isUserAskingToCreate) {
         pAction = 'CREATE_SLIDE'
+      } else if (isUserAskingToEdit && !isUserAskingToCreate) {
+        pAction = 'UPDATE_SLIDE'
       }
       const pTargetIndex =
         typeof p.targetSlideIndex === 'number' &&
@@ -985,11 +1168,9 @@ export const chatAndProposeSlideEdit = async (
           (hasCodeSignal ? 'code' : 'cards'),
         id: (slideData.id as string) || `slide-${crypto.randomUUID()}`
       }
-      const existingComps = normalizedSlide.components
-      const slideComps =
-        Array.isArray(existingComps) && existingComps.length > 0
-          ? existingComps
-          : buildSlideComponents(normalizedSlide, context.theme)
+      // Luôn luôn tạo lại components bằng buildSlideComponents để Layout Engine tính toán lại tọa độ chính xác,
+      // không bao giờ giữ lại tọa độ cũ bị lệch hay đè chữ!
+      const slideComps = buildSlideComponents(normalizedSlide, context.theme)
 
       return {
         id: `prop-${Date.now()}-${idx}`,
@@ -1020,6 +1201,7 @@ export const chatAndProposeSlideEdit = async (
       : undefined
 
     return {
+      thought: parsed.thought?.trim(),
       reply,
       action,
       targetSlideIndex,

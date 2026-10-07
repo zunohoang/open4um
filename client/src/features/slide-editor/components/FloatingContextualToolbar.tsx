@@ -179,17 +179,20 @@ export const FloatingContextualToolbar = ({
     const currentWidth = selectedComponent.width ?? 40
 
     return (
-      <div className='flex h-11 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-4 shadow-md backdrop-blur-xs select-none'>
-        <span className='flex items-center gap-1.5 rounded-full bg-brand-rust/10 px-2.5 py-1 text-xs font-bold text-brand-rust'>
+      <div className='flex h-10 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-3 shadow-md backdrop-blur-xs select-none max-w-full overflow-x-auto no-scrollbar shrink-0'>
+        <span
+          className='flex items-center gap-1 rounded-full bg-brand-rust/10 px-2 py-0.5 text-xs font-bold text-brand-rust'
+          title='Hình ảnh'
+        >
           <ImageIcon size={14} />
-          <span>Hình ảnh</span>
+          <span className='hidden sm:inline'>Hình ảnh</span>
         </span>
 
         <span className='h-4 w-px bg-stone-200' />
 
         {/* Kích thước chiều rộng ảnh (%) */}
-        <div className='flex items-center gap-1'>
-          <span className='text-[11px] font-medium text-stone-500'>Rộng:</span>
+        <div className='flex items-center gap-0.5' title='Chiều rộng ảnh'>
+          <span className='text-[10px] font-medium text-stone-400'>R:</span>
           <button
             type='button'
             onClick={() =>
@@ -197,12 +200,12 @@ export const FloatingContextualToolbar = ({
                 width: Math.max(10, currentWidth - 5)
               })
             }
-            className='flex h-7 w-7 items-center justify-center rounded-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+            className='flex h-6 w-5 items-center justify-center rounded-l border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
             title='Thu nhỏ ảnh'
           >
-            <Minus size={12} />
+            <Minus size={10} />
           </button>
-          <span className='w-10 text-center font-mono text-xs font-bold text-stone-800'>
+          <span className='w-8 text-center font-mono text-[11px] font-bold text-stone-800'>
             {currentWidth}%
           </span>
           <button
@@ -212,18 +215,17 @@ export const FloatingContextualToolbar = ({
                 width: Math.min(95, currentWidth + 5)
               })
             }
-            className='flex h-7 w-7 items-center justify-center rounded-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+            className='flex h-6 w-5 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
             title='Phóng to ảnh'
           >
-            <Plus size={12} />
+            <Plus size={10} />
           </button>
         </div>
 
         <span className='h-4 w-px bg-stone-200' />
 
         {/* Xoay ảnh */}
-        <div className='flex items-center gap-1'>
-          <span className='text-[11px] font-medium text-stone-500'>Xoay:</span>
+        <div className='flex items-center gap-0.5'>
           <button
             type='button'
             onClick={() =>
@@ -231,7 +233,7 @@ export const FloatingContextualToolbar = ({
                 rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
               })
             }
-            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-1.5 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
             title='Xoay 90° cùng chiều kim đồng hồ'
           >
             <RotateCw size={12} />
@@ -243,7 +245,7 @@ export const FloatingContextualToolbar = ({
             <button
               type='button'
               onClick={() => onUpdateComponent({ rotation: 0 })}
-              className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+              className='flex h-7 items-center rounded-md px-1 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
               title='Đặt lại góc xoay về 0°'
             >
               0°
@@ -257,11 +259,10 @@ export const FloatingContextualToolbar = ({
         <button
           type='button'
           onClick={() => onDuplicateComponent(selectedComponent)}
-          className='flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100'
+          className='flex h-7 w-7 items-center justify-center rounded-md text-stone-600 hover:bg-stone-100'
           title='Nhân bản ảnh'
         >
           <Copy size={13} />
-          <span>Nhân bản</span>
         </button>
 
         {/* Xóa */}
@@ -322,11 +323,14 @@ export const FloatingContextualToolbar = ({
     }
 
     return (
-      <div className='flex h-11 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-3.5 shadow-md backdrop-blur-xs select-none'>
+      <div className='flex h-10 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-3 shadow-md backdrop-blur-xs select-none max-w-full overflow-x-auto no-scrollbar shrink-0'>
         {/* Nhãn hình khối */}
-        <span className='flex items-center gap-1.5 rounded-full bg-brand-rust/10 px-2.5 py-1 text-xs font-bold text-brand-rust'>
+        <span
+          className='flex items-center gap-1 rounded-full bg-brand-rust/10 px-2 py-0.5 text-xs font-bold text-brand-rust'
+          title={getShapeName(shapeType)}
+        >
           {renderShapeIcon(shapeType)}
-          <span>{getShapeName(shapeType)}</span>
+          <span className='hidden sm:inline'>{getShapeName(shapeType)}</span>
         </span>
 
         <span className='h-4 w-px bg-stone-200' />
@@ -339,10 +343,10 @@ export const FloatingContextualToolbar = ({
               setIsFillPickerOpen((prev) => !prev)
               setIsBorderColorPickerOpen(false)
             }}
-            className='flex h-7 items-center gap-1.5 rounded-md border border-stone-200 px-2 text-xs font-medium text-stone-700 hover:bg-stone-50 cursor-pointer'
+            className='flex h-7 items-center gap-1.5 rounded-md border border-stone-200 px-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 cursor-pointer'
             title='Chọn màu nền tô'
           >
-            <PaintBucket size={14} className='text-stone-600' />
+            <PaintBucket size={13} className='text-stone-600' />
             <span
               className='h-3.5 w-3.5 rounded-xs border border-stone-300 shadow-2xs'
               style={{
@@ -376,7 +380,7 @@ export const FloatingContextualToolbar = ({
               setIsBorderColorPickerOpen((prev) => !prev)
               setIsFillPickerOpen(false)
             }}
-            className='flex h-7 items-center gap-1.5 rounded-md border border-stone-200 px-2 text-xs font-medium text-stone-700 hover:bg-stone-50 cursor-pointer'
+            className='flex h-7 items-center gap-1.5 rounded-md border border-stone-200 px-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 cursor-pointer'
             title='Chọn màu viền'
           >
             <Square size={13} className='text-stone-600' />
@@ -398,19 +402,21 @@ export const FloatingContextualToolbar = ({
         </div>
 
         {/* 3. Độ dày viền (Border Width) */}
-        <div className='flex items-center gap-1'>
-          <span className='text-[10px] font-medium text-stone-500'>Viền:</span>
+        <div className='flex items-center gap-0.5' title='Độ dày đường viền'>
+          <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>
+            Viền:
+          </span>
           <select
             value={borderWidth}
             onChange={(e) =>
               onUpdateComponent({ borderWidth: Number(e.target.value) })
             }
-            className='h-7 rounded-md border border-stone-200 bg-transparent px-1.5 font-mono text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer'
+            className='h-7 rounded-md border border-stone-200 bg-transparent px-1 font-mono text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer'
             title='Độ dày đường viền'
           >
             {BORDER_WIDTHS.map((w) => (
               <option key={w} value={w}>
-                {w === 0 ? '0px (Không viền)' : `${w}px`}
+                {w === 0 ? '0px' : `${w}px`}
               </option>
             ))}
           </select>
@@ -418,14 +424,16 @@ export const FloatingContextualToolbar = ({
 
         {/* 4. Bo góc (Border Radius - cho chữ nhật / vuông) */}
         {['rectangle', 'square', 'rounded-rect'].includes(shapeType) && (
-          <div className='flex items-center gap-1'>
-            <span className='text-[10px] font-medium text-stone-500'>Góc:</span>
+          <div className='flex items-center gap-0.5' title='Độ bo tròn góc'>
+            <span className='text-[10px] font-medium text-stone-400 hidden sm:inline'>
+              Góc:
+            </span>
             <select
               value={borderRadius}
               onChange={(e) =>
                 onUpdateComponent({ borderRadius: Number(e.target.value) })
               }
-              className='h-7 rounded-md border border-stone-200 bg-transparent px-1.5 font-mono text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer'
+              className='h-7 rounded-md border border-stone-200 bg-transparent px-1 font-mono text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer'
               title='Độ bo tròn góc'
             >
               {BORDER_RADII.map((r) => (
@@ -438,8 +446,8 @@ export const FloatingContextualToolbar = ({
         )}
 
         {/* 5. Kích thước chiều rộng (%) */}
-        <div className='flex items-center gap-0.5'>
-          <span className='text-[10px] font-medium text-stone-500'>R:</span>
+        <div className='flex items-center gap-0.5' title='Chiều rộng (%)'>
+          <span className='text-[10px] font-medium text-stone-400'>R:</span>
           <button
             type='button'
             onClick={() =>
@@ -447,12 +455,12 @@ export const FloatingContextualToolbar = ({
                 width: Math.max(5, currentWidth - 5)
               })
             }
-            className='flex h-7 w-5 items-center justify-center rounded-l-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+            className='flex h-6 w-4 items-center justify-center rounded-l border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
             title='Giảm chiều rộng'
           >
-            <Minus size={10} />
+            <Minus size={9} />
           </button>
-          <span className='w-8 text-center font-mono text-[11px] font-bold text-stone-800'>
+          <span className='w-7 text-center font-mono text-[10px] font-bold text-stone-800'>
             {currentWidth}%
           </span>
           <button
@@ -462,17 +470,17 @@ export const FloatingContextualToolbar = ({
                 width: Math.min(95, currentWidth + 5)
               })
             }
-            className='flex h-7 w-5 items-center justify-center rounded-r-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+            className='flex h-6 w-4 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
             title='Tăng chiều rộng'
           >
-            <Plus size={10} />
+            <Plus size={9} />
           </button>
         </div>
 
         {/* 6. Kích thước chiều cao (%) - ngoại trừ đường kẻ */}
         {shapeType !== 'line' && (
-          <div className='flex items-center gap-0.5'>
-            <span className='text-[10px] font-medium text-stone-500'>C:</span>
+          <div className='flex items-center gap-0.5' title='Chiều cao (%)'>
+            <span className='text-[10px] font-medium text-stone-400'>C:</span>
             <button
               type='button'
               onClick={() =>
@@ -480,12 +488,12 @@ export const FloatingContextualToolbar = ({
                   height: Math.max(5, currentHeight - 5)
                 })
               }
-              className='flex h-7 w-5 items-center justify-center rounded-l-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+              className='flex h-6 w-4 items-center justify-center rounded-l border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
               title='Giảm chiều cao'
             >
-              <Minus size={10} />
+              <Minus size={9} />
             </button>
-            <span className='w-8 text-center font-mono text-[11px] font-bold text-stone-800'>
+            <span className='w-7 text-center font-mono text-[10px] font-bold text-stone-800'>
               {currentHeight}%
             </span>
             <button
@@ -495,10 +503,10 @@ export const FloatingContextualToolbar = ({
                   height: Math.min(95, currentHeight + 5)
                 })
               }
-              className='flex h-7 w-5 items-center justify-center rounded-r-md border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
+              className='flex h-6 w-4 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
               title='Tăng chiều cao'
             >
-              <Plus size={10} />
+              <Plus size={9} />
             </button>
           </div>
         )}
@@ -506,8 +514,7 @@ export const FloatingContextualToolbar = ({
         <span className='h-4 w-px bg-stone-200' />
 
         {/* Xoay hình khối */}
-        <div className='flex items-center gap-1'>
-          <span className='text-[11px] font-medium text-stone-500'>Xoay:</span>
+        <div className='flex items-center gap-0.5'>
           <button
             type='button'
             onClick={() =>
@@ -515,7 +522,7 @@ export const FloatingContextualToolbar = ({
                 rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
               })
             }
-            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+            className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-1.5 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
             title='Xoay 90° cùng chiều kim đồng hồ'
           >
             <RotateCw size={12} />
@@ -527,7 +534,7 @@ export const FloatingContextualToolbar = ({
             <button
               type='button'
               onClick={() => onUpdateComponent({ rotation: 0 })}
-              className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+              className='flex h-7 items-center rounded-md px-1 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
               title='Đặt lại góc xoay về 0°'
             >
               0°
@@ -569,10 +576,10 @@ export const FloatingContextualToolbar = ({
   const textAlign = selectedComponent.textAlign || 'left'
 
   return (
-    <div className='flex h-11 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-3.5 shadow-md backdrop-blur-xs select-none'>
+    <div className='flex h-10 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-2.5 sm:px-3 shadow-md backdrop-blur-xs select-none max-w-full overflow-x-auto no-scrollbar shrink-0'>
       {/* 1. Phông chữ (Canva font picker với 8 phông chữ phong phú) */}
       <div className='flex items-center gap-1'>
-        <Type size={14} className='text-stone-500' />
+        <Type size={14} className='text-stone-500 shrink-0' />
         <select
           value={selectedComponent.fontFamily || 'sans'}
           onChange={(e) =>
@@ -580,7 +587,7 @@ export const FloatingContextualToolbar = ({
               fontFamily: e.target.value
             })
           }
-          className='h-7 max-w-[155px] rounded-md border border-stone-200 bg-transparent px-2 text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer'
+          className='h-7 max-w-[115px] sm:max-w-[140px] rounded-md border border-stone-200 bg-transparent px-1.5 text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer truncate'
           title='Chọn phông chữ'
         >
           {FONT_OPTIONS.map((f) => (
@@ -606,10 +613,10 @@ export const FloatingContextualToolbar = ({
               fontSize: Math.max(10, currentFontSize - 2)
             })
           }
-          className='flex h-7 w-6 items-center justify-center rounded-l-md border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'
+          className='flex h-7 w-5 items-center justify-center rounded-l border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'
           title='Giảm cỡ chữ'
         >
-          <Minus size={12} />
+          <Minus size={11} />
         </button>
         <input
           type='number'
@@ -619,7 +626,7 @@ export const FloatingContextualToolbar = ({
               fontSize: Math.max(8, Math.min(120, Number(e.target.value) || 20))
             })
           }
-          className='h-7 w-11 border-y border-stone-200 text-center font-mono text-xs font-bold text-stone-800 outline-none'
+          className='h-7 w-9 border-y border-stone-200 text-center font-mono text-xs font-bold text-stone-800 outline-none'
           title='Nhập cỡ chữ'
         />
         <button
@@ -629,10 +636,10 @@ export const FloatingContextualToolbar = ({
               fontSize: Math.min(120, currentFontSize + 2)
             })
           }
-          className='flex h-7 w-6 items-center justify-center rounded-r-md border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'
+          className='flex h-7 w-5 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'
           title='Tăng cỡ chữ'
         >
-          <Plus size={12} />
+          <Plus size={11} />
         </button>
       </div>
 
@@ -643,14 +650,14 @@ export const FloatingContextualToolbar = ({
         <button
           type='button'
           onClick={() => setIsColorPickerOpen((prev) => !prev)}
-          className='flex h-7 flex-col items-center justify-center rounded-md px-2 hover:bg-stone-100 cursor-pointer'
+          className='flex h-7 flex-col items-center justify-center rounded-md px-1.5 hover:bg-stone-100 cursor-pointer'
           title='Màu chữ'
         >
           <span className='text-xs font-bold text-stone-900 leading-none'>
             A
           </span>
           <span
-            className='mt-0.5 h-1 w-4 rounded-full border border-stone-300'
+            className='mt-0.5 h-1 w-3.5 rounded-full border border-stone-300'
             style={{ backgroundColor: selectedComponent.color || '#173c39' }}
           />
         </button>
@@ -676,7 +683,7 @@ export const FloatingContextualToolbar = ({
               fontWeight: isBold ? 'normal' : 'bold'
             })
           }
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             isBold
               ? 'bg-brand-rust/15 text-brand-rust font-black'
               : 'text-stone-700 hover:bg-stone-100'
@@ -694,7 +701,7 @@ export const FloatingContextualToolbar = ({
               fontStyle: isItalic ? 'normal' : 'italic'
             })
           }
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             isItalic
               ? 'bg-brand-rust/15 text-brand-rust font-bold'
               : 'text-stone-700 hover:bg-stone-100'
@@ -712,7 +719,7 @@ export const FloatingContextualToolbar = ({
               textDecoration: isUnderline ? 'none' : 'underline'
             })
           }
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             isUnderline
               ? 'bg-brand-rust/15 text-brand-rust font-bold'
               : 'text-stone-700 hover:bg-stone-100'
@@ -730,7 +737,7 @@ export const FloatingContextualToolbar = ({
               textCase: isUppercase ? 'normal' : 'uppercase'
             })
           }
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             isUppercase
               ? 'bg-brand-rust/15 text-brand-rust'
               : 'text-stone-700 hover:bg-stone-100'
@@ -748,7 +755,7 @@ export const FloatingContextualToolbar = ({
         <button
           type='button'
           onClick={() => onUpdateComponent({ textAlign: 'left' })}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             textAlign === 'left'
               ? 'bg-brand-rust/15 text-brand-rust font-bold'
               : 'text-stone-600 hover:bg-stone-100'
@@ -760,7 +767,7 @@ export const FloatingContextualToolbar = ({
         <button
           type='button'
           onClick={() => onUpdateComponent({ textAlign: 'center' })}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             textAlign === 'center'
               ? 'bg-brand-rust/15 text-brand-rust font-bold'
               : 'text-stone-600 hover:bg-stone-100'
@@ -772,7 +779,7 @@ export const FloatingContextualToolbar = ({
         <button
           type='button'
           onClick={() => onUpdateComponent({ textAlign: 'right' })}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+          className={`flex h-7 w-6 items-center justify-center rounded-md transition ${
             textAlign === 'right'
               ? 'bg-brand-rust/15 text-brand-rust font-bold'
               : 'text-stone-600 hover:bg-stone-100'
@@ -791,7 +798,7 @@ export const FloatingContextualToolbar = ({
             type: selectedComponent.type === 'bullets' ? 'text' : 'bullets'
           })
         }
-        className={`flex h-7 items-center gap-1 rounded-md px-2 text-xs transition ${
+        className={`flex h-7 items-center gap-1 rounded-md px-1.5 text-xs transition ${
           selectedComponent.type === 'bullets'
             ? 'bg-brand-rust/15 text-brand-rust font-bold'
             : 'text-stone-600 hover:bg-stone-100'
@@ -804,7 +811,7 @@ export const FloatingContextualToolbar = ({
       <span className='h-4 w-px bg-stone-200' />
 
       {/* 7. Xoay văn bản */}
-      <div className='flex items-center gap-1'>
+      <div className='flex items-center gap-0.5'>
         <button
           type='button'
           onClick={() =>
@@ -812,7 +819,7 @@ export const FloatingContextualToolbar = ({
               rotation: ((selectedComponent.rotation ?? 0) + 90) % 360
             })
           }
-          className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
+          className='flex h-7 items-center gap-1 rounded-md border border-stone-200 px-1.5 text-xs font-bold text-stone-700 hover:bg-stone-100 transition'
           title='Xoay 90° cùng chiều kim đồng hồ'
         >
           <RotateCw size={12} />
@@ -824,7 +831,7 @@ export const FloatingContextualToolbar = ({
           <button
             type='button'
             onClick={() => onUpdateComponent({ rotation: 0 })}
-            className='flex h-7 items-center rounded-md px-1.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
+            className='flex h-7 items-center rounded-md px-1 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 transition'
             title='Đặt lại góc xoay về 0°'
           >
             0°

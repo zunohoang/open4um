@@ -136,11 +136,18 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
     const radius = comp.borderRadius ?? 0
     const shapeType = comp.shapeType || 'rectangle'
 
+    const cx = x + w / 2
+    const cy = shapeType === 'line' ? y + (strokeW || 2) / 2 : y + h / 2
+    const rotTransform = comp.rotation
+      ? `rotate(${comp.rotation} ${cx} ${cy})`
+      : undefined
+
+    let shapeElement: React.ReactNode = null
+
     switch (shapeType) {
       case 'circle':
-        return (
+        shapeElement = (
           <ellipse
-            key={comp.id}
             cx={x + w / 2}
             cy={y + h / 2}
             rx={w / 2}
@@ -150,30 +157,30 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             strokeWidth={strokeW}
           />
         )
+        break
       case 'triangle':
-        return (
+        shapeElement = (
           <polygon
-            key={comp.id}
             points={`${x + w / 2},${y} ${x + w},${y + h} ${x},${y + h}`}
             fill={fill}
             stroke={strokeW > 0 ? stroke : 'none'}
             strokeWidth={strokeW}
           />
         )
+        break
       case 'star':
-        return (
+        shapeElement = (
           <polygon
-            key={comp.id}
             points={getStarPoints(x, y, w, h)}
             fill={fill}
             stroke={strokeW > 0 ? stroke : 'none'}
             strokeWidth={strokeW}
           />
         )
+        break
       case 'line':
-        return (
+        shapeElement = (
           <line
-            key={comp.id}
             x1={x}
             y1={y + (strokeW || 2) / 2}
             x2={x + w}
@@ -182,10 +189,10 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             strokeWidth={Math.max(2, strokeW || 2)}
           />
         )
+        break
       case 'rounded-rect':
-        return (
+        shapeElement = (
           <rect
-            key={comp.id}
             x={x}
             y={y}
             width={w}
@@ -196,12 +203,12 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             strokeWidth={strokeW}
           />
         )
+        break
       case 'rectangle':
       case 'square':
       default:
-        return (
+        shapeElement = (
           <rect
-            key={comp.id}
             x={x}
             y={y}
             width={w}
@@ -212,7 +219,14 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             strokeWidth={strokeW}
           />
         )
+        break
     }
+
+    return (
+      <g key={comp.id} transform={rotTransform}>
+        {shapeElement}
+      </g>
+    )
   }
 
   // 2. Trường hợp slide có components tùy biến
@@ -242,6 +256,9 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
           }
 
           if (comp.type === 'image') {
+            const imgH = h || w * 0.6
+            const cx = x + w / 2
+            const cy = y + imgH / 2
             return (
               <image
                 key={comp.id}
@@ -249,8 +266,13 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
                 x={x}
                 y={y}
                 width={w}
-                height={h || w * 0.6}
+                height={imgH}
                 preserveAspectRatio='xMidYMid slice'
+                transform={
+                  comp.rotation
+                    ? `rotate(${comp.rotation} ${cx} ${cy})`
+                    : undefined
+                }
               />
             )
           }
@@ -269,14 +291,27 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             comp.textCase === 'uppercase' ? 'uppercase' : 'none'
           const textDecoration = comp.textDecoration ?? 'none'
 
+          const initialH = comp.height
+            ? (comp.height / 100) * 540
+            : fontSize * 1.3
+          const cx = x + w / 2
+          const cy = y + initialH / 2
+          // TC-28: Chiều cao foreignObject tự động giãn hoặc có đệm an toàn để không cắt xén dòng thứ 2 trở đi
+          const textHeight = Math.max(h || 60, 540 - y - 10)
+
           return (
             <foreignObject
               key={comp.id}
               x={x}
               y={y}
               width={w}
-              height={h || Math.max(60, 540 - y - 10)}
-              className='overflow-hidden pointer-events-none'
+              height={textHeight}
+              className='pointer-events-none'
+              transform={
+                comp.rotation
+                  ? `rotate(${comp.rotation} ${cx} ${cy})`
+                  : undefined
+              }
             >
               <div
                 style={{
@@ -290,9 +325,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
                   textTransform,
                   lineHeight: 1.3,
                   wordBreak: 'break-word',
-                  width: '100%',
-                  height: '100%',
-                  overflow: 'hidden'
+                  width: '100%'
                 }}
               >
                 {comp.type === 'bullets' ? (

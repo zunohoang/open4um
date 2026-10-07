@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from 'react'
 import {
   Check,
   Cloud,
@@ -6,14 +5,12 @@ import {
   FileDown,
   ListTree,
   Loader2,
-  Palette,
   Play,
   Redo2,
   Sparkles,
   Undo2
 } from 'lucide-react'
 import { BrandLogo } from '@/components/ui'
-import { THEME_PRESETS } from '../constants/theme-options'
 import { useEditorStore } from '../store/editor.store'
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
@@ -32,8 +29,6 @@ interface EditorHeaderProps {
   countdown: number | null
   isAutoSave: boolean
   onToggleAutoSave: () => void
-  currentThemeId?: string
-  onThemeChange?: (themeId: string) => void
 }
 
 export const EditorHeader = ({
@@ -49,33 +44,12 @@ export const EditorHeader = ({
   saveStatus,
   countdown,
   isAutoSave,
-  onToggleAutoSave,
-  currentThemeId,
-  onThemeChange
+  onToggleAutoSave
 }: EditorHeaderProps) => {
   const { undoStack, redoStack, isAiPanelOpen, toggleAiPanel } =
     useEditorStore()
   const canUndo = undoStack.length > 0
   const canRedo = redoStack.length > 0
-  const [isThemeOpen, setIsThemeOpen] = useState(false)
-  const themeRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        themeRef.current &&
-        !themeRef.current.contains(event.target as Node)
-      ) {
-        setIsThemeOpen(false)
-      }
-    }
-    if (isThemeOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isThemeOpen])
 
   return (
     <header className='relative flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
@@ -249,81 +223,6 @@ export const EditorHeader = ({
             <ListTree size={14} />
             <span className='hidden md:inline'>Dàn ý</span>
           </button>
-        )}
-
-        {/* Nút đổi Giao diện / Theme */}
-        {onThemeChange && (
-          <div className='relative' ref={themeRef}>
-            <button
-              type='button'
-              onClick={() => setIsThemeOpen((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
-                isThemeOpen
-                  ? 'border border-brand-rust/50 bg-emerald-900/60 text-brand-rust'
-                  : 'text-stone-300 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-              title='Đổi giao diện bài giảng (Theme)'
-            >
-              <Palette size={14} />
-              <span className='hidden md:inline'>Giao diện</span>
-            </button>
-
-            {isThemeOpen && (
-              <div className='absolute right-0 top-full mt-2 w-72 rounded-xl border border-emerald-800/80 bg-[#142321] p-2.5 shadow-2xl backdrop-blur-md z-50'>
-                <div className='px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-stone-400 border-b border-emerald-800/50 mb-1.5'>
-                  Bộ giao diện bài giảng
-                </div>
-                <div className='space-y-1 max-h-80 overflow-y-auto'>
-                  {THEME_PRESETS.map((t) => {
-                    const isSelected =
-                      (currentThemeId || 'classic-editorial') === t.id
-                    return (
-                      <button
-                        key={t.id}
-                        type='button'
-                        onClick={() => {
-                          onThemeChange(t.id)
-                          setIsThemeOpen(false)
-                        }}
-                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg p-2 text-left transition cursor-pointer ${
-                          isSelected
-                            ? 'bg-emerald-900/70 text-white ring-1 ring-brand-rust/60'
-                            : 'text-stone-300 hover:bg-emerald-900/30 hover:text-white'
-                        }`}
-                      >
-                        <div className='flex items-center gap-2.5 min-w-0'>
-                          <div className='flex -space-x-1 shrink-0'>
-                            <div
-                              className='h-5 w-5 rounded-full border border-stone-600 shadow-2xs'
-                              style={{ backgroundColor: t.background }}
-                            />
-                            <div
-                              className='h-5 w-5 rounded-full border border-stone-600 shadow-2xs'
-                              style={{ backgroundColor: t.accentColor }}
-                            />
-                          </div>
-                          <div className='min-w-0 truncate'>
-                            <div className='text-xs font-semibold truncate'>
-                              {t.name}
-                            </div>
-                            <div className='text-[10px] text-stone-400 truncate'>
-                              {t.description}
-                            </div>
-                          </div>
-                        </div>
-                        {isSelected && (
-                          <Check
-                            size={14}
-                            className='shrink-0 text-brand-rust'
-                          />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
         )}
 
         {/* Toggle AI Copilot Panel */}
