@@ -2,8 +2,8 @@ import { env } from '@/config/env'
 import { logger } from '@/lib/logger'
 import { AppError } from '@/utils/AppError'
 
-const AI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-const DEFAULT_AI_MODEL = 'gemini-3.5-flash'
+const AI_API_BASE = `${env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com'}/v1beta/models`
+const DEFAULT_AI_MODEL = env.GEMINI_MODEL
 
 export interface OutlineSection {
   heading: string

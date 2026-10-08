@@ -150,4 +150,51 @@ describe('production admin environment', () => {
     expect(result.ADMIN_NAME).toBe('Admin ABSlider')
     expect(result.ADMIN_CREDIT_BALANCE).toBe(1000)
   })
+
+  it('giữ model Google hiện tại khi không cấu hình AI provider', () => {
+    const result = parseEnv({ ...baseEnv, NODE_ENV: 'test' })
+    expect(result.GEMINI_BASE_URL).toBeUndefined()
+    expect(result.GEMINI_MODEL).toBe('gemini-3.5-flash')
+  })
+
+  it('đọc endpoint và model ShopAIKey từ env', () => {
+    const result = parseEnv({
+      ...baseEnv,
+      NODE_ENV: 'test',
+      GEMINI_BASE_URL: 'https://api.shopaikey.com',
+      GEMINI_MODEL: ' gemini-3.8-flash '
+    })
+    expect(result.GEMINI_BASE_URL).toBe('https://api.shopaikey.com')
+    expect(result.GEMINI_MODEL).toBe('gemini-3.8-flash')
+  })
+
+  it('dùng fallback khi endpoint và model để trống', () => {
+    const result = parseEnv({
+      ...baseEnv,
+      NODE_ENV: 'test',
+      GEMINI_BASE_URL: '',
+      GEMINI_MODEL: '   '
+    })
+    expect(result.GEMINI_BASE_URL).toBeUndefined()
+    expect(result.GEMINI_MODEL).toBe('gemini-3.5-flash')
+  })
+
+  it.each([
+    'not-a-url',
+    'ftp://api.shopaikey.com',
+    'http://api.shopaikey.com',
+    'https://user:password@api.shopaikey.com',
+    'https://api.shopaikey.com/v1beta',
+    'https://api.shopaikey.com?key=secret',
+    'https://api.shopaikey.com#fragment'
+  ])('từ chối AI origin production không an toàn: %s', (origin) => {
+    expect(() =>
+      parseEnv({
+        ...baseEnv,
+        ADMIN_EMAIL: 'owner@example.com',
+        ADMIN_PASSWORD: 'Strong!Password123',
+        GEMINI_BASE_URL: origin
+      })
+    ).toThrow(ZodError)
+  })
 })

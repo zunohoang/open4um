@@ -79,6 +79,11 @@ const envSchema = z
     REDIS_URL: z.string().url(),
     JWT_SECRET: z.string().min(16),
     GEMINI_API_KEY: z.string(),
+    GEMINI_BASE_URL: optionalUrl,
+    GEMINI_MODEL: z.preprocess(
+      emptyStringToUndefined,
+      z.string().trim().min(1).default('gemini-3.5-flash')
+    ),
     MINIO_ENDPOINT: z.string(),
     MINIO_USE_SSL: booleanString,
     MINIO_PUBLIC_ENDPOINT: optionalUrl,
@@ -102,6 +107,27 @@ const envSchema = z
       .transform((val) => val !== 'false')
   })
   .superRefine((values, context) => {
+    if (values.GEMINI_BASE_URL) {
+      let validOrigin = false
+      try {
+        const aiUrl = new URL(values.GEMINI_BASE_URL)
+        validOrigin =
+          isExactOrigin(values.GEMINI_BASE_URL) &&
+          ['http:', 'https:'].includes(aiUrl.protocol) &&
+          (values.NODE_ENV !== 'production' || aiUrl.protocol === 'https:')
+      } catch {
+        // The field validator also rejects malformed URLs.
+      }
+      if (!validOrigin) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['GEMINI_BASE_URL'],
+          message:
+            'GEMINI_BASE_URL must be an HTTP(S) origin without credentials or paths; production requires HTTPS'
+        })
+      }
+    }
+
     for (const origin of values.CORS_ALLOWED_ORIGINS) {
       if (!isExactOrigin(origin)) {
         context.addIssue({

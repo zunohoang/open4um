@@ -208,6 +208,29 @@ for release_environment in develop production; do
       --env-file "${repository_root}/deploy/env/${release_environment}.env.example" \
       --file "$compose_file" \
       config --quiet
+
+  rendered_ai_env="$(
+    RELEASE_ENVIRONMENT="$release_environment" \
+    RELEASE_SHA="$release_sha" \
+    ABSLIDER_CLIENT_IMAGE="$client_digest_ref" \
+    ABSLIDER_SERVER_IMAGE="$server_digest_ref" \
+    GEMINI_BASE_URL='https://api.shopaikey.com' \
+    GEMINI_MODEL='gemini-3.8-flash' \
+      docker compose \
+        --project-name "abslider-${release_environment}" \
+        --env-file "${repository_root}/deploy/env/${release_environment}.env.example" \
+        --file "$compose_file" \
+        config --format json
+  )"
+  printf '%s' "$rendered_ai_env" | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const env = JSON.parse(input).services.server.environment;
+      if (env.GEMINI_BASE_URL !== "https://api.shopaikey.com" ||
+          env.GEMINI_MODEL !== "gemini-3.8-flash") process.exit(1);
+    });
+  ' || fail 'Compose must forward the configured AI endpoint and model'
 done
 
 printf 'PASS: deployment source contracts\n'
