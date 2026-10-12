@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
+import { Maximize2, Minimize2 } from 'lucide-react'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { useToast } from '@/components/ui/Toast'
@@ -28,6 +29,7 @@ export const CreateLectureModal = ({
 
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [promptExpanded, setPromptExpanded] = useState(false)
   const [selectedThemeId, setSelectedThemeId] =
     useState<string>(DEFAULT_THEME_ID)
   const [outline, setOutline] = useState<Outline | null>(null)
@@ -268,7 +270,43 @@ export const CreateLectureModal = ({
         </div>
 
         {/* Nội dung chính: 2 box chia theo CSS Grid tỉ lệ 3/7 */}
-        <div className='grid flex-1 overflow-hidden md:grid-cols-10 md:divide-x divide-stone-300'>
+        <div className='relative grid flex-1 overflow-hidden md:grid-cols-10 md:divide-x divide-stone-300'>
+          {/* Vùng soạn thảo prompt mở rộng, dùng chung state với ô nhập nhỏ */}
+          {promptExpanded && (
+            <div className='absolute inset-0 z-10 flex flex-col bg-white p-6'>
+              <div className='flex items-center justify-between'>
+                <label
+                  htmlFor='modal-lecture-prompt-expanded'
+                  className='block text-xs font-bold text-stone-700 uppercase tracking-wider'
+                >
+                  Prompt sinh dàn ý
+                </label>
+                <button
+                  type='button'
+                  onClick={() => setPromptExpanded(false)}
+                  className='flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider transition hover:text-orange-700 cursor-pointer'
+                >
+                  <Minimize2 size={14} />
+                  Thu gọn
+                </button>
+              </div>
+              <textarea
+                id='modal-lecture-prompt-expanded'
+                autoFocus
+                className='mt-3 w-full flex-1 border border-stone-300 bg-white p-4 text-sm leading-relaxed outline-orange-700 resize-none custom-scrollbar'
+                placeholder='Ví dụ: Căn bản về NodeJS cho sinh viên IT...'
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    setPromptExpanded(false)
+                  }
+                }}
+              />
+            </div>
+          )}
+
           {/* Cột 1 (3/10 chiều rộng): Thông tin đầu vào */}
           <div className='flex flex-col justify-between bg-stone-50 p-6 md:col-span-3'>
             <div className='space-y-4'>
@@ -289,12 +327,24 @@ export const CreateLectureModal = ({
               </div>
 
               <div>
-                <label
-                  htmlFor='modal-lecture-prompt'
-                  className='block text-xs font-bold text-stone-700 uppercase tracking-wider'
-                >
-                  Prompt sinh dàn ý
-                </label>
+                <div className='flex items-center justify-between'>
+                  <label
+                    htmlFor='modal-lecture-prompt'
+                    className='block text-xs font-bold text-stone-700 uppercase tracking-wider'
+                  >
+                    Prompt sinh dàn ý
+                  </label>
+                  <button
+                    type='button'
+                    onClick={() => setPromptExpanded(true)}
+                    className='flex items-center gap-1 text-[11px] font-bold text-stone-500 uppercase tracking-wider transition hover:text-orange-700 cursor-pointer'
+                    aria-label='Mở rộng ô prompt'
+                    title='Mở rộng'
+                  >
+                    <Maximize2 size={13} />
+                    Mở rộng
+                  </button>
+                </div>
                 <textarea
                   id='modal-lecture-prompt'
                   className='mt-2 w-full border border-stone-300 bg-white p-3 text-xs outline-orange-700 resize-none custom-scrollbar'
