@@ -34,6 +34,31 @@ import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 
+const resolveProposalTargetIndex = (
+  slides: Slide[],
+  proposedSlide: Slide,
+  action?: string,
+  targetSlideIndex?: number,
+  targetSlideId?: string
+) => {
+  if (targetSlideId) {
+    return slides.findIndex((slide) => slide.id === targetSlideId)
+  }
+
+  if (action !== 'CREATE_SLIDE') {
+    const indexByProposedId = slides.findIndex(
+      (slide) => slide.id === proposedSlide.id
+    )
+    if (indexByProposedId >= 0) return indexByProposedId
+  }
+
+  return typeof targetSlideIndex === 'number' &&
+    targetSlideIndex >= 0 &&
+    targetSlideIndex < slides.length
+    ? targetSlideIndex
+    : -1
+}
+
 interface EditorPageProps {
   initialLecture?: Lecture
   onBack?: () => void
@@ -65,6 +90,7 @@ export const EditorPage = ({
     aiMessages,
     previewSlide,
     previewSlideAction,
+    previewTargetSlideId,
     setPreviewSlide,
     sourceMaterial,
     setSourceMaterial,
@@ -528,7 +554,13 @@ export const EditorPage = ({
 
   // THAO TÁC TRÊN SLIDE VÀ COMPONENT
   const currentSlide = lecture?.slides[activeSlideIndex]
-  const activeSlideToDisplay = previewSlide || currentSlide
+  const isPreviewVisible = Boolean(
+    previewSlide &&
+    (previewSlideAction === 'CREATE_SLIDE' ||
+      !previewTargetSlideId ||
+      currentSlide?.id === previewTargetSlideId)
+  )
+  const activeSlideToDisplay = isPreviewVisible ? previewSlide : currentSlide
   const currentComponents = activeSlideToDisplay
     ? getSlideComponents(activeSlideToDisplay, lecture?.theme)
     : []
@@ -906,6 +938,8 @@ export const EditorPage = ({
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ
   const handleApplyAiPrompt = async (instruction: string) => {
     if (!lecture || !currentSlide || !instruction.trim()) return
+    const requestTargetSlideId = currentSlide.id
+    const requestTargetSlideIndex = activeSlideIndex
     try {
       setIsAiLoading(true)
       addAiMessage('user', instruction)
@@ -937,32 +971,75 @@ export const EditorPage = ({
         response.targetSlideIndex >= 0 &&
         response.targetSlideIndex < lecture.slides.length
           ? response.targetSlideIndex
-          : activeSlideIndex
+          : requestTargetSlideIndex
 
       const formattedProposals = response.proposals?.map((p, idx) => ({
         id: p.id || `prop-${Date.now()}-${idx}`,
         action: p.action,
         targetSlideIndex: p.targetSlideIndex,
+        targetSlideId:
+          p.targetSlideId || lecture.slides[p.targetSlideIndex]?.id,
         proposedSlide: p.proposedSlide,
         summary: p.summary,
         status: 'pending' as const
       }))
+
+      const activeProp =
+        formattedProposals && formattedProposals.length > 0
+          ? formattedProposals[0]
+          : undefined
+      const slideToPreview = activeProp?.proposedSlide || response.proposedSlide
+      const slideAction =
+        activeProp?.action ||
+        (response.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE')
+      const pTargetIdx =
+        activeProp?.targetSlideIndex !== undefined
+          ? activeProp.targetSlideIndex
+          : targetIndex
+      const pTargetSlideId =
+        activeProp?.targetSlideId ||
+        response.targetSlideId ||
+        lecture.slides[pTargetIdx]?.id ||
+        (pTargetIdx === requestTargetSlideIndex
+          ? requestTargetSlideId
+          : undefined)
 
       if (
         response.aiChatHistory &&
         Array.isArray(response.aiChatHistory) &&
         response.aiChatHistory.length > 0
       ) {
-        setAiMessages(response.aiChatHistory as unknown as AiChatMessage[])
+        const serverHistory =
+          response.aiChatHistory as unknown as Array<AiChatMessage>
+        const enrichedHistory = serverHistory.map((message, index) =>
+          index === serverHistory.length - 1 && message.role === 'assistant'
+            ? {
+                ...message,
+                targetSlideIndex: pTargetIdx,
+                targetSlideId: pTargetSlideId,
+                proposedSlide: response.proposedSlide,
+                proposals: formattedProposals
+              }
+            : message
+        )
+        setAiMessages(enrichedHistory)
         setLecture((prev) =>
-          prev ? { ...prev, aiChatHistory: response.aiChatHistory } : prev
+          prev
+            ? {
+                ...prev,
+                aiChatHistory: enrichedHistory as unknown as Array<
+                  Record<string, unknown>
+                >
+              }
+            : prev
         )
       } else {
         addAiMessage({
           role: 'assistant',
           text: response.reply,
           action: response.action,
-          targetSlideIndex: targetIndex,
+          targetSlideIndex: pTargetIdx,
+          targetSlideId: pTargetSlideId,
           proposedSlide: response.proposedSlide,
           proposals: formattedProposals,
           status:
@@ -973,38 +1050,57 @@ export const EditorPage = ({
         })
       }
 
-      const activeProp =
-        response.proposals && response.proposals.length > 0
-          ? response.proposals[0]
-          : undefined
-      const slideToPreview = activeProp?.proposedSlide || response.proposedSlide
-      const slideAction =
-        activeProp?.action ||
-        (response.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE')
-      const pTargetIdx =
-        activeProp?.targetSlideIndex !== undefined
-          ? activeProp.targetSlideIndex
-          : targetIndex
+      let canShowPreview = Boolean(slideToPreview)
+      let latestTargetIndex = pTargetIdx
+      if (slideToPreview) {
+        const latestLecture = lectureRef.current
+        latestTargetIndex = latestLecture
+          ? resolveProposalTargetIndex(
+              latestLecture.slides,
+              slideToPreview,
+              slideAction,
+              pTargetIdx,
+              pTargetSlideId
+            )
+          : -1
+        canShowPreview = latestTargetIndex >= 0
 
-      if (response.proposals && response.proposals.length > 1) {
+        if (!canShowPreview) {
+          setPreviewSlide(null)
+          showToast(
+            'Slide đích của đề xuất không còn tồn tại. Vui lòng gửi lại yêu cầu.',
+            'error'
+          )
+        } else {
+          const latestActiveSlideIndex =
+            useEditorStore.getState().activeSlideIndex
+          if (latestTargetIndex !== latestActiveSlideIndex) {
+            setActiveSlideIndex(latestTargetIndex)
+          }
+        }
+      }
+
+      if (
+        canShowPreview &&
+        slideToPreview &&
+        response.proposals &&
+        response.proposals.length > 1
+      ) {
         // Nhiều đề xuất (BATCH_CHANGES): preview slide đầu tiên
-        setPreviewSlide(slideToPreview ?? null, slideAction)
+        setPreviewSlide(slideToPreview, slideAction, pTargetSlideId)
         showToast(
           `AI đã đề xuất ${response.proposals.length} slide mới. Bạn có thể xem trước hoặc chấp nhận tất cả.`,
           'info'
         )
-      } else if (slideToPreview) {
-        if (pTargetIdx !== activeSlideIndex && slideAction !== 'CREATE_SLIDE') {
-          setActiveSlideIndex(pTargetIdx)
-        }
-        setPreviewSlide(slideToPreview, slideAction)
+      } else if (canShowPreview && slideToPreview) {
+        setPreviewSlide(slideToPreview, slideAction, pTargetSlideId)
         showToast(
           slideAction === 'CREATE_SLIDE'
             ? 'AI đã đề xuất tạo slide mới. Bạn có thể xem trước trên Canvas.'
-            : `AI đã đề xuất thay đổi cho Slide ${pTargetIdx + 1}. Bạn có thể xem trước trên Canvas.`,
+            : `AI đã đề xuất thay đổi cho Slide ${latestTargetIndex + 1}. Bạn có thể xem trước trên Canvas.`,
           'info'
         )
-      } else {
+      } else if (!slideToPreview) {
         showToast('AI đã phản hồi yêu cầu của bạn', 'info')
       }
 
@@ -1033,22 +1129,32 @@ export const EditorPage = ({
     messageId: string,
     proposedSlide: Slide,
     action?: string,
-    targetSlideIndex?: number
+    targetSlideIndex?: number,
+    targetSlideId?: string
   ) => {
     if (!lecture) return
+    const targetIdx = resolveProposalTargetIndex(
+      lecture.slides,
+      proposedSlide,
+      action,
+      targetSlideIndex,
+      targetSlideId
+    )
+    if (targetIdx < 0) {
+      setPreviewSlide(null)
+      showToast(
+        'Không thể áp dụng vì slide đích không còn tồn tại. Vui lòng gửi lại yêu cầu.',
+        'error'
+      )
+      return
+    }
+
     updateAiMessageStatus(messageId, 'accepted')
     recordHistory(lecture.slides)
 
     const updatedMessages = aiMessages.map((m) =>
       m.id === messageId ? { ...m, status: 'accepted' as const } : m
     )
-
-    const targetIdx =
-      typeof targetSlideIndex === 'number' &&
-      targetSlideIndex >= 0 &&
-      targetSlideIndex < lecture.slides.length
-        ? targetSlideIndex
-        : activeSlideIndex
 
     const finalizedSlide: Slide = {
       ...proposedSlide,
@@ -1200,21 +1306,24 @@ export const EditorPage = ({
         pendingMsg.id,
         previewSlide,
         matchingProp.action,
-        matchingProp.targetSlideIndex
+        matchingProp.targetSlideIndex,
+        matchingProp.targetSlideId
       )
     } else if (pendingMsg && pendingMsg.proposedSlide) {
       handleAcceptProposal(
         pendingMsg.id,
         previewSlide,
         pendingMsg.action,
-        pendingMsg.targetSlideIndex
+        pendingMsg.targetSlideIndex,
+        pendingMsg.targetSlideId
       )
     } else {
       handleAcceptProposal(
         `temp-${Date.now()}`,
         previewSlide,
         previewSlideAction || 'UPDATE_SLIDE',
-        activeSlideIndex
+        undefined,
+        previewTargetSlideId || undefined
       )
     }
   }
@@ -1392,20 +1501,22 @@ export const EditorPage = ({
           <SlideCanvas
             slide={activeSlideToDisplay}
             originalSlide={
-              previewSlideAction === 'CREATE_SLIDE' ? undefined : currentSlide
+              isPreviewVisible && previewSlideAction === 'CREATE_SLIDE'
+                ? undefined
+                : currentSlide
             }
             components={currentComponents}
             themeId={lecture.theme}
             slideIndex={activeSlideIndex}
             totalSlides={lecture.slides.length}
-            selectedCompId={previewSlide ? null : selectedCompId}
-            onSelectComponent={previewSlide ? () => {} : setSelectedCompId}
+            selectedCompId={isPreviewVisible ? null : selectedCompId}
+            onSelectComponent={isPreviewVisible ? () => {} : setSelectedCompId}
             onUpdateComponent={handleUpdateComponent}
             onDuplicateComponent={handleDuplicateComponent}
             onDeleteComponent={handleDeleteComponent}
             onAiQuickAction={handleAiQuickAction}
             isAiLoading={isAiLoading}
-            isPreview={Boolean(previewSlide)}
+            isPreview={isPreviewVisible}
             onAcceptPreview={handleAcceptCurrentPreview}
             onExitPreview={() => setPreviewSlide(null)}
           />

@@ -28,7 +28,8 @@ interface AiCopilotPanelProps {
     messageId: string,
     proposedSlide: Slide,
     action?: string,
-    targetSlideIndex?: number
+    targetSlideIndex?: number,
+    targetSlideId?: string
   ) => void
   onAcceptAllProposals?: (
     messageId: string,
@@ -81,6 +82,7 @@ export const AiCopilotPanel = ({
     toggleAiPanel,
     aiMessages,
     previewSlide,
+    previewTargetSlideId,
     setPreviewSlide,
     sourceMaterial,
     setSourceMaterial,
@@ -164,9 +166,13 @@ export const AiCopilotPanel = ({
   const handleTogglePreview = (
     slide: Slide,
     targetIdx?: number,
-    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE',
+    targetSlideId?: string
   ) => {
-    if (previewSlide?.id === slide.id) {
+    if (
+      previewSlide?.id === slide.id &&
+      previewTargetSlideId === (targetSlideId || null)
+    ) {
       setPreviewSlide(null)
     } else {
       if (
@@ -176,7 +182,7 @@ export const AiCopilotPanel = ({
       ) {
         onSelectSlide(targetIdx)
       }
-      setPreviewSlide(slide, action)
+      setPreviewSlide(slide, action, targetSlideId)
     }
   }
 
@@ -325,6 +331,10 @@ export const AiCopilotPanel = ({
             (msg.proposals && msg.proposals.length === 1
               ? msg.proposals[0].targetSlideIndex
               : undefined) ?? msg.targetSlideIndex
+          const singleTargetSlideId =
+            (msg.proposals && msg.proposals.length === 1
+              ? msg.proposals[0].targetSlideId
+              : undefined) ?? msg.targetSlideId
           const hasSingleProposal = Boolean(singleSlide && !hasBatchProposals)
           const isPreviewing =
             singleSlide && previewSlide?.id === singleSlide.id
@@ -437,7 +447,8 @@ export const AiCopilotPanel = ({
                                     handleTogglePreview(
                                       prop.proposedSlide,
                                       prop.targetSlideIndex,
-                                      prop.action
+                                      prop.action,
+                                      prop.targetSlideId
                                     )
                                   }
                                   className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition cursor-pointer ${
@@ -468,7 +479,8 @@ export const AiCopilotPanel = ({
                                           msg.id,
                                           prop.proposedSlide,
                                           prop.action,
-                                          prop.targetSlideIndex
+                                          prop.targetSlideIndex,
+                                          prop.targetSlideId
                                         )
                                       }
                                       className='rounded p-1 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer'
@@ -595,7 +607,8 @@ export const AiCopilotPanel = ({
                             singleTargetIdx,
                             singleAction === 'CREATE_SLIDE'
                               ? 'CREATE_SLIDE'
-                              : 'UPDATE_SLIDE'
+                              : 'UPDATE_SLIDE',
+                            singleTargetSlideId
                           )
                         }
                         className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded transition cursor-pointer ${
@@ -638,7 +651,8 @@ export const AiCopilotPanel = ({
                                   msg.id,
                                   singleSlide,
                                   singleAction,
-                                  singleTargetIdx
+                                  singleTargetIdx,
+                                  singleTargetSlideId
                                 )
                               }
                               className='flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-2xs hover:bg-blue-700 active:scale-95 transition cursor-pointer'
