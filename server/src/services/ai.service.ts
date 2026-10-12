@@ -3,6 +3,15 @@ import { env } from '@/config/env'
 import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { AppError } from '@/utils/AppError'
+import {
+  extractRequestedHintLabel,
+  isShortHintAdditionRequest,
+  mergeShortHintIntoSlide
+} from '@/utils/aiSlideMerge'
+import {
+  getAiReadableSlideContext,
+  isExplicitChatOnlyRequest
+} from '@/utils/aiChatContext'
 
 const DEFAULT_AI_MODEL = env.GEMINI_MODEL || 'gemini-2.0-flash'
 
@@ -600,6 +609,7 @@ export interface AiChatSlideSummary {
   title: string
   bullets: string[]
   layout: string
+  visibleText?: string[]
   contentItems?: Array<{
     title?: string
     description?: string
@@ -670,6 +680,7 @@ export const chatAndProposeSlideEdit = async (
       '- Slide hiện tại mà người dùng đang mở (currentSlide với đầy đủ components).\n' +
       '- Tóm tắt cốt lõi bài giảng (contextSummary) duy trì tính nhất quán xuyên suốt.\n' +
       '- Slide trước/sau (surroundingSlides), thành phần đang chọn (selectedElement), tài liệu tham khảo (sourceMaterial) và lịch sử trò chuyện.\n\n' +
+      'Nếu dữ liệu có mâu thuẫn, nội dung đang hiển thị trong components của currentSlide là nguồn hiện hành và BẮT BUỘC được ưu tiên hơn contentItems, contextSummary hoặc lịch sử cũ.\n\n' +
       'QUY TẮC NHẬN DIỆN PHẠM VI & MỤC TIÊU (SCOPE & TARGET RESOLUTION - BẮT BUỘC TUÂN THỦ):\n' +
       'Trước khi quyết định hành động, bạn BẮT BUỘC phải phân tích ý định của người dùng thuộc 1 trong 3 trường hợp sau:\n\n' +
       '1. PHẠM VI TOÀN BÀI HOẶC HÀNG LOẠT (Global / Multi-slide Scope):\n' +
@@ -828,20 +839,31 @@ export const chatAndProposeSlideEdit = async (
       '- Cung cấp trường "thought" (Chuỗi suy luận): Phân tích ngắn gọn ý định người dùng (Sửa nội dung hay Lỗi hiển thị đồ họa) và giải pháp bố cục được chọn trước khi xuất JSON.\n' +
       '- Phản hồi BẮT BUỘC là JSON thuần túy theo cấu trúc trên. Tuyệt đối không chèn ký tự xuống dòng thô bên trong chuỗi string.'
 
+    const isExplicitChatOnly = isExplicitChatOnlyRequest(normalizedMessage)
+    const isShortHintAddition =
+      !isExplicitChatOnly && isShortHintAdditionRequest(normalizedMessage)
+    const requestedHintLabel = isShortHintAddition
+      ? extractRequestedHintLabel(normalizedMessage)
+      : undefined
     const isUserAskingToCreate =
-      /\b(thêm|tạo|bổ sung|viết thêm|chèn thêm)\b.*?\b(slide|slides|trang)\b/i.test(
+      !isExplicitChatOnly &&
+      !isShortHintAddition &&
+      (/\b(thêm|tạo|bổ sung|viết thêm|chèn thêm)\b.*?\b(slide|slides|trang)\b/i.test(
         normalizedMessage
       ) ||
-      /\b(thêm|tạo|bổ sung)\b.*?\b(ví dụ|code|bài tập|minh họa)\b.*?\b(sau|cho)\b/i.test(
-        normalizedMessage
-      )
+        /\b(thêm|tạo|bổ sung)\b.*?\b(ví dụ|code|bài tập|minh họa)\b.*?\b(sau|cho)\b/i.test(
+          normalizedMessage
+        ))
 
     const isUserAskingToEdit =
+      !isExplicitChatOnly &&
       /\b(sửa|chỉnh sửa|điều chỉnh|đổi|thay đổi|cập nhật|rút gọn|viết lại|format|bố cục|layout|đè chữ|tràn chữ|chống đè|đọc lại|xem lại|khắc phục|sắp xếp)\b/i.test(
         normalizedMessage
       )
 
     const isUserAskingBatch =
+      !isExplicitChatOnly &&
+      !isShortHintAddition &&
       /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các|hàng loạt|toàn bài)\b/i.test(
         normalizedMessage
       )
@@ -910,7 +932,9 @@ export const chatAndProposeSlideEdit = async (
       .map((s) => {
         let lines = `  - Slide ${s.slideNumber} (index: ${s.slideNumber - 1}): "${s.title}" [layout: ${s.layout}]`
         if (s.header) lines += ` [header: "${s.header}"]`
-        if (s.contentItems && s.contentItems.length > 0) {
+        if (s.visibleText && s.visibleText.length > 0) {
+          lines += `\n    Nội dung đang hiển thị: ${s.visibleText.join('; ')}`
+        } else if (s.contentItems && s.contentItems.length > 0) {
           const itemsStr = s.contentItems
             .map((it, idx) => {
               let str = `      + Mục ${idx + 1}: `
@@ -931,60 +955,21 @@ export const chatAndProposeSlideEdit = async (
     let currentSlideInfo = 'Không có slide nào đang mở'
     if (context.currentSlide) {
       const cs = context.currentSlide
-      type RawItem = {
-        title?: string
-        description?: string
-        tag?: string
-        stat?: string
-      }
-      let rawItems: RawItem[] = []
-      if (Array.isArray(cs.contentItems) && cs.contentItems.length > 0) {
-        rawItems = (cs.contentItems as RawItem[]).map((it) => ({
-          title: it.title || '',
-          description: it.description || '',
-          stat: it.stat || undefined,
-          tag: it.tag || undefined
-        }))
-      } else if (Array.isArray(cs.components)) {
-        const comps = cs.components as Array<{ id?: string; content?: string }>
-        const titleComps = comps.filter(
-          (c) => c.id?.includes('title-') && !c.id.startsWith('title-')
-        )
-        const descComps = comps.filter((c) => c.id?.includes('desc-'))
-        const statComps = comps.filter(
-          (c) => c.id?.includes('metric-num-') || c.id?.includes('tl-year-')
-        )
-        const tagComps = comps.filter(
-          (c) => c.id?.includes('tag-') && !c.id.includes('tag-bg-')
-        )
-        rawItems = titleComps.map((tc, idx) => ({
-          title: tc.content || '',
-          description: descComps[idx]?.content || '',
-          stat: statComps[idx]?.content || undefined,
-          tag: tagComps[idx]?.content || undefined
-        }))
-      }
-      const itemsSummary = rawItems
-        .filter((it) => it.title || it.description || it.stat)
-        .map((it, i) => {
-          let str = `    ${i + 1}. `
-          if (it.stat) str += `[Chỉ số/Stat: "${it.stat}"] `
-          if (it.tag) str += `[Tag: "${it.tag}"] `
-          str += `"${it.title}": "${it.description}"`
-          return str
-        })
+      const readableSlide = getAiReadableSlideContext(cs)
+      const visibleTextSummary = readableSlide.visibleText
+        .map((text, index) => `    ${index + 1}. "${text}"`)
         .join('\n')
 
       currentSlideInfo =
         `  - Đang mở: Slide ${(context.currentSlideIndex ?? 0) + 1}/${context.totalSlides}\n` +
-        `  - Header: "${cs.header || ''}"\n` +
-        `  - Tiêu đề: "${cs.title || 'Không có tiêu đề'}"\n` +
+        `  - Header: "${readableSlide.header}"\n` +
+        `  - Tiêu đề: "${readableSlide.title || 'Không có tiêu đề'}"\n` +
         `  - Bố cục hiện tại: "${cs.layout || cs.contentLayout || 'cards'}"\n` +
-        (itemsSummary
-          ? `  - Các khối nội dung trên slide:\n${itemsSummary}\n`
+        (visibleTextSummary
+          ? `  - Nội dung đang hiển thị trên canvas (nguồn hiện hành):\n${visibleTextSummary}\n`
           : '') +
-        (Array.isArray(cs.bullets) && cs.bullets.length > 0
-          ? `  - Các ý chính: ${(cs.bullets as string[]).join('; ')}\n`
+        (readableSlide.bullets.length > 0
+          ? `  - Các ý chính: ${readableSlide.bullets.join('; ')}\n`
           : '')
     }
 
@@ -994,7 +979,32 @@ export const chatAndProposeSlideEdit = async (
       .join('\n')
 
     const executionDirectives: string[] = []
-    if (isUserAskingBatch && isUserAskingToEdit && !isUserAskingToCreate) {
+    if (isExplicitChatOnly) {
+      executionDirectives.push(
+        'Đây là yêu cầu CHỈ HỎI ĐÁP. BẮT BUỘC chọn "action": "CHAT_ONLY".',
+        'Chỉ trả lời câu hỏi dựa trên snapshot canvas hiện hành được cung cấp; không tạo proposedSlide và không tạo proposals.',
+        'Không chỉnh sửa, tạo mới hoặc đề xuất áp dụng thay đổi lên bất kỳ slide nào.'
+      )
+    } else if (isShortHintAddition) {
+      const requiredHintFormat = requestedHintLabel
+        ? `"${requestedHintLabel}: Gợi ý: ..."`
+        : '"Gợi ý: ..."'
+      executionDirectives.push(
+        'Đây là yêu cầu BỔ SUNG TỐI THIỂU trên slide hiện tại, BẮT BUỘC chọn "action": "UPDATE_SLIDE".',
+        'Giữ nguyên tuyệt đối đề bài, dữ kiện, nhiệm vụ học sinh, tiêu đề, bố cục, contentItems, bullets và các nội dung đã có.',
+        'Chỉ bổ sung đúng MỘT câu gợi ý ngắn, tối đa 18 từ. Không viết lại, tóm tắt hoặc thay thế bất kỳ nội dung cũ nào.',
+        `Trong proposedSlide, sao chép nguyên slide hiện tại và nối câu mới theo đúng dạng ${requiredHintFormat} vào trường subtitle.`,
+        ...(requestedHintLabel
+          ? [
+              `BẮT BUỘC giữ nguyên nhãn "${requestedHintLabel}" và đặt nhãn này ngay trước nội dung gợi ý.`
+            ]
+          : [])
+      )
+    } else if (
+      isUserAskingBatch &&
+      isUserAskingToEdit &&
+      !isUserAskingToCreate
+    ) {
       executionDirectives.push(
         'Người dùng yêu cầu chỉnh sửa/chống đè chữ toàn bộ bài giảng: BẮT BUỘC chọn "action": "BATCH_CHANGES" với các phần tử trong "proposals" có "action": "UPDATE_SLIDE".',
         'Duyệt qua từng slide trong slidesCatalog, đặt "targetSlideIndex" là vị trí 0-indexed tương ứng (0, 1, 2, ...).',
@@ -1100,8 +1110,15 @@ export const chatAndProposeSlideEdit = async (
     ) {
       action = 'CHAT_ONLY'
     }
+    if (isExplicitChatOnly) action = 'CHAT_ONLY'
 
-    let rawProposals = Array.isArray(parsed.proposals) ? parsed.proposals : []
+    let rawProposals =
+      !isExplicitChatOnly && Array.isArray(parsed.proposals)
+        ? parsed.proposals
+        : []
+    if (isShortHintAddition && parsed.proposedSlide) {
+      action = 'UPDATE_SLIDE'
+    }
 
     // Chuẩn hóa nếu AI trả về proposedSlide đơn lẻ nhưng không có proposals
     if (rawProposals.length === 0 && parsed.proposedSlide) {
@@ -1122,10 +1139,28 @@ export const chatAndProposeSlideEdit = async (
       }
     }
 
-    if (
-      rawProposals.length > 1 ||
-      (isUserAskingBatch && rawProposals.length > 0) ||
-      action === 'BATCH_CHANGES'
+    if (isShortHintAddition && rawProposals.length > 0) {
+      const currentSlideProposal =
+        rawProposals.find(
+          (proposal) => proposal.targetSlideIndex === context.currentSlideIndex
+        ) || rawProposals[0]
+      action = 'UPDATE_SLIDE'
+      rawProposals = [
+        {
+          ...currentSlideProposal,
+          action: 'UPDATE_SLIDE',
+          targetSlideIndex: context.currentSlideIndex
+        }
+      ]
+    }
+
+    if (isShortHintAddition && rawProposals.length === 0) {
+      action = 'CHAT_ONLY'
+    } else if (
+      !isShortHintAddition &&
+      (rawProposals.length > 1 ||
+        (isUserAskingBatch && rawProposals.length > 0) ||
+        action === 'BATCH_CHANGES')
     ) {
       action = 'BATCH_CHANGES'
     }
@@ -1138,7 +1173,9 @@ export const chatAndProposeSlideEdit = async (
     const proposals: AiSlideProposal[] = rawProposals.map((p, idx) => {
       let pAction: 'CREATE_SLIDE' | 'UPDATE_SLIDE' =
         p.action === 'CREATE_SLIDE' ? 'CREATE_SLIDE' : 'UPDATE_SLIDE'
-      if (isUserAskingToCreate) {
+      if (isShortHintAddition) {
+        pAction = 'UPDATE_SLIDE'
+      } else if (isUserAskingToCreate) {
         pAction = 'CREATE_SLIDE'
       } else if (isUserAskingToEdit && !isUserAskingToCreate) {
         pAction = 'UPDATE_SLIDE'
@@ -1149,7 +1186,23 @@ export const chatAndProposeSlideEdit = async (
         p.targetSlideIndex < context.totalSlides
           ? p.targetSlideIndex
           : context.currentSlideIndex
-      const slideData = p.proposedSlide || {}
+      const catalogSlide = context.slidesCatalog?.find(
+        (slide) => slide.slideNumber - 1 === pTargetIndex
+      )
+      const originalSlide: Record<string, unknown> | undefined =
+        pTargetIndex === context.currentSlideIndex && context.currentSlide
+          ? context.currentSlide
+          : catalogSlide
+            ? { ...catalogSlide }
+            : undefined
+      const slideData =
+        isShortHintAddition && originalSlide
+          ? mergeShortHintIntoSlide(
+              originalSlide,
+              p.proposedSlide || {},
+              requestedHintLabel
+            )
+          : p.proposedSlide || {}
       const slideTitle = String(slideData.title || '').toLowerCase()
       const slideHeader = String(slideData.header || '').toLowerCase()
       const hasCodeSignal =
@@ -1170,7 +1223,10 @@ export const chatAndProposeSlideEdit = async (
       }
       // Luôn luôn tạo lại components bằng buildSlideComponents để Layout Engine tính toán lại tọa độ chính xác,
       // không bao giờ giữ lại tọa độ cũ bị lệch hay đè chữ!
-      const slideComps = buildSlideComponents(normalizedSlide, context.theme)
+      const slideComps =
+        isShortHintAddition && Array.isArray(normalizedSlide.components)
+          ? normalizedSlide.components
+          : buildSlideComponents(normalizedSlide, context.theme)
 
       return {
         id: `prop-${Date.now()}-${idx}`,
