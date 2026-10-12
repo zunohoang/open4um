@@ -18,7 +18,7 @@ import {
   Sparkles,
   X
 } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
 
@@ -28,7 +28,8 @@ interface AiCopilotPanelProps {
     messageId: string,
     proposedSlide: Slide,
     action?: string,
-    targetSlideIndex?: number
+    targetSlideIndex?: number,
+    targetSlideId?: string
   ) => void
   onAcceptAllProposals?: (
     messageId: string,
@@ -81,6 +82,7 @@ export const AiCopilotPanel = ({
     toggleAiPanel,
     aiMessages,
     previewSlide,
+    previewTargetSlideId,
     setPreviewSlide,
     sourceMaterial,
     setSourceMaterial,
@@ -98,7 +100,7 @@ export const AiCopilotPanel = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentMenuRef = useRef<HTMLDivElement>(null)
-  const chatBottomRef = useRef<HTMLDivElement>(null)
+  const chatHistoryRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isAiLoading) {
@@ -113,9 +115,24 @@ export const AiCopilotPanel = ({
     return () => clearInterval(interval)
   }, [isAiLoading])
 
+  useLayoutEffect(() => {
+    if (!isAiPanelOpen) return
+
+    const chatHistory = chatHistoryRef.current
+    if (chatHistory) {
+      chatHistory.scrollTop = chatHistory.scrollHeight
+    }
+  }, [isAiPanelOpen])
+
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [aiMessages, isAiLoading])
+    if (!isAiPanelOpen) return
+
+    const chatHistory = chatHistoryRef.current
+    chatHistory?.scrollTo({
+      top: chatHistory.scrollHeight,
+      behavior: 'smooth'
+    })
+  }, [aiMessages, isAiLoading, isAiPanelOpen])
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -149,9 +166,13 @@ export const AiCopilotPanel = ({
   const handleTogglePreview = (
     slide: Slide,
     targetIdx?: number,
-    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE',
+    targetSlideId?: string
   ) => {
-    if (previewSlide?.id === slide.id) {
+    if (
+      previewSlide?.id === slide.id &&
+      previewTargetSlideId === (targetSlideId || null)
+    ) {
       setPreviewSlide(null)
     } else {
       if (
@@ -161,7 +182,7 @@ export const AiCopilotPanel = ({
       ) {
         onSelectSlide(targetIdx)
       }
-      setPreviewSlide(slide, action)
+      setPreviewSlide(slide, action, targetSlideId)
     }
   }
 
@@ -281,7 +302,10 @@ export const AiCopilotPanel = ({
       )}
 
       {/* Danh sách tin nhắn trao đổi (Chat history) */}
-      <div className='flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar'>
+      <div
+        ref={chatHistoryRef}
+        className='flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar'
+      >
         {aiMessages.map((msg) => {
           const isUser = msg.role === 'user'
           const hasBatchProposals = Boolean(
@@ -307,6 +331,10 @@ export const AiCopilotPanel = ({
             (msg.proposals && msg.proposals.length === 1
               ? msg.proposals[0].targetSlideIndex
               : undefined) ?? msg.targetSlideIndex
+          const singleTargetSlideId =
+            (msg.proposals && msg.proposals.length === 1
+              ? msg.proposals[0].targetSlideId
+              : undefined) ?? msg.targetSlideId
           const hasSingleProposal = Boolean(singleSlide && !hasBatchProposals)
           const isPreviewing =
             singleSlide && previewSlide?.id === singleSlide.id
@@ -419,7 +447,8 @@ export const AiCopilotPanel = ({
                                     handleTogglePreview(
                                       prop.proposedSlide,
                                       prop.targetSlideIndex,
-                                      prop.action
+                                      prop.action,
+                                      prop.targetSlideId
                                     )
                                   }
                                   className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition cursor-pointer ${
@@ -450,7 +479,8 @@ export const AiCopilotPanel = ({
                                           msg.id,
                                           prop.proposedSlide,
                                           prop.action,
-                                          prop.targetSlideIndex
+                                          prop.targetSlideIndex,
+                                          prop.targetSlideId
                                         )
                                       }
                                       className='rounded p-1 text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer'
@@ -577,7 +607,8 @@ export const AiCopilotPanel = ({
                             singleTargetIdx,
                             singleAction === 'CREATE_SLIDE'
                               ? 'CREATE_SLIDE'
-                              : 'UPDATE_SLIDE'
+                              : 'UPDATE_SLIDE',
+                            singleTargetSlideId
                           )
                         }
                         className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded transition cursor-pointer ${
@@ -620,7 +651,8 @@ export const AiCopilotPanel = ({
                                   msg.id,
                                   singleSlide,
                                   singleAction,
-                                  singleTargetIdx
+                                  singleTargetIdx,
+                                  singleTargetSlideId
                                 )
                               }
                               className='flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-2xs hover:bg-blue-700 active:scale-95 transition cursor-pointer'
@@ -721,7 +753,6 @@ export const AiCopilotPanel = ({
             </div>
           </div>
         )}
-        <div ref={chatBottomRef} />
       </div>
 
       {/* POPOVER NỘI DUNG: Gợi ý nhanh (khi mở từ tab hoặc menu) */}

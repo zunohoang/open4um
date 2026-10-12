@@ -16,6 +16,7 @@ export interface AiSlideProposalItem {
   id: string
   action: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
   targetSlideIndex: number
+  targetSlideId?: string
   proposedSlide: Slide
   summary?: string
   status?: 'pending' | 'accepted' | 'rejected'
@@ -33,6 +34,7 @@ export interface AiChatMessage {
     | 'BATCH_CHANGES'
     | 'CHAT_ONLY'
   targetSlideIndex?: number
+  targetSlideId?: string
   proposedSlide?: Slide
   proposals?: AiSlideProposalItem[]
   status?: 'pending' | 'accepted' | 'rejected'
@@ -58,6 +60,7 @@ interface EditorStoreState {
   aiMessages: AiChatMessage[]
   previewSlide: Slide | null
   previewSlideAction: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+  previewTargetSlideId: string | null
   sourceMaterial: string
   isSourceMaterialModalOpen: boolean
 
@@ -92,7 +95,8 @@ interface EditorStoreState {
   clearAiMessages: () => void
   setPreviewSlide: (
     slide: Slide | null,
-    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null,
+    targetSlideId?: string | null
   ) => void
   setSourceMaterial: (material: string) => void
   setIsSourceMaterialModalOpen: (open: boolean) => void
@@ -143,11 +147,18 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   ],
   previewSlide: null,
   previewSlideAction: null,
+  previewTargetSlideId: null,
   sourceMaterial: '',
   isSourceMaterialModalOpen: false,
 
   setActiveSlideIndex: (index: number) => {
-    set({ activeSlideIndex: Math.max(0, index), selectedCompId: null })
+    set({
+      activeSlideIndex: Math.max(0, index),
+      selectedCompId: null,
+      previewSlide: null,
+      previewSlideAction: null,
+      previewTargetSlideId: null
+    })
   },
 
   setSelectedCompId: (id: string | null) => {
@@ -291,11 +302,13 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   clearAiMessages: () => set({ aiMessages: [] }),
   setPreviewSlide: (
     slide: Slide | null,
-    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null
+    action?: 'CREATE_SLIDE' | 'UPDATE_SLIDE' | null,
+    targetSlideId?: string | null
   ) =>
     set({
       previewSlide: slide,
-      previewSlideAction: action ?? (slide ? 'UPDATE_SLIDE' : null)
+      previewSlideAction: action ?? (slide ? 'UPDATE_SLIDE' : null),
+      previewTargetSlideId: slide ? targetSlideId || null : null
     }),
   setSourceMaterial: (sourceMaterial: string) => set({ sourceMaterial }),
   setIsSourceMaterialModalOpen: (open: boolean) =>

@@ -166,6 +166,7 @@ export const aiChat = asyncHandler(async (req, res) => {
     {
       message: req.body.message,
       slideId: req.body.slideId,
+      currentSlide: req.body.currentSlide,
       selectedCompId: req.body.selectedCompId,
       sourceMaterial: req.body.sourceMaterial,
       history: req.body.history

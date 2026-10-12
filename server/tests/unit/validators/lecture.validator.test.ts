@@ -4,6 +4,7 @@ import {
   createBlankLectureSchema,
   updateLectureSchema,
   aiEditSlideSchema,
+  aiChatSchema,
   slideOperationSchema
 } from '@/validators/lecture.validator'
 
@@ -145,6 +146,44 @@ describe('aiEditSlideSchema', () => {
     const result = aiEditSlideSchema.safeParse({
       slideId: 'slide-1'
     })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('aiChatSchema', () => {
+  it('chấp nhận snapshot slide hiện tại với components từ canvas', () => {
+    const result = aiChatSchema.safeParse({
+      message: 'Chỉ trả lời: nội dung slide hiện tại là gì?',
+      slideId: 'slide-1',
+      currentSlide: {
+        id: 'slide-1',
+        title: 'Tiêu đề mới',
+        components: [
+          {
+            id: 'title-slide-1',
+            type: 'title',
+            content: 'Tiêu đề mới',
+            x: 8,
+            y: 10
+          }
+        ]
+      }
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it('từ chối component snapshot có loại không hợp lệ', () => {
+    const result = aiChatSchema.safeParse({
+      message: 'Nội dung slide là gì?',
+      currentSlide: {
+        id: 'slide-1',
+        components: [
+          { id: 'bad-component', type: 'script', content: 'Không hợp lệ' }
+        ]
+      }
+    })
+
     expect(result.success).toBe(false)
   })
 })

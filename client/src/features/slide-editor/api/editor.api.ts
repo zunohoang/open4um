@@ -4,6 +4,7 @@ import type { Lecture, Slide } from '@/lib/types'
 export interface AiChatPayload {
   message: string
   slideId?: string
+  currentSlide?: Slide
   selectedCompId?: string
   sourceMaterial?: string
   history?: Array<{ role: 'user' | 'assistant'; text: string }>
@@ -13,6 +14,7 @@ export interface AiSlideProposalData {
   id?: string
   action: 'CREATE_SLIDE' | 'UPDATE_SLIDE'
   targetSlideIndex: number
+  targetSlideId?: string
   proposedSlide: Slide
   summary?: string
 }
@@ -26,6 +28,7 @@ export interface AiChatResponseData {
     | 'BATCH_CHANGES'
     | 'CHAT_ONLY'
   targetSlideIndex?: number
+  targetSlideId?: string
   proposedSlide?: Slide
   proposals?: AiSlideProposalData[]
   updatedSummary?: string
