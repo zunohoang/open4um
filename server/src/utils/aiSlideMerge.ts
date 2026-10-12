@@ -1,5 +1,7 @@
 const SHORT_HINT_REQUEST_PATTERN =
   /(bổ sung|thêm|chèn).*?(gợi ý|hint)|(gợi ý|hint).*?(ngắn gọn|ngắn)/i
+const REQUESTED_HINT_LABEL_PATTERN =
+  /(?:nhãn|label)\s*(?:là|:)?\s*(?:["“”'‘’]([A-Za-z0-9][A-Za-z0-9._-]{0,15})["“”'‘’]|([A-Z][A-Z0-9._-]{0,15}))/u
 
 const normalizeText = (value: string) =>
   value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -7,11 +9,37 @@ const normalizeText = (value: string) =>
 const asText = (value: unknown) =>
   typeof value === 'string' ? value.trim() : ''
 
-const stripHintPrefix = (value: string) =>
-  value.replace(/^\s*(?:[-•]\s*)?(?:gợi\s*ý|hint)\s*[:：-]?\s*/i, '').trim()
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const shortenHint = (value: string, maxLength = 180, maxWords = 18) => {
-  const normalized = stripHintPrefix(value).replace(/\s+/g, ' ').trim()
+const stripHintPrefix = (value: string, requestedLabel?: string) => {
+  let normalized = value.replace(/^\s*(?:[-•]\s*)?/, '').trim()
+  const labelPrefix = requestedLabel
+    ? `${escapeRegExp(requestedLabel)}\\s*[:：-]?\\s*|`
+    : ''
+  const prefixPattern = new RegExp(
+    `^(?:${labelPrefix}(?:gợi\\s*ý|hint)\\s*[:：-]?\\s*)`,
+    'i'
+  )
+
+  for (let index = 0; index < 2; index += 1) {
+    const stripped = normalized.replace(prefixPattern, '').trim()
+    if (stripped === normalized) break
+    normalized = stripped
+  }
+
+  return normalized
+}
+
+const shortenHint = (
+  value: string,
+  requestedLabel?: string,
+  maxLength = 180,
+  maxWords = 18
+) => {
+  const normalized = stripHintPrefix(value, requestedLabel)
+    .replace(/\s+/g, ' ')
+    .trim()
   const words = normalized.split(' ')
   const wordLimited =
     words.length > maxWords
@@ -113,14 +141,25 @@ const extractHint = (
 export const isShortHintAdditionRequest = (message: string) =>
   SHORT_HINT_REQUEST_PATTERN.test(message.trim())
 
+export const extractRequestedHintLabel = (message: string) => {
+  const match = message.normalize('NFKC').match(REQUESTED_HINT_LABEL_PATTERN)
+  return match?.[1] || match?.[2] || undefined
+}
+
 export const mergeShortHintIntoSlide = (
   originalSlide: Record<string, unknown>,
-  proposedSlide: Record<string, unknown>
+  proposedSlide: Record<string, unknown>,
+  requestedLabel?: string
 ): Record<string, unknown> => {
-  const extractedHint = shortenHint(extractHint(originalSlide, proposedSlide))
+  const extractedHint = shortenHint(
+    extractHint(originalSlide, proposedSlide),
+    requestedLabel
+  )
   if (!extractedHint) return { ...originalSlide }
 
-  const hintLine = `Gợi ý: ${extractedHint}`
+  const hintLine = requestedLabel
+    ? `${requestedLabel}: Gợi ý: ${extractedHint}`
+    : `Gợi ý: ${extractedHint}`
   const originalSubtitle = asText(originalSlide.subtitle)
   const subtitleAlreadyContainsHint = originalSubtitle
     ? normalizeText(originalSubtitle).includes(normalizeText(hintLine))
@@ -129,15 +168,21 @@ export const mergeShortHintIntoSlide = (
   const originalComponents = Array.isArray(originalSlide.components)
     ? (originalSlide.components as Array<Record<string, unknown>>)
     : null
+  const slideId = String(originalSlide.id || 'slide')
+  let hintTargetIndex =
+    originalComponents?.findIndex((component) => {
+      const componentId = asText(component.id)
+      return component.type === 'subtitle' || componentId === `sub-${slideId}`
+    }) ?? -1
+  if (hintTargetIndex < 0) {
+    hintTargetIndex =
+      originalComponents?.findIndex((component) =>
+        asText(component.id).startsWith('ai-hint-')
+      ) ?? -1
+  }
   let hintAddedToComponents = false
-  const components = originalComponents?.map((component) => {
-    const componentId = asText(component.id)
-    const isHintTarget =
-      component.type === 'subtitle' ||
-      componentId.startsWith('sub-') ||
-      componentId.startsWith('footer-') ||
-      componentId.startsWith('ai-hint-')
-    if (!isHintTarget || hintAddedToComponents) return { ...component }
+  const components = originalComponents?.map((component, index) => {
+    if (index !== hintTargetIndex) return { ...component }
 
     hintAddedToComponents = true
     const currentContent = asText(component.content)
@@ -156,7 +201,7 @@ export const mergeShortHintIntoSlide = (
 
   if (components && !hintAddedToComponents) {
     components.push({
-      id: `ai-hint-${String(originalSlide.id || 'slide')}`,
+      id: `ai-hint-${slideId}`,
       type: 'text',
       content: hintLine,
       x: 8,

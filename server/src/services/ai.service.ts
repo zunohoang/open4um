@@ -4,6 +4,7 @@ import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { AppError } from '@/utils/AppError'
 import {
+  extractRequestedHintLabel,
   isShortHintAdditionRequest,
   mergeShortHintIntoSlide
 } from '@/utils/aiSlideMerge'
@@ -839,8 +840,14 @@ export const chatAndProposeSlideEdit = async (
       '- Phản hồi BẮT BUỘC là JSON thuần túy theo cấu trúc trên. Tuyệt đối không chèn ký tự xuống dòng thô bên trong chuỗi string.'
 
     const isExplicitChatOnly = isExplicitChatOnlyRequest(normalizedMessage)
+    const isShortHintAddition =
+      !isExplicitChatOnly && isShortHintAdditionRequest(normalizedMessage)
+    const requestedHintLabel = isShortHintAddition
+      ? extractRequestedHintLabel(normalizedMessage)
+      : undefined
     const isUserAskingToCreate =
       !isExplicitChatOnly &&
+      !isShortHintAddition &&
       (/\b(thêm|tạo|bổ sung|viết thêm|chèn thêm)\b.*?\b(slide|slides|trang)\b/i.test(
         normalizedMessage
       ) ||
@@ -856,12 +863,10 @@ export const chatAndProposeSlideEdit = async (
 
     const isUserAskingBatch =
       !isExplicitChatOnly &&
+      !isShortHintAddition &&
       /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các|hàng loạt|toàn bài)\b/i.test(
         normalizedMessage
       )
-
-    const isShortHintAddition =
-      !isUserAskingToCreate && isShortHintAdditionRequest(normalizedMessage)
 
     const isAskingNewCodeExamples =
       isUserAskingToCreate &&
@@ -981,11 +986,19 @@ export const chatAndProposeSlideEdit = async (
         'Không chỉnh sửa, tạo mới hoặc đề xuất áp dụng thay đổi lên bất kỳ slide nào.'
       )
     } else if (isShortHintAddition) {
+      const requiredHintFormat = requestedHintLabel
+        ? `"${requestedHintLabel}: Gợi ý: ..."`
+        : '"Gợi ý: ..."'
       executionDirectives.push(
         'Đây là yêu cầu BỔ SUNG TỐI THIỂU trên slide hiện tại, BẮT BUỘC chọn "action": "UPDATE_SLIDE".',
         'Giữ nguyên tuyệt đối đề bài, dữ kiện, nhiệm vụ học sinh, tiêu đề, bố cục, contentItems, bullets và các nội dung đã có.',
         'Chỉ bổ sung đúng MỘT câu gợi ý ngắn, tối đa 18 từ. Không viết lại, tóm tắt hoặc thay thế bất kỳ nội dung cũ nào.',
-        'Trong proposedSlide, sao chép nguyên slide hiện tại và nối câu mới theo dạng "Gợi ý: ..." vào trường subtitle.'
+        `Trong proposedSlide, sao chép nguyên slide hiện tại và nối câu mới theo đúng dạng ${requiredHintFormat} vào trường subtitle.`,
+        ...(requestedHintLabel
+          ? [
+              `BẮT BUỘC giữ nguyên nhãn "${requestedHintLabel}" và đặt nhãn này ngay trước nội dung gợi ý.`
+            ]
+          : [])
       )
     } else if (
       isUserAskingBatch &&
@@ -1127,20 +1140,27 @@ export const chatAndProposeSlideEdit = async (
     }
 
     if (isShortHintAddition && rawProposals.length > 0) {
+      const currentSlideProposal =
+        rawProposals.find(
+          (proposal) => proposal.targetSlideIndex === context.currentSlideIndex
+        ) || rawProposals[0]
       action = 'UPDATE_SLIDE'
       rawProposals = [
         {
-          ...rawProposals[0],
+          ...currentSlideProposal,
           action: 'UPDATE_SLIDE',
           targetSlideIndex: context.currentSlideIndex
         }
       ]
     }
 
-    if (
-      rawProposals.length > 1 ||
-      (isUserAskingBatch && rawProposals.length > 0) ||
-      action === 'BATCH_CHANGES'
+    if (isShortHintAddition && rawProposals.length === 0) {
+      action = 'CHAT_ONLY'
+    } else if (
+      !isShortHintAddition &&
+      (rawProposals.length > 1 ||
+        (isUserAskingBatch && rawProposals.length > 0) ||
+        action === 'BATCH_CHANGES')
     ) {
       action = 'BATCH_CHANGES'
     }
@@ -1177,7 +1197,11 @@ export const chatAndProposeSlideEdit = async (
             : undefined
       const slideData =
         isShortHintAddition && originalSlide
-          ? mergeShortHintIntoSlide(originalSlide, p.proposedSlide || {})
+          ? mergeShortHintIntoSlide(
+              originalSlide,
+              p.proposedSlide || {},
+              requestedHintLabel
+            )
           : p.proposedSlide || {}
       const slideTitle = String(slideData.title || '').toLowerCase()
       const slideHeader = String(slideData.header || '').toLowerCase()
