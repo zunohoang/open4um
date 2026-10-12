@@ -18,7 +18,7 @@ import {
   Sparkles,
   X
 } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
 
@@ -98,7 +98,7 @@ export const AiCopilotPanel = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentMenuRef = useRef<HTMLDivElement>(null)
-  const chatBottomRef = useRef<HTMLDivElement>(null)
+  const chatHistoryRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isAiLoading) {
@@ -113,9 +113,24 @@ export const AiCopilotPanel = ({
     return () => clearInterval(interval)
   }, [isAiLoading])
 
+  useLayoutEffect(() => {
+    if (!isAiPanelOpen) return
+
+    const chatHistory = chatHistoryRef.current
+    if (chatHistory) {
+      chatHistory.scrollTop = chatHistory.scrollHeight
+    }
+  }, [isAiPanelOpen])
+
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [aiMessages, isAiLoading])
+    if (!isAiPanelOpen) return
+
+    const chatHistory = chatHistoryRef.current
+    chatHistory?.scrollTo({
+      top: chatHistory.scrollHeight,
+      behavior: 'smooth'
+    })
+  }, [aiMessages, isAiLoading, isAiPanelOpen])
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -281,7 +296,10 @@ export const AiCopilotPanel = ({
       )}
 
       {/* Danh sách tin nhắn trao đổi (Chat history) */}
-      <div className='flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar'>
+      <div
+        ref={chatHistoryRef}
+        className='flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar'
+      >
         {aiMessages.map((msg) => {
           const isUser = msg.role === 'user'
           const hasBatchProposals = Boolean(
@@ -721,7 +739,6 @@ export const AiCopilotPanel = ({
             </div>
           </div>
         )}
-        <div ref={chatBottomRef} />
       </div>
 
       {/* POPOVER NỘI DUNG: Gợi ý nhanh (khi mở từ tab hoặc menu) */}
