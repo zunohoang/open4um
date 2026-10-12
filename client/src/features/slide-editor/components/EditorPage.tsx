@@ -918,9 +918,15 @@ export const EditorPage = ({
           text: m.text
         }))
 
+      const currentSlideSnapshot: Slide = {
+        ...currentSlide,
+        components: getSlideComponents(currentSlide, lecture.theme)
+      }
+
       const response = await editorApi.aiChat(lecture._id, {
         message: instruction,
         slideId: currentSlide.id,
+        currentSlide: currentSlideSnapshot,
         selectedCompId: selectedCompId || undefined,
         sourceMaterial: sourceMaterial || lecture.sourceMaterial || undefined,
         history: historyPayload

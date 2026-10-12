@@ -4,6 +4,7 @@ import type { Lecture, Slide } from '@/lib/types'
 export interface AiChatPayload {
   message: string
   slideId?: string
+  currentSlide?: Slide
   selectedCompId?: string
   sourceMaterial?: string
   history?: Array<{ role: 'user' | 'assistant'; text: string }>

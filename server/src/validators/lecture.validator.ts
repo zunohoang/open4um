@@ -50,12 +50,48 @@ export const aiEditSlideSchema = z.object({
     .max(2000, 'Hướng dẫn chỉnh sửa không được quá 2000 ký tự')
 })
 
+const aiChatSlideSnapshotSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    title: z.string().max(1000).optional(),
+    subtitle: z.string().max(5000).optional(),
+    header: z.string().max(1000).optional(),
+    footer: z.string().max(1000).optional(),
+    bullets: z.array(z.string().max(5000)).max(100).optional(),
+    contentItems: z
+      .array(z.record(z.string(), z.unknown()))
+      .max(100)
+      .optional(),
+    components: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(200),
+            type: z.enum([
+              'title',
+              'subtitle',
+              'text',
+              'bullets',
+              'quote',
+              'image',
+              'shape'
+            ]),
+            content: z.string().max(10000)
+          })
+          .passthrough()
+      )
+      .max(300)
+      .optional()
+  })
+  .passthrough()
+
 export const aiChatSchema = z.object({
   message: z
     .string()
     .min(1, 'Nội dung tin nhắn không được để trống')
     .max(3000, 'Nội dung tin nhắn không được quá 3000 ký tự'),
   slideId: z.string().optional(),
+  currentSlide: aiChatSlideSnapshotSchema.optional(),
   selectedCompId: z.string().optional(),
   sourceMaterial: z.string().max(10000).optional(),
   history: z

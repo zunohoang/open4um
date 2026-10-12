@@ -12,6 +12,7 @@ const mockAiGenerateOutlineFromPrompt = jest.fn()
 const mockAiRefineOutlineWithFeedback = jest.fn()
 const mockAiGenerateSlidesFromOutline = jest.fn()
 const mockAiBuildSlidesFromOutline = jest.fn()
+const mockAiChatAndProposeSlideEdit = jest.fn()
 
 jest.mock('@/models/user.model', () => ({
   UserModel: {
@@ -50,7 +51,9 @@ jest.mock('@/services/ai.service', () => ({
   generateSlidesFromOutline: (...args: any[]) =>
     mockAiGenerateSlidesFromOutline(...args),
   buildSlidesFromOutline: (...args: any[]) =>
-    mockAiBuildSlidesFromOutline(...args)
+    mockAiBuildSlidesFromOutline(...args),
+  chatAndProposeSlideEdit: (...args: any[]) =>
+    mockAiChatAndProposeSlideEdit(...args)
 }))
 
 jest.mock('@/services/admin.service', () => ({
@@ -68,6 +71,7 @@ import {
   createBlankLecture,
   getLecture,
   hardDeleteLecture,
+  aiChatInEditor,
   applySlideOperation
 } from '@/services/lecture.service'
 
@@ -455,6 +459,144 @@ describe('lecture.service unit tests', () => {
         userId: 'user-1'
       })
       expect(result).toEqual({ message: 'Đã xóa vĩnh viễn bài giảng' })
+    })
+  })
+
+  describe('aiChatInEditor', () => {
+    it('dùng snapshot canvas mới nhất làm context thay cho slide cũ trong database', async () => {
+      const persistedSlide = {
+        id: 'slide-1',
+        title: 'Tiêu đề cũ',
+        contentItems: [
+          { title: 'Dữ kiện cũ', description: 'Giá trị cũ là 10' }
+        ],
+        components: [
+          {
+            id: 'title-slide-1',
+            type: 'title',
+            content: 'Tiêu đề cũ',
+            x: 8,
+            y: 10
+          }
+        ]
+      }
+      const currentSlideSnapshot = {
+        ...persistedSlide,
+        title: 'Tiêu đề mới',
+        components: [
+          {
+            id: 'title-slide-1',
+            type: 'title',
+            content: 'Tiêu đề mới',
+            x: 8,
+            y: 10
+          },
+          {
+            id: 'body-slide-1',
+            type: 'text',
+            content: 'Giá trị mới là 42',
+            x: 8,
+            y: 30
+          }
+        ]
+      }
+      const mockLecture = {
+        _id: 'lecture-123',
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn((key: string) => {
+          if (key === 'aiChatHistory') return []
+          return ''
+        }),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      const mockUser = {
+        creditBalance: 10,
+        save: jest.fn().mockResolvedValue(true)
+      }
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockAiUsageLogCreate.mockResolvedValue({})
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Tiêu đề mới, giá trị mới là 42.',
+        action: 'CHAT_ONLY',
+        targetSlideIndex: 0,
+        proposals: []
+      })
+
+      await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Chỉ trả lời, không sửa slide: Nêu tiêu đề và nội dung chính.',
+        slideId: 'slide-1',
+        currentSlide: currentSlideSnapshot
+      })
+
+      expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          currentSlide: currentSlideSnapshot,
+          outlineOverview: 'Slide 1: Tiêu đề mới',
+          slidesCatalog: [
+            expect.objectContaining({
+              title: 'Tiêu đề mới',
+              visibleText: ['Giá trị mới là 42']
+            })
+          ]
+        })
+      )
+    })
+
+    it('bỏ qua snapshot có ID không khớp slide thuộc bài giảng', async () => {
+      const persistedSlide = {
+        id: 'slide-owned',
+        title: 'Tiêu đề thuộc bài giảng',
+        components: [
+          {
+            id: 'title-slide-owned',
+            type: 'title',
+            content: 'Tiêu đề thuộc bài giảng'
+          }
+        ]
+      }
+      const mockLecture = {
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn((key: string) => {
+          if (key === 'aiChatHistory') return []
+          return ''
+        }),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue({
+        creditBalance: 10,
+        save: jest.fn().mockResolvedValue(true)
+      })
+      mockAiUsageLogCreate.mockResolvedValue({})
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Tiêu đề thuộc bài giảng.',
+        action: 'CHAT_ONLY',
+        proposals: []
+      })
+
+      await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Chỉ trả lời: tiêu đề hiện tại là gì?',
+        slideId: 'slide-owned',
+        currentSlide: {
+          id: 'slide-not-owned',
+          title: 'Nội dung không hợp lệ'
+        }
+      })
+
+      expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ currentSlide: persistedSlide })
+      )
     })
   })
 

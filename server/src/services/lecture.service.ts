@@ -7,6 +7,7 @@ import { getCreditConfig } from '@/services/admin.service'
 import { FolderModel } from '@/models/folder.model'
 import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
 import { buildSlideComponents, THEME_PRESETS } from '@/constants/theme-options'
+import { getAiReadableSlideContext } from '@/utils/aiChatContext'
 import {
   generateOutlineFromPrompt,
   refineOutlineWithFeedback,
@@ -560,6 +561,7 @@ export const aiChatInEditor = async (
   payload: {
     message: string
     slideId?: string
+    currentSlide?: Record<string, unknown>
     selectedCompId?: string
     sourceMaterial?: string
     history?: Array<{ role: 'user' | 'assistant'; text: string }>
@@ -581,10 +583,23 @@ export const aiChatInEditor = async (
     : 0
 
   const activeIndex = targetSlideIndex >= 0 ? targetSlideIndex : 0
-  const currentSlide = slides[activeIndex] || {}
-  const prevSlide = activeIndex > 0 ? slides[activeIndex - 1] : undefined
+  const persistedCurrentSlide = slides[activeIndex] || {}
+  const hasMatchingSnapshot =
+    payload.currentSlide &&
+    String(payload.currentSlide.id || '') ===
+      String(persistedCurrentSlide.id || '')
+  const currentSlide = hasMatchingSnapshot
+    ? payload.currentSlide!
+    : persistedCurrentSlide
+  const contextualSlides = slides.map((slide, index) =>
+    index === activeIndex ? currentSlide : slide
+  )
+  const prevSlide =
+    activeIndex > 0 ? contextualSlides[activeIndex - 1] : undefined
   const nextSlide =
-    activeIndex < slides.length - 1 ? slides[activeIndex + 1] : undefined
+    activeIndex < contextualSlides.length - 1
+      ? contextualSlides[activeIndex + 1]
+      : undefined
 
   let selectedElement: Record<string, unknown> | undefined
   if (payload.selectedCompId && Array.isArray(currentSlide.components)) {
@@ -593,55 +608,24 @@ export const aiChatInEditor = async (
     ).find((c) => c && c.id === payload.selectedCompId)
   }
 
-  const outlineOverview = slides
-    .map(
-      (s, idx) => `Slide ${idx + 1}: ${String(s.title || 'Không có tiêu đề')}`
-    )
+  const outlineOverview = contextualSlides
+    .map((slide, idx) => {
+      const readableSlide = getAiReadableSlideContext(slide)
+      return `Slide ${idx + 1}: ${readableSlide.title || 'Không có tiêu đề'}`
+    })
     .join('\n')
 
-  const slidesCatalog = slides.map((s, idx) => {
-    type RawItem = {
-      title?: string
-      description?: string
-      stat?: string
-      tag?: string
-    }
-    let rawItems: RawItem[] = []
-    if (Array.isArray(s.contentItems) && s.contentItems.length > 0) {
-      rawItems = (s.contentItems as RawItem[]).map((it) => ({
-        title: it.title || '',
-        description: it.description || '',
-        stat: it.stat || undefined,
-        tag: it.tag || undefined
-      }))
-    } else if (Array.isArray(s.components)) {
-      const comps = s.components as Array<{ id?: string; content?: string }>
-      const titleComps = comps.filter(
-        (c) => c.id?.includes('title-') && !c.id.startsWith('title-')
-      )
-      const descComps = comps.filter((c) => c.id?.includes('desc-'))
-      const statComps = comps.filter(
-        (c) => c.id?.includes('metric-num-') || c.id?.includes('tl-year-')
-      )
-      const tagComps = comps.filter(
-        (c) => c.id?.includes('tag-') && !c.id.includes('tag-bg-')
-      )
-      rawItems = titleComps.map((tc, i) => ({
-        title: tc.content || '',
-        description: descComps[i]?.content || '',
-        stat: statComps[i]?.content || undefined,
-        tag: tagComps[i]?.content || undefined
-      }))
-    }
-
+  const slidesCatalog = contextualSlides.map((slide, idx) => {
+    const readableSlide = getAiReadableSlideContext(slide)
     return {
       slideNumber: idx + 1,
-      id: String(s.id || `slide-${idx + 1}`),
-      header: String(s.header || ''),
-      title: String(s.title || 'Không có tiêu đề'),
-      bullets: Array.isArray(s.bullets) ? (s.bullets as string[]) : [],
-      layout: String(s.layout || 'standard'),
-      contentItems: rawItems
+      id: String(slide.id || `slide-${idx + 1}`),
+      header: readableSlide.header,
+      title: readableSlide.title || 'Không có tiêu đề',
+      bullets: readableSlide.bullets,
+      layout: String(slide.layout || slide.contentLayout || 'standard'),
+      contentItems: readableSlide.contentItems,
+      visibleText: readableSlide.visibleText
     }
   })
 
@@ -704,7 +688,8 @@ export const aiChatInEditor = async (
     (aiResult.action === 'UPDATE_SLIDE' ||
       aiResult.action === 'UPDATE_CURRENT_SLIDE')
   ) {
-    const baseSlide = slides[targetIdx] || {}
+    const baseSlide =
+      targetIdx === activeIndex ? currentSlide : slides[targetIdx] || {}
     // Giữ nguyên ID của slide cũ để không mất liên kết, nhưng BẮT BUỘC dùng components mới do AI & Layout Engine vừa sinh ra
     // TUYỆT ĐỐI không ghi đè lại baseComps cũ vì sẽ làm sống lại lỗi đè chữ / layout cũ!
     proposedSlide = {
