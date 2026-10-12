@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
-import { Maximize2, Minimize2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { useToast } from '@/components/ui/Toast'
@@ -29,7 +29,9 @@ export const CreateLectureModal = ({
 
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [promptExpanded, setPromptExpanded] = useState(false)
+  const [expandedField, setExpandedField] = useState<
+    'prompt' | 'feedback' | null
+  >(null)
   const [selectedThemeId, setSelectedThemeId] =
     useState<string>(DEFAULT_THEME_ID)
   const [outline, setOutline] = useState<Outline | null>(null)
@@ -169,6 +171,21 @@ export const CreateLectureModal = ({
     })
   }
 
+  // Đổi chỗ cả object phần, nên tiêu đề và các ý con đi cùng nhau
+  const handleMoveSection = (secIdx: number, dir: -1 | 1) => {
+    setOutline((prev) => {
+      if (!prev) return prev
+      const target = secIdx + dir
+      if (target < 0 || target >= prev.sections.length) return prev
+      const sections = [...prev.sections]
+      ;[sections[secIdx], sections[target]] = [
+        sections[target],
+        sections[secIdx]
+      ]
+      return { ...prev, sections }
+    })
+  }
+
   const handleAddSection = () => {
     setOutline((prev) => {
       if (!prev) return prev
@@ -271,19 +288,21 @@ export const CreateLectureModal = ({
 
         {/* Nội dung chính: 2 box chia theo CSS Grid tỉ lệ 3/7 */}
         <div className='relative grid flex-1 overflow-hidden md:grid-cols-10 md:divide-x divide-stone-300'>
-          {/* Vùng soạn thảo prompt mở rộng, dùng chung state với ô nhập nhỏ */}
-          {promptExpanded && (
+          {/* Vùng soạn thảo mở rộng, dùng chung state với ô nhập nhỏ */}
+          {expandedField && (
             <div className='absolute inset-0 z-10 flex flex-col bg-white p-6'>
               <div className='flex items-center justify-between'>
                 <label
-                  htmlFor='modal-lecture-prompt-expanded'
+                  htmlFor='modal-expanded-editor'
                   className='block text-xs font-bold text-stone-700 uppercase tracking-wider'
                 >
-                  Prompt sinh dàn ý
+                  {expandedField === 'prompt'
+                    ? 'Prompt sinh dàn ý'
+                    : 'Nhờ AI điều chỉnh dàn ý'}
                 </label>
                 <button
                   type='button'
-                  onClick={() => setPromptExpanded(false)}
+                  onClick={() => setExpandedField(null)}
                   className='flex items-center gap-1.5 text-xs font-bold text-stone-500 uppercase tracking-wider transition hover:text-orange-700 cursor-pointer'
                 >
                   <Minimize2 size={14} />
@@ -291,16 +310,19 @@ export const CreateLectureModal = ({
                 </button>
               </div>
               <textarea
-                id='modal-lecture-prompt-expanded'
+                id='modal-expanded-editor'
                 autoFocus
                 className='mt-3 w-full flex-1 border border-stone-300 bg-white p-4 text-sm leading-relaxed outline-orange-700 resize-none custom-scrollbar'
-                placeholder='Ví dụ: Căn bản về NodeJS cho sinh viên IT...'
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                value={expandedField === 'prompt' ? prompt : feedback}
+                onChange={(e) =>
+                  expandedField === 'prompt'
+                    ? setPrompt(e.target.value)
+                    : setFeedback(e.target.value)
+                }
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     e.stopPropagation()
-                    setPromptExpanded(false)
+                    setExpandedField(null)
                   }
                 }}
               />
@@ -336,7 +358,7 @@ export const CreateLectureModal = ({
                   </label>
                   <button
                     type='button'
-                    onClick={() => setPromptExpanded(true)}
+                    onClick={() => setExpandedField('prompt')}
                     className='flex items-center gap-1 text-[11px] font-bold text-stone-500 uppercase tracking-wider transition hover:text-orange-700 cursor-pointer'
                     aria-label='Mở rộng ô prompt'
                     title='Mở rộng'
@@ -467,6 +489,30 @@ export const CreateLectureModal = ({
                               className='flex-1 resize-none overflow-hidden border-b border-transparent bg-transparent text-sm font-semibold text-emerald-950 font-display transition hover:border-stone-300 focus:border-orange-700 focus:bg-white focus:px-2 focus:py-1 outline-hidden leading-snug break-words'
                               placeholder='Nhập tiêu đề phần...'
                             />
+                            <div className='flex shrink-0 items-center mt-0.5'>
+                              <button
+                                type='button'
+                                disabled={secIdx === 0}
+                                onClick={() => handleMoveSection(secIdx, -1)}
+                                className='p-1 text-stone-400 transition hover:text-orange-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer'
+                                aria-label='Di chuyển phần lên'
+                                title='Di chuyển lên'
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              <button
+                                type='button'
+                                disabled={
+                                  secIdx === outline.sections.length - 1
+                                }
+                                onClick={() => handleMoveSection(secIdx, 1)}
+                                className='p-1 text-stone-400 transition hover:text-orange-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer'
+                                aria-label='Di chuyển phần xuống'
+                                title='Di chuyển xuống'
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                            </div>
                             <button
                               type='button'
                               onClick={() => handleDeleteSection(secIdx)}
@@ -564,16 +610,36 @@ export const CreateLectureModal = ({
                         <span>✨</span>
                         <span>Nhờ AI điều chỉnh dàn ý</span>
                       </span>
-                      <span className='text-[10px] text-stone-400 font-sans'>
-                        Gửi ý kiến đóng góp kèm prompt ban đầu
-                      </span>
+                      <div className='flex items-center gap-3'>
+                        <span className='text-[10px] text-stone-400 font-sans'>
+                          Gửi ý kiến đóng góp kèm prompt ban đầu
+                        </span>
+                        <button
+                          type='button'
+                          onClick={() => setExpandedField('feedback')}
+                          className='flex items-center gap-1 text-[11px] font-bold text-stone-500 uppercase tracking-wider transition hover:text-orange-700 cursor-pointer'
+                          aria-label='Mở rộng ô điều chỉnh dàn ý'
+                          title='Mở rộng'
+                        >
+                          <Maximize2 size={13} />
+                          Mở rộng
+                        </button>
+                      </div>
                     </div>
+                    {/* Tự giãn theo nội dung, tối đa max-h-48 rồi cuộn bên trong */}
                     <textarea
+                      id='modal-outline-feedback'
                       rows={2}
                       value={feedback}
+                      ref={(el) => {
+                        if (el) {
+                          el.style.height = 'auto'
+                          el.style.height = `${el.scrollHeight}px`
+                        }
+                      }}
                       onChange={(e) => setFeedback(e.target.value)}
                       placeholder='Ví dụ: Bổ sung phần thực hành với MongoDB, giảm bớt lý thuyết tổng quan...'
-                      className='w-full border border-stone-300 bg-white p-2.5 text-xs outline-orange-700 resize-none custom-scrollbar'
+                      className='w-full max-h-48 overflow-y-auto border border-stone-300 bg-white p-2.5 text-xs outline-orange-700 resize-none custom-scrollbar'
                     />
                     <div className='flex justify-end'>
                       <button
