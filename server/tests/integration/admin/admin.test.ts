@@ -341,6 +341,80 @@ describe('Integration Tests — Admin Console', () => {
         expect(res.body.data.items[0].userId.name).toBe('Tran Van B')
         expect(res.body.data.items[0].userId.email).toBe('b@example.com')
       })
+
+      it('lọc theo khoảng ngày và phân trang đúng kết quả', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { user } = await createUser()
+        const logs = await AiUsageLogModel.create([
+          {
+            userId: user._id,
+            prompt: 'Prompt trong khoảng lọc',
+            slideCount: 2,
+            creditSpent: 10
+          },
+          {
+            userId: user._id,
+            prompt: 'Prompt thứ hai trong khoảng lọc',
+            slideCount: 4,
+            creditSpent: 20
+          },
+          {
+            userId: user._id,
+            prompt: 'Prompt ngoài khoảng lọc',
+            slideCount: 5,
+            creditSpent: 25
+          }
+        ])
+        await Promise.all([
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[0]._id },
+            { $set: { createdAt: new Date('2026-01-15T12:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[1]._id },
+            { $set: { createdAt: new Date('2026-01-15T18:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[2]._id },
+            { $set: { createdAt: new Date('2026-01-16T00:00:00.000Z') } }
+          )
+        ])
+
+        const res = await request(app)
+          .get(
+            '/api/v1/admin/ai-usage?page=1&limit=1&from=2026-01-15&to=2026-01-15'
+          )
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(200)
+        expect(res.body.data.items).toHaveLength(1)
+        expect(res.body.data.items[0].prompt).toBe(
+          'Prompt thứ hai trong khoảng lọc'
+        )
+      })
+
+      it('trả danh sách rỗng khi không có dữ liệu phù hợp', async () => {
+        const { token: adminToken } = await createAdmin()
+
+        const res = await request(app)
+          .get('/api/v1/admin/ai-usage?from=2030-01-01&to=2030-01-31')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(200)
+        expect(res.body.data.items).toEqual([])
+        expect(res.body.data.total).toBe(0)
+      })
+
+      it('từ chối khoảng ngày không hợp lệ', async () => {
+        const { token: adminToken } = await createAdmin()
+
+        const res = await request(app)
+          .get('/api/v1/admin/ai-usage?from=2026-02-02&to=2026-02-01')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+      })
     })
   })
 })

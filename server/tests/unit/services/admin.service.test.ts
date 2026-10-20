@@ -350,9 +350,23 @@ describe('admin.service unit tests', () => {
       ;(AiUsageLogModel.find as jest.Mock).mockReturnValue(mockFind)
       ;(AiUsageLogModel.countDocuments as jest.Mock).mockResolvedValue(1)
 
-      const result = await listAiUsage(1, 10, 'u-1', '2026-01-01', '2026-01-02')
+      const result = await listAiUsage(
+        1,
+        10,
+        '507f1f77bcf86cd799439011',
+        '2026-01-01',
+        '2026-01-02'
+      )
       expect(result.items).toEqual(mockLogs)
       expect(result.total).toBe(1)
+    })
+
+    it('từ chối khoảng ngày không hợp lệ', async () => {
+      await expect(
+        listAiUsage(1, 10, undefined, '2026-01-03', '2026-01-02')
+      ).rejects.toMatchObject({ statusCode: 422 })
+
+      expect(AiUsageLogModel.find).not.toHaveBeenCalled()
     })
   })
 })

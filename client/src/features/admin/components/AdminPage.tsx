@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { adminApi } from '@/features/admin/api/admin.api'
+import { AiUsageManagement } from '@/features/admin/components/AiUsageManagement'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { Modal, Pagination } from '@/components/ui'
-import type { AdminUser, AiUsageLog, CreditConfig } from '@/lib/types'
+import type { AdminUser, CreditConfig } from '@/lib/types'
 
 interface AdminPageProps {
   onBack?: () => void
@@ -18,13 +19,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [usersPage, setUsersPage] = useState(1)
   const [usersLimit, setUsersLimit] = useState(10)
   const [isLoadingUsers, setIsLoadingUsers] = useState(false)
-
-  // Phân trang & dữ liệu nhật ký AI
-  const [logs, setLogs] = useState<AiUsageLog[]>([])
-  const [logsTotal, setLogsTotal] = useState(0)
-  const [logsPage, setLogsPage] = useState(1)
-  const [logsLimit, setLogsLimit] = useState(10)
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false)
 
   // Cấu hình credit & trạng thái chung
   const [config, setConfig] = useState<CreditConfig | null>(null)
@@ -82,23 +76,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }
   }, [search, usersPage, usersLimit])
 
-  // Tải nhật ký AI
-  const fetchLogs = useCallback(async () => {
-    setIsLoadingLogs(true)
-    try {
-      const response = await adminApi.getAiUsage({
-        page: logsPage,
-        limit: logsLimit
-      })
-      setLogs(response.items)
-      setLogsTotal(response.total)
-    } catch (error) {
-      console.error('Lỗi tải nhật ký AI:', error)
-    } finally {
-      setIsLoadingLogs(false)
-    }
-  }, [logsPage, logsLimit])
-
   // Tải cấu hình credit khi khởi tạo
   useEffect(() => {
     void adminApi
@@ -114,11 +91,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }, 250)
     return () => clearTimeout(timer)
   }, [fetchUsers])
-
-  // Tự động tải nhật ký AI khi đổi trang hoặc số lượng mỗi trang
-  useEffect(() => {
-    void fetchLogs()
-  }, [fetchLogs])
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value)
@@ -379,7 +351,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           }`}
           onClick={() => setActiveTab('logs')}
         >
-          Nhật ký AI ({logsTotal})
+          AI Usage
         </button>
       </div>
 
@@ -582,113 +554,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       )}
 
       {/* Tab 3: Nhật ký AI */}
-      {activeTab === 'logs' && (
-        <section className='border border-stone-300 bg-stone-50 p-7'>
-          <div className='mb-5 flex flex-col gap-1'>
-            <h2 className='text-2xl font-medium text-emerald-950'>
-              Nhật ký hoạt động AI
-            </h2>
-            <p className='font-sans text-xs text-stone-500'>
-              Theo dõi lịch sử sinh bài giảng, nội dung prompt và lượng credit
-              tiêu thụ
-            </p>
-          </div>
-
-          <div className='overflow-x-auto'>
-            <table className='w-full text-left font-sans text-sm'>
-              <thead>
-                <tr className='border-b border-stone-300 text-xs tracking-wider text-stone-500 uppercase'>
-                  <th className='py-3'>Thời gian</th>
-                  <th className='py-3'>Người dùng</th>
-                  <th className='py-3'>Yêu cầu (Prompt)</th>
-                  <th className='py-3'>Số slide</th>
-                  <th className='py-3 text-right'>Credit tiêu thụ</th>
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-stone-200'>
-                {isLoadingLogs ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className='py-8 text-center text-xs text-stone-500'
-                    >
-                      Đang tải nhật ký...
-                    </td>
-                  </tr>
-                ) : (
-                  <>
-                    {logs.map((log) => {
-                      const userDisplay =
-                        typeof log.userId === 'object' && log.userId !== null
-                          ? log.userId.name ||
-                            log.userId.email ||
-                            log.userId._id.slice(-6)
-                          : typeof log.userId === 'string'
-                            ? log.userId.slice(-6)
-                            : 'Ẩn danh'
-
-                      const userEmail =
-                        typeof log.userId === 'object' && log.userId !== null
-                          ? log.userId.email
-                          : undefined
-
-                      return (
-                        <tr key={log._id} className='hover:bg-stone-100/60'>
-                          <td className='py-3 font-mono text-xs text-stone-500'>
-                            {new Date(log.createdAt).toLocaleString('vi-VN')}
-                          </td>
-                          <td className='py-3 text-xs text-stone-800'>
-                            <div className='font-semibold'>{userDisplay}</div>
-                            {userEmail && (
-                              <div className='font-mono text-[11px] text-stone-400'>
-                                {userEmail}
-                              </div>
-                            )}
-                          </td>
-                          <td
-                            className='max-w-xs truncate py-3 text-stone-800'
-                            title={log.prompt}
-                          >
-                            {log.prompt || '(Trống)'}
-                          </td>
-                          <td className='py-3 text-stone-600'>
-                            {log.slideCount}
-                          </td>
-                          <td className='py-3 text-right font-semibold text-orange-700'>
-                            -{log.creditSpent}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {logs.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className='py-8 text-center text-stone-500'
-                        >
-                          Chưa có nhật ký hoạt động nào
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <Pagination
-            page={logsPage}
-            total={logsTotal}
-            limit={logsLimit}
-            onPageChange={setLogsPage}
-            onLimitChange={(limit) => {
-              setLogsLimit(limit)
-              setLogsPage(1)
-            }}
-            itemName='nhật ký'
-          />
-        </section>
-      )}
+      {activeTab === 'logs' && <AiUsageManagement />}
 
       {/* Modal Chỉnh sửa Credit người dùng */}
       <Modal

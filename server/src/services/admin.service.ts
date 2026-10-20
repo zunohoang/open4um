@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt'
+import { Types } from 'mongoose'
 import { AppError } from '@/utils/AppError'
 import { UserModel } from '@/models/user.model'
 import { LectureModel } from '@/models/lecture.model'
@@ -162,12 +163,41 @@ export const listAiUsage = async (
   from?: string,
   to?: string
 ) => {
+  const parseDate = (value: string, fieldName: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new AppError(`${fieldName} phải có định dạng YYYY-MM-DD`, 422)
+    }
+
+    const date = new Date(`${value}T00:00:00.000Z`)
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.toISOString().slice(0, 10) !== value
+    ) {
+      throw new AppError(`${fieldName} không phải là ngày hợp lệ`, 422)
+    }
+    return date
+  }
+
+  const fromDate = from ? parseDate(from, 'Từ ngày') : undefined
+  const toDate = to ? parseDate(to, 'Đến ngày') : undefined
+  if (fromDate && toDate && fromDate > toDate) {
+    throw new AppError('Từ ngày không được sau Đến ngày', 422)
+  }
+
   const filter: Record<string, unknown> = {}
-  if (userId) filter.userId = userId
-  if (from || to) {
+  if (userId) {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new AppError('Người dùng không hợp lệ', 422)
+    }
+    filter.userId = new Types.ObjectId(userId)
+  }
+  if (fromDate || toDate) {
+    const toExclusive = toDate
+      ? new Date(toDate.getTime() + 24 * 60 * 60 * 1000)
+      : undefined
     filter.createdAt = {
-      ...(from ? { $gte: new Date(from) } : {}),
-      ...(to ? { $lte: new Date(`${to}T23:59:59.999Z`) } : {})
+      ...(fromDate ? { $gte: fromDate } : {}),
+      ...(toExclusive ? { $lt: toExclusive } : {})
     }
   }
   const [items, total] = await Promise.all([
