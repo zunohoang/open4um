@@ -119,43 +119,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }
   }, [search, usersPage, usersLimit])
 
-  // Tải nhật ký AI
-  const fetchLogs = useCallback(async () => {
-    setIsLoadingLogs(true)
-    try {
-      const response = await adminApi.getAiUsage({
-        page: logsPage,
-        limit: logsLimit
-      })
-      setLogs(response.items)
-      setLogsTotal(response.total)
-    } catch (error) {
-      console.error('Lỗi tải nhật ký AI:', error)
-    } finally {
-      setIsLoadingLogs(false)
-    }
-  }, [logsPage, logsLimit])
-
-  const fetchCreditConfig = useCallback(async () => {
-    setIsLoadingConfig(true)
-    setConfigError(null)
-    try {
-      const currentConfig = await adminApi.getCreditConfig()
-      setConfig(currentConfig)
-      setCreditForm(toCreditConfigForm(currentConfig))
-      setCreditErrors({})
-    } catch (error) {
-      setConfigError(
-        getRequestErrorMessage(
-          error,
-          'Không thể tải cấu hình credit. Vui lòng thử lại.'
-        )
-      )
-    } finally {
-      setIsLoadingConfig(false)
-    }
-  }, [])
-
   // Tải cấu hình credit khi khởi tạo
   useEffect(() => {
     void fetchCreditConfig()
