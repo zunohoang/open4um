@@ -119,6 +119,27 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }
   }, [search, usersPage, usersLimit])
 
+  // Tải credit configs
+  const fetchCreditConfig = useCallback(async () => {
+    setIsLoadingConfig(true)
+    setConfigError(null)
+    try {
+      const currentConfig = await adminApi.getCreditConfig()
+      setConfig(currentConfig)
+      setCreditForm(toCreditConfigForm(currentConfig))
+      setCreditErrors({})
+    } catch (error) {
+      setConfigError(
+        getRequestErrorMessage(
+          error,
+          'Không thể tải cấu hình credit. Vui lòng thử lại.'
+        )
+      )
+    } finally {
+      setIsLoadingConfig(false)
+    }
+  }, [])
+
   // Tải cấu hình credit khi khởi tạo
   useEffect(() => {
     void fetchCreditConfig()
