@@ -8,11 +8,18 @@ export const seedCreditConfig = async () => {
   let config = await CreditConfigModel.findOne()
   if (!config) {
     config = await CreditConfigModel.create({
+      pricePerLecture: 80,
       pricePerSlide: 10,
       pricePerAiEdit: 5,
+      pricePerOutline: 5,
       signupBonus: 100
     })
     logger.info('✅ Tạo cấu hình credit mặc định')
+  } else {
+    await CreditConfigModel.updateOne(
+      { _id: config._id, pricePerLecture: { $exists: false } },
+      { $set: { pricePerLecture: 80 } }
+    )
   }
   return config
 }
