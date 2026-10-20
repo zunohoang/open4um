@@ -634,6 +634,9 @@ export interface AiChatContext {
   sourceMaterial?: string
   history?: Array<{ role: 'user' | 'assistant'; text: string }>
   theme?: string
+  creditBalance?: number
+  pricePerSlide?: number
+  maxCreatableSlides?: number
 }
 
 export type AiSlideAction =
@@ -979,6 +982,16 @@ export const chatAndProposeSlideEdit = async (
       .join('\n')
 
     const executionDirectives: string[] = []
+    if (
+      typeof context.creditBalance === 'number' &&
+      typeof context.pricePerSlide === 'number' &&
+      typeof context.maxCreatableSlides === 'number'
+    ) {
+      executionDirectives.push(
+        `GIỚI HẠN AI CREDIT: Người dùng hiện còn ${context.creditBalance} credit; mỗi slide mới tốn ${context.pricePerSlide} credit; vì vậy chỉ được tạo tối đa ${context.maxCreatableSlides} slide mới trong phản hồi này.`,
+        `Nếu người dùng yêu cầu nhiều hơn ${context.maxCreatableSlides} slide mới, chỉ trả về tối đa ${context.maxCreatableSlides} proposal có action "CREATE_SLIDE" và nói rõ đã giới hạn theo số credit còn lại. Tuyệt đối không vượt quá giới hạn này.`
+      )
+    }
     if (isExplicitChatOnly) {
       executionDirectives.push(
         'Đây là yêu cầu CHỈ HỎI ĐÁP. BẮT BUỘC chọn "action": "CHAT_ONLY".',

@@ -32,8 +32,10 @@ export interface ListAiUsageParams {
 }
 
 export interface UpdateCreditConfigPayload {
+  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
+  pricePerOutline?: number
   signupBonus?: number
 }
 

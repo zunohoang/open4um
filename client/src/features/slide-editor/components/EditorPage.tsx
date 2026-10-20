@@ -74,7 +74,7 @@ export const EditorPage = ({
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
-  const { user } = useAuthStore()
+  const { user, updateUser } = useAuthStore()
 
   const {
     activeSlideIndex,
@@ -966,6 +966,8 @@ export const EditorPage = ({
         history: historyPayload
       })
 
+      updateUser({ creditBalance: response.creditBalance })
+
       const targetIndex =
         typeof response.targetSlideIndex === 'number' &&
         response.targetSlideIndex >= 0 &&
@@ -1149,12 +1151,29 @@ export const EditorPage = ({
       return
     }
 
-    updateAiMessageStatus(messageId, 'accepted')
     recordHistory(lecture.slides)
 
-    const updatedMessages = aiMessages.map((m) =>
-      m.id === messageId ? { ...m, status: 'accepted' as const } : m
-    )
+    const updatedMessages = aiMessages.map((m) => {
+      if (m.id !== messageId) return m
+
+      const updatedProposals = m.proposals?.map((proposal) =>
+        proposal.proposedSlide.id === proposedSlide.id
+          ? { ...proposal, status: 'accepted' as const }
+          : proposal
+      )
+      const hasPendingProposal = updatedProposals?.some(
+        (proposal) => proposal.status !== 'accepted'
+      )
+
+      return {
+        ...m,
+        proposals: updatedProposals,
+        status: hasPendingProposal
+          ? ('pending' as const)
+          : ('accepted' as const)
+      }
+    })
+    setAiMessages(updatedMessages)
 
     const finalizedSlide: Slide = {
       ...proposedSlide,
@@ -1199,7 +1218,10 @@ export const EditorPage = ({
     messageId: string,
     proposals: AiSlideProposalItem[]
   ) => {
-    if (!lecture || proposals.length === 0) return
+    const pendingProposals = proposals.filter(
+      (proposal) => proposal.status !== 'accepted'
+    )
+    if (!lecture || pendingProposals.length === 0) return
     updateAiMessageStatus(messageId, 'accepted')
     recordHistory(lecture.slides)
 
@@ -1220,7 +1242,7 @@ export const EditorPage = ({
     const nextSlides = [...lecture.slides]
 
     // 1. Áp dụng các thay đổi UPDATE_SLIDE trước
-    proposals
+    pendingProposals
       .filter((p) => p.action === 'UPDATE_SLIDE')
       .forEach((p) => {
         if (p.targetSlideIndex >= 0 && p.targetSlideIndex < nextSlides.length) {
@@ -1233,7 +1255,9 @@ export const EditorPage = ({
       })
 
     // 2. Chèn các slide mới CREATE_SLIDE theo thứ tự tăng dần
-    const createProps = proposals.filter((p) => p.action === 'CREATE_SLIDE')
+    const createProps = pendingProposals.filter(
+      (p) => p.action === 'CREATE_SLIDE'
+    )
     let insertedOffset = 0
     createProps.forEach((p) => {
       const insertAt = Math.min(
@@ -1258,7 +1282,7 @@ export const EditorPage = ({
     setPreviewSlide(null)
     setSelectedCompId(null)
     showToast(
-      `Đã áp dụng thành công ${proposals.length} đề xuất slide từ AI`,
+      `Đã áp dụng thành công ${pendingProposals.length} đề xuất slide từ AI`,
       'success'
     )
   }
@@ -1366,6 +1390,7 @@ export const EditorPage = ({
         currentOutline: lecture.outline || undefined,
         lectureId: lecture._id
       })
+      updateUser({ creditBalance: result.creditBalance })
       if (result.outline) {
         mutateLecture({ ...lecture, outline: result.outline })
         showToast('Đã tạo dàn ý bài giảng mới thành công', 'success')

@@ -243,8 +243,10 @@ describe('Integration Tests — Admin Console', () => {
       it('trả 200 và cấu hình giá credit chính xác từ Database', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -254,8 +256,10 @@ describe('Integration Tests — Admin Console', () => {
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
+        expect(res.body.data.pricePerLecture).toBe(80)
         expect(res.body.data.pricePerSlide).toBe(2)
         expect(res.body.data.pricePerAiEdit).toBe(1)
+        expect(res.body.data.pricePerOutline).toBe(4)
         expect(res.body.data.signupBonus).toBe(20)
       })
     })
@@ -264,8 +268,10 @@ describe('Integration Tests — Admin Console', () => {
       it('cập nhật bảng giá credit thành công và lưu thay đổi vào DB', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -273,8 +279,10 @@ describe('Integration Tests — Admin Console', () => {
           .patch('/api/v1/admin/credit-config')
           .set('Authorization', `Bearer ${adminToken}`)
           .send({
+            pricePerLecture: 90,
             pricePerSlide: 10,
             pricePerAiEdit: 3,
+            pricePerOutline: 6,
             signupBonus: 50
           })
 
@@ -282,16 +290,20 @@ describe('Integration Tests — Admin Console', () => {
         expect(res.body.success).toBe(true)
 
         const configInDb = await CreditConfigModel.findOne()
+        expect(configInDb?.pricePerLecture).toBe(90)
         expect(configInDb?.pricePerSlide).toBe(10)
         expect(configInDb?.pricePerAiEdit).toBe(3)
+        expect(configInDb?.pricePerOutline).toBe(6)
         expect(configInDb?.signupBonus).toBe(50)
       })
 
       it('trả 422 khi truyền giá trị credit âm và không thay đổi DB', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -307,6 +319,33 @@ describe('Integration Tests — Admin Console', () => {
 
         const configInDb = await CreditConfigModel.findOne()
         expect(configInDb?.pricePerSlide).toBe(2)
+      })
+
+      it.each([
+        ['giá trị bằng 0', 0],
+        ['số thập phân', 1.5],
+        ['chuỗi ký tự', 'abc'],
+        ['chuỗi số', '2']
+      ])('trả 422 khi truyền %s', async (_caseName, invalidValue) => {
+        const { token: adminToken } = await createAdmin()
+        await CreditConfigModel.create({
+          pricePerLecture: 80,
+          pricePerSlide: 2,
+          pricePerAiEdit: 1,
+          pricePerOutline: 4,
+          signupBonus: 20
+        })
+
+        const res = await request(app)
+          .patch('/api/v1/admin/credit-config')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ pricePerAiEdit: invalidValue })
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+
+        const configInDb = await CreditConfigModel.findOne()
+        expect(configInDb?.pricePerAiEdit).toBe(1)
       })
     })
   })

@@ -11,6 +11,7 @@ import {
   Undo2
 } from 'lucide-react'
 import { BrandLogo } from '@/components/ui'
+import { UserAccountMenu } from '@/components/layout/UserAccountMenu'
 import { useEditorStore } from '../store/editor.store'
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
@@ -261,6 +262,8 @@ export const EditorHeader = ({
           <Play size={14} />
           <span>Trình chiếu</span>
         </button>
+
+        <UserAccountMenu />
       </div>
     </header>
   )

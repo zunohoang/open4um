@@ -5,6 +5,43 @@ import { useAuthStore } from '@/features/auth/store/auth.store'
 import { Modal, Pagination } from '@/components/ui'
 import type { AdminUser, CreditConfig } from '@/lib/types'
 
+type CreditConfigField =
+  | 'pricePerLecture'
+  | 'pricePerOutline'
+  | 'pricePerSlide'
+  | 'pricePerAiEdit'
+  | 'signupBonus'
+type CreditConfigForm = Record<CreditConfigField, string>
+type CreditConfigErrors = Partial<Record<CreditConfigField, string>>
+
+const CREDIT_FIELD_LABELS: Record<CreditConfigField, string> = {
+  pricePerLecture: 'Credit sinh bài giảng',
+  pricePerOutline: 'Credit sinh dàn ý',
+  pricePerSlide: 'Credit tạo slide',
+  pricePerAiEdit: 'Credit chỉnh sửa AI',
+  signupBonus: 'Credit tặng khi đăng ký'
+}
+
+const EMPTY_CREDIT_FORM: CreditConfigForm = {
+  pricePerLecture: '',
+  pricePerOutline: '',
+  pricePerSlide: '',
+  pricePerAiEdit: '',
+  signupBonus: ''
+}
+
+const toCreditConfigForm = (config: CreditConfig): CreditConfigForm => ({
+  pricePerLecture: String(config.pricePerLecture),
+  pricePerOutline: String(config.pricePerOutline),
+  pricePerSlide: String(config.pricePerSlide),
+  pricePerAiEdit: String(config.pricePerAiEdit),
+  signupBonus: String(config.signupBonus)
+})
+
+const getRequestErrorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data
+    ?.message || fallback
+
 interface AdminPageProps {
   onBack?: () => void
 }
@@ -22,6 +59,12 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
 
   // Cấu hình credit & trạng thái chung
   const [config, setConfig] = useState<CreditConfig | null>(null)
+  const [creditForm, setCreditForm] =
+    useState<CreditConfigForm>(EMPTY_CREDIT_FORM)
+  const [creditErrors, setCreditErrors] = useState<CreditConfigErrors>({})
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true)
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<'users' | 'config' | 'logs'>(
     'users'
@@ -76,13 +119,47 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     }
   }, [search, usersPage, usersLimit])
 
+  // Tải nhật ký AI
+  const fetchLogs = useCallback(async () => {
+    setIsLoadingLogs(true)
+    try {
+      const response = await adminApi.getAiUsage({
+        page: logsPage,
+        limit: logsLimit
+      })
+      setLogs(response.items)
+      setLogsTotal(response.total)
+    } catch (error) {
+      console.error('Lỗi tải nhật ký AI:', error)
+    } finally {
+      setIsLoadingLogs(false)
+    }
+  }, [logsPage, logsLimit])
+
+  const fetchCreditConfig = useCallback(async () => {
+    setIsLoadingConfig(true)
+    setConfigError(null)
+    try {
+      const currentConfig = await adminApi.getCreditConfig()
+      setConfig(currentConfig)
+      setCreditForm(toCreditConfigForm(currentConfig))
+      setCreditErrors({})
+    } catch (error) {
+      setConfigError(
+        getRequestErrorMessage(
+          error,
+          'Không thể tải cấu hình credit. Vui lòng thử lại.'
+        )
+      )
+    } finally {
+      setIsLoadingConfig(false)
+    }
+  }, [])
+
   // Tải cấu hình credit khi khởi tạo
   useEffect(() => {
-    void adminApi
-      .getCreditConfig()
-      .then(setConfig)
-      .catch((error) => console.error('Lỗi tải cấu hình credit:', error))
-  }, [])
+    void fetchCreditConfig()
+  }, [fetchCreditConfig])
 
   // Tự động tải người dùng khi thay đổi từ khóa tìm kiếm hoặc trang
   useEffect(() => {
@@ -97,16 +174,70 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     setUsersPage(1)
   }
 
+  const handleCreditFieldChange = (field: CreditConfigField, value: string) => {
+    setCreditForm((previous) => ({ ...previous, [field]: value }))
+    setCreditErrors((previous) => {
+      if (!previous[field]) return previous
+      const nextErrors = { ...previous }
+      delete nextErrors[field]
+      return nextErrors
+    })
+    setConfigError(null)
+  }
+
+  const parseCreditConfigForm = () => {
+    const fields = Object.keys(creditForm) as CreditConfigField[]
+    const errors: CreditConfigErrors = {}
+    const values = {} as Record<CreditConfigField, number>
+
+    fields.forEach((field) => {
+      const rawValue = creditForm[field].trim()
+      const parsedValue = Number(rawValue)
+      if (!/^[1-9]\d*$/.test(rawValue) || !Number.isSafeInteger(parsedValue)) {
+        errors[field] =
+          `${CREDIT_FIELD_LABELS[field]} chỉ chấp nhận số nguyên dương`
+        return
+      }
+      values[field] = parsedValue
+    })
+
+    return { errors, values }
+  }
+
   const saveConfig = async () => {
-    if (config) {
+    if (!config || isSavingConfig) return
+
+    const { errors, values } = parseCreditConfigForm()
+    if (Object.keys(errors).length > 0) {
+      setCreditErrors(errors)
+      setConfigError('Vui lòng kiểm tra lại các giá trị chưa hợp lệ.')
+      return
+    }
+
+    try {
+      setIsSavingConfig(true)
+      setConfigError(null)
       const updated = await adminApi.updateCreditConfig({
-        pricePerSlide: config.pricePerSlide,
-        pricePerAiEdit: config.pricePerAiEdit,
-        signupBonus: config.signupBonus
+        pricePerLecture: values.pricePerLecture,
+        pricePerOutline: values.pricePerOutline,
+        pricePerSlide: values.pricePerSlide,
+        pricePerAiEdit: values.pricePerAiEdit,
+        signupBonus: values.signupBonus
       })
       setConfig(updated)
+      setCreditForm(toCreditConfigForm(updated))
+      setCreditErrors({})
       setSaveMessage('Đã lưu cấu hình credit thành công')
       setTimeout(() => setSaveMessage(null), 3000)
+    } catch (error) {
+      setConfigError(
+        getRequestErrorMessage(
+          error,
+          'Không thể lưu cấu hình credit. Vui lòng thử lại.'
+        )
+      )
+    } finally {
+      setIsSavingConfig(false)
     }
   }
 
@@ -497,56 +628,167 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           <h2 className='mb-5 text-2xl font-medium text-emerald-950'>
             Cấu hình hệ thống Credit
           </h2>
-          {config && (
+          {isLoadingConfig ? (
+            <div className='py-8 text-center font-sans text-sm text-stone-500'>
+              Đang tải cấu hình credit...
+            </div>
+          ) : !config ? (
+            <div className='rounded bg-red-50 p-3 font-sans'>
+              <p className='text-xs font-semibold text-red-700'>
+                {configError || 'Không thể tải cấu hình credit.'}
+              </p>
+              <button
+                className='mt-3 border border-stone-300 bg-white px-3 py-2 text-xs font-semibold hover:bg-stone-100'
+                onClick={() => void fetchCreditConfig()}
+                type='button'
+              >
+                Tải lại
+              </button>
+            </div>
+          ) : (
             <div className='space-y-4'>
               <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi slide tạo mới (credit)
+                Giá mỗi lượt sinh bài giảng
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.pricePerSlide}
+                  aria-invalid={Boolean(creditErrors.pricePerLecture)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerLecture
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerLecture}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      pricePerSlide: Number(event.target.value)
-                    })
+                    handleCreditFieldChange(
+                      'pricePerLecture',
+                      event.target.value
+                    )
                   }
                 />
+                {creditErrors.pricePerLecture && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerLecture}
+                  </span>
+                )}
               </label>
+
               <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi lượt AI chỉnh sửa slide (credit)
+                Giá mỗi slide tạo mới trong AI Chat
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.pricePerAiEdit}
+                  aria-invalid={Boolean(creditErrors.pricePerSlide)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerSlide
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerSlide}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      pricePerAiEdit: Number(event.target.value)
-                    })
+                    handleCreditFieldChange('pricePerSlide', event.target.value)
                   }
                 />
+                {creditErrors.pricePerSlide && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerSlide}
+                  </span>
+                )}
               </label>
+
+              <label className='block font-sans text-sm font-semibold text-stone-600'>
+                Giá mỗi lượt AI chỉnh sửa slide
+                <input
+                  aria-invalid={Boolean(creditErrors.pricePerAiEdit)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerAiEdit
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerAiEdit}
+                  onChange={(event) =>
+                    handleCreditFieldChange(
+                      'pricePerAiEdit',
+                      event.target.value
+                    )
+                  }
+                />
+                {creditErrors.pricePerAiEdit && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerAiEdit}
+                  </span>
+                )}
+              </label>
+
+              <label className='block font-sans text-sm font-semibold text-stone-600'>
+                Giá mỗi lượt AI sinh dàn ý
+                <input
+                  aria-invalid={Boolean(creditErrors.pricePerOutline)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerOutline
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerOutline}
+                  onChange={(event) =>
+                    handleCreditFieldChange(
+                      'pricePerOutline',
+                      event.target.value
+                    )
+                  }
+                />
+                {creditErrors.pricePerOutline && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerOutline}
+                  </span>
+                )}
+              </label>
+
               <label className='block font-sans text-sm font-semibold text-stone-600'>
                 Credit tặng khi người dùng đăng ký mới
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.signupBonus}
+                  aria-invalid={Boolean(creditErrors.signupBonus)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.signupBonus
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.signupBonus}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      signupBonus: Number(event.target.value)
-                    })
+                    handleCreditFieldChange('signupBonus', event.target.value)
                   }
                 />
+                {creditErrors.signupBonus && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.signupBonus}
+                  </span>
+                )}
               </label>
+
+              {configError && (
+                <div className='rounded bg-red-50 p-2 font-sans text-xs font-semibold text-red-700'>
+                  ❌ {configError}
+                </div>
+              )}
+
               <button
-                className='mt-5 bg-orange-700 px-5 py-3 font-sans text-sm font-bold text-white transition hover:bg-orange-800'
+                className='mt-5 bg-orange-700 px-5 py-3 font-sans text-sm font-bold text-white transition hover:bg-orange-800 disabled:opacity-50'
+                disabled={isSavingConfig}
                 onClick={() => void saveConfig()}
                 type='button'
               >
-                Lưu cấu hình
+                {isSavingConfig ? 'Đang lưu...' : 'Lưu cấu hình'}
               </button>
             </div>
           )}

@@ -218,6 +218,7 @@ export const getCreditConfig = async () => {
 }
 
 export const updateCreditConfig = async (data: {
+  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
   pricePerOutline?: number
