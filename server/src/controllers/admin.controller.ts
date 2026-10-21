@@ -53,6 +53,13 @@ export const listAiUsage = asyncHandler(async (req, res) => {
   okPaginated(res, items, total, page, limit)
 })
 
+export const getDashboard = asyncHandler(async (req, res) => {
+  const from = typeof req.query.from === 'string' ? req.query.from : undefined
+  const to = typeof req.query.to === 'string' ? req.query.to : undefined
+  const stats = await adminService.getDashboardStats(from, to)
+  ok(res, stats)
+})
+
 export const getCreditConfig = asyncHandler(async (_req, res) => {
   const config = await adminService.getCreditConfig()
   ok(res, config)

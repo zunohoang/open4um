@@ -159,6 +159,30 @@ export interface AiUsageLog {
   createdAt: string
 }
 
+export interface DashboardTotals {
+  users: number
+  lectures: number
+  aiUsages: number
+  aiSlides: number
+  creditsSpent: number
+}
+
+export interface DashboardSeriesPoint {
+  date: string
+  users: number
+  lectures: number
+  creditsSpent: number
+}
+
+export interface DashboardStats {
+  from: string
+  to: string
+  totals: DashboardTotals
+  allTime: DashboardTotals
+  series: DashboardSeriesPoint[]
+  recentActivities: AiUsageLog[]
+}
+
 export interface CreditConfig {
   _id: string
   pricePerLecture: number
