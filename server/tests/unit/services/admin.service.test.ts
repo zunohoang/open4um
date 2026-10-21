@@ -58,6 +58,28 @@ describe('admin.service unit tests', () => {
         })
       )
     })
+
+    it('escape ký tự đặc biệt để tìm theo chuỗi nguyên văn', async () => {
+      const mockFind = {
+        select: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      }
+      ;(UserModel.find as jest.Mock).mockReturnValue(mockFind)
+      ;(UserModel.countDocuments as jest.Mock).mockResolvedValue(0)
+
+      await listUsers(1, 10, 'a+b(')
+
+      expect(UserModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          $or: [
+            { name: { $regex: 'a\\+b\\(', $options: 'i' } },
+            { email: { $regex: 'a\\+b\\(', $options: 'i' } }
+          ]
+        })
+      )
+    })
   })
 
   describe('createUser', () => {
@@ -160,6 +182,60 @@ describe('admin.service unit tests', () => {
 
       expect(result.creditBalance).toBe(80)
       expect(mockUser.save).toHaveBeenCalled()
+    })
+
+    it('cập nhật họ tên, email (chuẩn hóa chữ thường) và credit thành công', async () => {
+      const mockUser = {
+        _id: 'u-1',
+        role: 'user',
+        name: 'Tên cũ',
+        email: 'old@example.com',
+        creditBalance: 20,
+        save: jest.fn().mockResolvedValue(true)
+      }
+      ;(UserModel.findById as jest.Mock).mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser)
+      })
+      ;(UserModel.findOne as jest.Mock).mockResolvedValue(null)
+
+      const result = await updateUser('u-1', {
+        name: 'Tên mới',
+        email: '  New@Example.com ',
+        creditBalance: 80
+      })
+
+      expect(UserModel.findOne).toHaveBeenCalledWith({
+        email: 'new@example.com',
+        _id: { $ne: 'u-1' }
+      })
+      expect(result).toMatchObject({
+        name: 'Tên mới',
+        email: 'new@example.com',
+        creditBalance: 80
+      })
+      expect(mockUser.save).toHaveBeenCalled()
+    })
+
+    it('ném lỗi 409 và không lưu khi email đã thuộc về người dùng khác', async () => {
+      const mockUser = {
+        _id: 'u-1',
+        role: 'user',
+        email: 'old@example.com',
+        save: jest.fn().mockResolvedValue(true)
+      }
+      ;(UserModel.findById as jest.Mock).mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser)
+      })
+      ;(UserModel.findOne as jest.Mock).mockResolvedValue({ _id: 'u-2' })
+
+      await expect(
+        updateUser('u-1', { email: 'taken@example.com' })
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: expect.stringContaining('Email đã được sử dụng')
+      })
+      expect(mockUser.email).toBe('old@example.com')
+      expect(mockUser.save).not.toHaveBeenCalled()
     })
   })
 

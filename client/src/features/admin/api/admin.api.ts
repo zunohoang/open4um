@@ -20,7 +20,9 @@ export interface CreateUserPayload {
 }
 
 export interface UpdateUserPayload {
-  creditBalance: number
+  name?: string
+  email?: string
+  creditBalance?: number
 }
 
 export interface ListAiUsageParams {

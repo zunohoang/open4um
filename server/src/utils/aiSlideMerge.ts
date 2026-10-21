@@ -9,7 +9,7 @@ const normalizeText = (value: string) =>
 const asText = (value: unknown) =>
   typeof value === 'string' ? value.trim() : ''
 
-const escapeRegExp = (value: string) =>
+export const escapeRegExp = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const stripHintPrefix = (value: string, requestedLabel?: string) => {

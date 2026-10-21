@@ -26,7 +26,10 @@ services:
             - abslider_redisdata:/data
 
     minio:
-        image: quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z
+        # quay.io/minio/minio không còn cho pull công khai (401); dùng bản build MinIO của Chainguard
+        image: cgr.dev/chainguard/minio:latest
+        # Image chạy user non-root nên không ghi được vào volume mới; dev local chạy root cho đơn giản
+        user: "0:0"
         container_name: abslider_minio
         restart: unless-stopped
         command: server /data --console-address ":9001"

@@ -236,6 +236,102 @@ describe('Integration Tests — Admin Console', () => {
         expect(remainingLogs).toHaveLength(0)
       })
     })
+
+    describe('PATCH /api/v1/admin/users/:id', () => {
+      it('cập nhật họ tên, email và credit, lưu đúng vào DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { userId } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${userId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            name: 'Tên Mới',
+            email: 'New.Email@Example.com',
+            creditBalance: 75
+          })
+
+        expect(res.status).toBe(200)
+        expect(res.body.success).toBe(true)
+
+        const userInDb = await UserModel.findById(userId)
+        expect(userInDb?.name).toBe('Tên Mới')
+        expect(userInDb?.email).toBe('new.email@example.com')
+        expect(userInDb?.creditBalance).toBe(75)
+      })
+
+      it('trả 409 khi email đã thuộc về người dùng khác và không thay đổi DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { user: target } = await createUser()
+        const { user: other } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${target._id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ email: other.email })
+
+        expect(res.status).toBe(409)
+        expect(res.body.success).toBe(false)
+
+        const targetInDb = await UserModel.findById(target._id)
+        expect(targetInDb?.email).toBe(target.email)
+      })
+
+      it('trả 422 khi gửi trường không được phép sửa (role) và không thay đổi DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { userId } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${userId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ name: 'Đổi tên', role: 'admin' })
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+
+        const userInDb = await UserModel.findById(userId)
+        expect(userInDb?.role).toBe('user')
+        expect(userInDb?.name).toBe('Normal User')
+      })
+    })
+
+    describe('GET /api/v1/admin/users?search=', () => {
+      it('tìm theo chuỗi nguyên văn, ký tự đặc biệt không gây lỗi', async () => {
+        const { token: adminToken } = await createAdmin()
+        await UserModel.create([
+          {
+            name: 'Plus User',
+            email: 'a+b@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          },
+          {
+            name: 'Other User',
+            email: 'ab@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          }
+        ])
+
+        const plusRes = await request(app)
+          .get('/api/v1/admin/users')
+          .query({ search: 'a+b' })
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(plusRes.status).toBe(200)
+        expect(
+          plusRes.body.data.items.map((u: { email: string }) => u.email)
+        ).toEqual(['a+b@example.com'])
+
+        const parenRes = await request(app)
+          .get('/api/v1/admin/users')
+          .query({ search: '(' })
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(parenRes.status).toBe(200)
+        expect(parenRes.body.data.items).toHaveLength(0)
+      })
+    })
   })
 
   describe('Credit & System Configurations', () => {

@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt'
 import { Types } from 'mongoose'
 import { AppError } from '@/utils/AppError'
+import { escapeRegExp } from '@/utils/aiSlideMerge'
 import { UserModel } from '@/models/user.model'
 import { LectureModel } from '@/models/lecture.model'
 import { FolderModel } from '@/models/folder.model'
@@ -16,15 +17,17 @@ export const listUsers = async (
     role: { $ne: 'admin' }
   }
   if (search) {
+    // Tìm theo chuỗi nguyên văn: ký tự như ( + . không bị hiểu là regex
+    const pattern = escapeRegExp(search)
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { email: { $regex: pattern, $options: 'i' } }
     ]
   }
   const [items, total] = await Promise.all([
     UserModel.find(filter)
       .select('-passwordHash')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit),
     UserModel.countDocuments(filter)
@@ -72,14 +75,26 @@ export const createUser = async (data: {
 
 export const updateUser = async (
   id: string,
-  data: { creditBalance: number }
+  data: { name?: string; email?: string; creditBalance?: number }
 ) => {
   const user = await UserModel.findById(id).select('-passwordHash')
   if (!user) throw new AppError('Không tìm thấy người dùng', 404)
   if (user.role === 'admin') {
     throw new AppError('Không thể chỉnh sửa tài khoản quản trị viên', 403)
   }
-  user.creditBalance = data.creditBalance
+  if (data.email !== undefined) {
+    const email = data.email.toLowerCase().trim()
+    // shortcut: kiểm tra trước khi lưu nên 2 request đồng thời cùng email có thể nhận 500 (E11000) thay vì 409, map mã 11000 sang 409 trong error.middleware nếu gặp thực tế
+    const existing = await UserModel.findOne({ email, _id: { $ne: user._id } })
+    if (existing) {
+      throw new AppError('Email đã được sử dụng trong hệ thống', 409)
+    }
+    // shortcut: không báo cho địa chỉ email cũ nên admin (hoặc phiên admin bị lộ) có thể chiếm tài khoản qua "quên mật khẩu", gửi thông báo tới email cũ qua email.service nếu PO yêu cầu
+    user.email = email
+  }
+  if (data.name !== undefined) user.name = data.name
+  // shortcut: ghi số dư tuyệt đối nên credit người dùng tiêu trong lúc admin mở form sẽ bị ghi đè, chuyển sang $inc theo chênh lệch nếu cần
+  if (data.creditBalance !== undefined) user.creditBalance = data.creditBalance
   await user.save()
   return user
 }

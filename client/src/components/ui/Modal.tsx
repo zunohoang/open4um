@@ -15,8 +15,11 @@ export const Modal = ({ open, onClose, title, children }: ModalProps) => {
       onClick={onClose}
     >
       <div
+        aria-label={title}
+        aria-modal='true'
         className='w-full max-w-md border border-stone-300 bg-white p-6 shadow-xl'
         onClick={(e) => e.stopPropagation()}
+        role='dialog'
       >
         {title && (
           <div className='mb-4 flex items-center justify-between border-b border-stone-200 pb-3'>
