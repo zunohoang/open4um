@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { adminApi } from '@/features/admin/api/admin.api'
+import {
+  adminApi,
+  type CreateUserPayload,
+  type UpdateUserPayload
+} from '@/features/admin/api/admin.api'
 import { AiUsageManagement } from '@/features/admin/components/AiUsageManagement'
 import { useAuthStore } from '@/features/auth/store/auth.store'
-import { Modal, Pagination } from '@/components/ui'
+import { ConfirmDialog, Modal, Pagination, useToast } from '@/components/ui'
 import type { AdminUser, CreditConfig } from '@/lib/types'
 
 type CreditConfigField =
@@ -42,6 +46,22 @@ const getRequestErrorMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data
     ?.message || fallback
 
+// Lỗi đầu tiên của form thêm/sửa người dùng, null nếu hợp lệ; credit undefined = bỏ qua kiểm tra credit
+const getUserFormError = (name: string, email: string, credit?: string) => {
+  if (!name.trim()) return 'Vui lòng nhập họ và tên người dùng'
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return 'Địa chỉ email không đúng định dạng'
+  }
+  // Ô trống không được âm thầm thành 0 credit
+  if (
+    credit !== undefined &&
+    (!/^\d+$/.test(credit.trim()) || !Number.isSafeInteger(Number(credit)))
+  ) {
+    return 'Số dư credit phải là số nguyên không âm'
+  }
+  return null
+}
+
 interface AdminPageProps {
   onBack?: () => void
 }
@@ -49,13 +69,16 @@ interface AdminPageProps {
 export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const currentUser = useAuthStore((state) => state.user)
   const isAdminOnly = currentUser?.role === 'admin'
+  const { showToast } = useToast()
 
   // Phân trang & dữ liệu người dùng
   const [users, setUsers] = useState<AdminUser[]>([])
   const [usersTotal, setUsersTotal] = useState(0)
   const [usersPage, setUsersPage] = useState(1)
   const [usersLimit, setUsersLimit] = useState(10)
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true)
+  const [usersError, setUsersError] = useState<string | null>(null)
+  const [usersReloadKey, setUsersReloadKey] = useState(0)
 
   // Cấu hình credit & trạng thái chung
   const [config, setConfig] = useState<CreditConfig | null>(null)
@@ -69,13 +92,18 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [activeTab, setActiveTab] = useState<'users' | 'config' | 'logs'>(
     'users'
   )
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
   // State cho Modal chỉnh sửa người dùng
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
   const [editCredit, setEditCredit] = useState<string>('')
   const [editError, setEditError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Thay đổi đã kiểm tra, chờ Admin xác nhận
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateUserPayload | null>(
+    null
+  )
 
   // State cho Modal tạo tài khoản người dùng mới
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false)
@@ -85,6 +113,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [newCredit, setNewCredit] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  // Dữ liệu tạo mới đã kiểm tra, chờ Admin xác nhận
+  const [pendingCreate, setPendingCreate] = useState<CreateUserPayload | null>(
+    null
+  )
 
   // State cho Modal khóa tài khoản người dùng
   const [lockingUser, setLockingUser] = useState<AdminUser | null>(null)
@@ -101,23 +133,56 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  // Tải danh sách người dùng
-  const fetchUsers = useCallback(async () => {
-    setIsLoadingUsers(true)
-    try {
-      const response = await adminApi.getUsers({
-        search: search.trim() || undefined,
-        page: usersPage,
-        limit: usersLimit
-      })
-      setUsers(response.items)
-      setUsersTotal(response.total)
-    } catch (error) {
-      console.error('Lỗi tải danh sách người dùng:', error)
-    } finally {
+  // Tải danh sách người dùng (debounce 250ms); bỏ kết quả cũ khi tham số đổi hoặc vừa tải lại
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchUsers = async () => {
+      setIsLoadingUsers(true)
+      setUsersError(null)
+      try {
+        const response = await adminApi.getUsers({
+          search: search.trim() || undefined,
+          page: usersPage,
+          limit: usersLimit
+        })
+        if (cancelled) return
+
+        const lastPage = Math.max(1, Math.ceil(response.total / usersLimit))
+        // Trang hiện tại đã hết dữ liệu (vd: vừa xóa người cuối trang): lùi về trang cuối, effect sẽ tải lại
+        if (usersPage > lastPage) {
+          setUsersPage(lastPage)
+          return
+        }
+        setUsers(response.items)
+        setUsersTotal(response.total)
+      } catch (error) {
+        if (cancelled) return
+
+        setUsers([])
+        setUsersTotal(0)
+        setUsersError(
+          getRequestErrorMessage(
+            error,
+            'Không thể tải danh sách người dùng, vui lòng thử lại'
+          )
+        )
+      }
       setIsLoadingUsers(false)
     }
-  }, [search, usersPage, usersLimit])
+
+    const timer = setTimeout(() => void fetchUsers(), 250)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [search, usersPage, usersLimit, usersReloadKey])
+
+  // Tải lại ngay sau thao tác; hiện trạng thái tải để không còn thấy dữ liệu cũ
+  const reloadUsers = () => {
+    setIsLoadingUsers(true)
+    setUsersReloadKey((key) => key + 1)
+  }
 
   // Tải credit configs
   const fetchCreditConfig = useCallback(async () => {
@@ -144,14 +209,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   useEffect(() => {
     void fetchCreditConfig()
   }, [fetchCreditConfig])
-
-  // Tự động tải người dùng khi thay đổi từ khóa tìm kiếm hoặc trang
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchUsers()
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [fetchUsers])
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value)
@@ -211,8 +268,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setConfig(updated)
       setCreditForm(toCreditConfigForm(updated))
       setCreditErrors({})
-      setSaveMessage('Đã lưu cấu hình credit thành công')
-      setTimeout(() => setSaveMessage(null), 3000)
+      showToast('Đã lưu cấu hình credit thành công', 'success')
     } catch (error) {
       setConfigError(
         getRequestErrorMessage(
@@ -228,40 +284,68 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const openEditModal = (user: AdminUser) => {
     if (user._id === currentUser?.id || user.role === 'admin') return
     setEditingUser(user)
+    setEditName(user.name)
+    setEditEmail(user.email)
     setEditCredit(String(user.creditBalance))
     setEditError(null)
+    setPendingUpdate(null)
   }
 
-  const handleSaveUser = async () => {
+  // Kiểm tra form rồi chờ Admin xác nhận, chưa gọi API
+  const handleSaveUser = () => {
     if (!editingUser) return
-    const parsedCredit = Number(editCredit)
-    if (Number.isNaN(parsedCredit) || parsedCredit < 0) {
-      setEditError('Số credit phải là một số nguyên dương hoặc bằng 0')
+    // Số dư không đổi thì không kiểm tra lại (dữ liệu cũ có thể là số lẻ)
+    const creditChanged =
+      editCredit.trim() !== String(editingUser.creditBalance)
+    const formError = getUserFormError(
+      editName,
+      editEmail,
+      creditChanged ? editCredit : undefined
+    )
+    if (formError) {
+      setEditError(formError)
       return
     }
 
+    // Chỉ gửi trường đã đổi để không ghi đè credit bằng giá trị cũ trên màn hình
+    const changes: UpdateUserPayload = {}
+    const name = editName.trim()
+    const email = editEmail.trim().toLowerCase()
+    const creditBalance = Number(editCredit)
+    if (name !== editingUser.name) changes.name = name
+    if (email !== editingUser.email) changes.email = email
+    if (creditChanged && creditBalance !== editingUser.creditBalance) {
+      changes.creditBalance = creditBalance
+    }
+    if (Object.keys(changes).length === 0) {
+      setEditError('Không có thay đổi nào để lưu')
+      return
+    }
+    setEditError(null)
+    setPendingUpdate(changes)
+  }
+
+  const confirmSaveUser = async () => {
+    if (!editingUser || !pendingUpdate) return
+    const changes = pendingUpdate
+    // Đóng hộp xác nhận trước khi gọi API để bấm đúp không gửi 2 lần
+    setPendingUpdate(null)
     try {
       setIsSubmitting(true)
-      const updated = await adminApi.updateUser(editingUser._id, {
-        creditBalance: parsedCredit
-      })
-      setUsers((prev) =>
-        prev.map((u) =>
-          u._id === editingUser._id
-            ? {
-                ...u,
-                creditBalance: updated.creditBalance
-              }
-            : u
+      const updated = await adminApi.updateUser(editingUser._id, changes)
+      setEditingUser(null)
+      showToast(`Đã cập nhật thông tin người dùng ${updated.name}`, 'success')
+    } catch (error) {
+      setEditError(
+        getRequestErrorMessage(
+          error,
+          'Không thể cập nhật người dùng, vui lòng thử lại'
         )
       )
-      setEditingUser(null)
-      setSaveMessage(`Đã cập nhật số dư credit cho ${editingUser.name}`)
-      setTimeout(() => setSaveMessage(null), 3000)
-    } catch {
-      setEditError('Không thể cập nhật người dùng, vui lòng thử lại')
     } finally {
       setIsSubmitting(false)
+      // Tải lại cả khi lỗi (vd: 404 vì người dùng đã bị xóa ở phiên khác)
+      reloadUsers()
     }
   }
 
@@ -272,48 +356,52 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     setNewPassword('')
     setNewCredit(String(config?.signupBonus ?? 100))
     setCreateError(null)
+    setPendingCreate(null)
   }
 
-  const handleCreateUser = async () => {
-    if (!newName.trim()) {
-      setCreateError('Vui lòng nhập họ và tên người dùng')
+  // Kiểm tra form rồi chờ Admin xác nhận, chưa gọi API
+  const handleCreateUser = () => {
+    const formError =
+      getUserFormError(newName, newEmail, newCredit) ??
+      (newPassword.length < 6
+        ? 'Mật khẩu khởi tạo phải có tối thiểu 6 ký tự'
+        : null)
+    if (formError) {
+      setCreateError(formError)
       return
     }
-    if (
-      !newEmail.trim() ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim())
-    ) {
-      setCreateError('Địa chỉ email không đúng định dạng')
-      return
-    }
-    if (!newPassword || newPassword.length < 6) {
-      setCreateError('Mật khẩu khởi tạo phải có tối thiểu 6 ký tự')
-      return
-    }
-    const parsedCredit = Number(newCredit)
-    if (Number.isNaN(parsedCredit) || parsedCredit < 0) {
-      setCreateError('Số dư credit phải là số không âm')
-      return
-    }
+    setCreateError(null)
+    setPendingCreate({
+      name: newName.trim(),
+      email: newEmail.trim().toLowerCase(),
+      password: newPassword,
+      creditBalance: Number(newCredit)
+    })
+  }
 
+  const confirmCreateUser = async () => {
+    if (!pendingCreate) return
+    const payload = pendingCreate
+    // Đóng hộp xác nhận trước khi gọi API để bấm đúp không gửi 2 lần
+    setPendingCreate(null)
     try {
       setIsCreating(true)
-      const created = await adminApi.createUser({
-        name: newName.trim(),
-        email: newEmail.trim(),
-        password: newPassword,
-        creditBalance: parsedCredit
-      })
-      setUsers((prev) => [created, ...prev])
-      setUsersTotal((prev) => prev + 1)
+      const created = await adminApi.createUser(payload)
       setIsCreateUserOpen(false)
-      setSaveMessage(`Đã tạo thành công tài khoản người dùng ${created.name}`)
-      setTimeout(() => setSaveMessage(null), 3000)
+      showToast(
+        `Đã tạo thành công tài khoản người dùng ${created.name}`,
+        'success'
+      )
+      // Danh sách xếp mới nhất trước: về trang 1 để thấy người dùng vừa tạo
+      setUsersPage(1)
+      reloadUsers()
     } catch (err: unknown) {
-      const errorMsg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message || 'Không thể tạo tài khoản người dùng, vui lòng thử lại'
-      setCreateError(errorMsg)
+      setCreateError(
+        getRequestErrorMessage(
+          err,
+          'Không thể tạo tài khoản người dùng, vui lòng thử lại'
+        )
+      )
     } finally {
       setIsCreating(false)
     }
@@ -341,11 +429,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setUsers((prev) =>
         prev.map((u) => (u._id === lockingUser._id ? { ...u, ...updated } : u))
       )
-      setSaveMessage(
-        `Đã khóa tài khoản ${lockingUser.name}. Tài khoản sẽ tự động xóa sau 30 ngày nếu không được khôi phục.`
+      showToast(
+        `Đã khóa tài khoản ${lockingUser.name}. Tài khoản sẽ tự động xóa sau 30 ngày nếu không được khôi phục.`,
+        'success'
       )
       setLockingUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -371,11 +459,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           u._id === restoringUser._id ? { ...u, ...updated } : u
         )
       )
-      setSaveMessage(
-        `Đã khôi phục tài khoản ${restoringUser.name} về trạng thái hoạt động bình thường`
+      showToast(
+        `Đã khôi phục tài khoản ${restoringUser.name} về trạng thái hoạt động bình thường`,
+        'success'
       )
       setRestoringUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -397,13 +485,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     try {
       setIsDeleting(true)
       await adminApi.deleteUser(deletingUser._id)
-      setUsers((prev) => prev.filter((u) => u._id !== deletingUser._id))
-      setUsersTotal((prev) => Math.max(0, prev - 1))
-      setSaveMessage(
-        `Đã xóa vĩnh viễn tài khoản ${deletingUser.name} cùng toàn bộ dữ liệu liên quan`
+      showToast(
+        `Đã xóa vĩnh viễn tài khoản ${deletingUser.name} cùng toàn bộ dữ liệu liên quan`,
+        'success'
       )
       setDeletingUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -411,8 +497,21 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setDeleteError(errorMsg)
     } finally {
       setIsDeleting(false)
+      // Tải lại cả khi lỗi (vd: 404 vì người dùng đã bị xóa ở phiên khác)
+      reloadUsers()
     }
   }
+
+  // Tóm tắt các trường sẽ đổi, hiện trong hộp xác nhận cập nhật
+  const updateSummary = [
+    pendingUpdate?.name !== undefined && `Họ tên mới: ${pendingUpdate.name}.`,
+    pendingUpdate?.email !== undefined &&
+      `Email mới: ${pendingUpdate.email} (người dùng sẽ phải đăng nhập bằng email này).`,
+    pendingUpdate?.creditBalance !== undefined &&
+      `Số dư credit: ${editingUser?.creditBalance} → ${pendingUpdate.creditBalance}.`
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <main className='mx-auto max-w-7xl px-5 py-12 sm:px-12'>
@@ -470,12 +569,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
         </button>
       </div>
 
-      {saveMessage && (
-        <div className='mb-6 rounded bg-emerald-100 p-3 font-sans text-xs font-bold text-emerald-800'>
-          ✅ {saveMessage}
-        </div>
-      )}
-
       {/* Tab 1: Quản lý người dùng */}
       {activeTab === 'users' && (
         <section className='border border-stone-300 bg-stone-50 p-7'>
@@ -485,12 +578,13 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
                 Danh sách người dùng
               </h2>
               <p className='font-sans text-xs text-stone-500'>
-                Quản lý phân quyền, thêm mới, xóa và điều chỉnh số dư credit của
-                từng thành viên
+                Tìm kiếm, thêm mới, chỉnh sửa thông tin, khóa và xóa tài khoản
+                người dùng
               </p>
             </div>
             <div className='flex items-center gap-2'>
               <input
+                aria-label='Tìm kiếm người dùng theo tên hoặc email'
                 className='w-full border border-stone-300 bg-white p-2.5 font-sans text-sm outline-orange-700 sm:w-64'
                 placeholder='Tìm theo tên hoặc email...'
                 value={search}
@@ -510,6 +604,20 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             {isLoadingUsers ? (
               <div className='py-8 text-center font-sans text-sm text-stone-500'>
                 Đang tải dữ liệu người dùng...
+              </div>
+            ) : usersError ? (
+              <div
+                className='flex flex-col gap-3 border border-red-200 bg-red-50 p-4 font-sans text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between'
+                role='alert'
+              >
+                <span>{usersError}</span>
+                <button
+                  className='self-start font-semibold underline underline-offset-2 sm:self-auto'
+                  onClick={reloadUsers}
+                  type='button'
+                >
+                  Thử lại
+                </button>
               </div>
             ) : (
               <>
@@ -782,22 +890,46 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       {/* Tab 3: Nhật ký AI */}
       {activeTab === 'logs' && <AiUsageManagement />}
 
-      {/* Modal Chỉnh sửa Credit người dùng */}
+      {/* Modal Chỉnh sửa thông tin người dùng */}
       <Modal
         open={Boolean(editingUser)}
-        onClose={() => setEditingUser(null)}
-        title='Chỉnh sửa credit người dùng'
+        onClose={() => {
+          if (!isSubmitting) setEditingUser(null)
+        }}
+        title='Chỉnh sửa thông tin người dùng'
       >
         {editingUser && (
           <div className='space-y-4 font-sans'>
             <div>
-              <div className='text-xs font-semibold text-stone-500 uppercase'>
-                Tên & Email
-              </div>
-              <div className='mt-1 text-sm font-bold text-stone-900'>
-                {editingUser.name}
-              </div>
-              <div className='text-xs text-stone-500'>{editingUser.email}</div>
+              <label
+                htmlFor='edit-user-name'
+                className='block text-xs font-semibold text-stone-600 uppercase'
+              >
+                Họ và tên
+              </label>
+              <input
+                id='edit-user-name'
+                type='text'
+                className='mt-1 w-full border border-stone-300 bg-white p-2.5 text-sm outline-orange-700'
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor='edit-user-email'
+                className='block text-xs font-semibold text-stone-600 uppercase'
+              >
+                Địa chỉ Email
+              </label>
+              <input
+                id='edit-user-email'
+                type='email'
+                className='mt-1 w-full border border-stone-300 bg-white p-2.5 text-sm outline-orange-700'
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
             </div>
 
             <div>
@@ -818,7 +950,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             </div>
 
             {editError && (
-              <div className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'>
+              <div
+                className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'
+                role='alert'
+              >
                 ❌ {editError}
               </div>
             )}
@@ -835,7 +970,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
               <button
                 type='button'
                 className='bg-orange-700 px-4 py-2 text-xs font-bold text-white hover:bg-orange-800 disabled:opacity-50'
-                onClick={() => void handleSaveUser()}
+                onClick={handleSaveUser}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? 'Đang lưu...' : 'Lưu thay đổi'}
@@ -848,7 +983,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       {/* Modal Thêm người dùng mới */}
       <Modal
         open={isCreateUserOpen}
-        onClose={() => setIsCreateUserOpen(false)}
+        onClose={() => {
+          if (!isCreating) setIsCreateUserOpen(false)
+        }}
         title='Thêm người dùng mới'
       >
         <div className='space-y-4 font-sans'>
@@ -921,7 +1058,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           </div>
 
           {createError && (
-            <div className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'>
+            <div
+              className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'
+              role='alert'
+            >
               ❌ {createError}
             </div>
           )}
@@ -938,7 +1078,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             <button
               type='button'
               className='bg-emerald-950 px-4 py-2 text-xs font-bold text-white hover:bg-stone-900 disabled:opacity-50'
-              onClick={() => void handleCreateUser()}
+              onClick={handleCreateUser}
               disabled={isCreating}
             >
               {isCreating ? 'Đang tạo...' : 'Tạo người dùng'}
@@ -1068,7 +1208,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       {/* Modal Xóa vĩnh viễn người dùng */}
       <Modal
         open={Boolean(deletingUser)}
-        onClose={() => setDeletingUser(null)}
+        onClose={() => {
+          if (!isDeleting) setDeletingUser(null)
+        }}
         title='Xóa vĩnh viễn người dùng'
       >
         {deletingUser && (
@@ -1131,6 +1273,30 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           </div>
         )}
       </Modal>
+
+      {/* Xác nhận thêm/sửa (SRS UC030 bước 6): đặt sau mọi Modal để nằm trên form (cùng z-50, phần tử sau ở trên). Hủy = đóng form, không gọi API (6a) */}
+      <ConfirmDialog
+        open={isCreateUserOpen && Boolean(pendingCreate)}
+        title='Xác nhận thêm người dùng'
+        message={`Bạn có chắc chắn muốn thêm người dùng "${pendingCreate?.name}" (${pendingCreate?.email}) với ${pendingCreate?.creditBalance} credit ban đầu?`}
+        confirmLabel='Thêm người dùng'
+        onConfirm={() => void confirmCreateUser()}
+        onCancel={() => {
+          setPendingCreate(null)
+          setIsCreateUserOpen(false)
+        }}
+      />
+      <ConfirmDialog
+        open={Boolean(editingUser && pendingUpdate)}
+        title='Xác nhận cập nhật người dùng'
+        message={`Bạn có chắc chắn muốn lưu thay đổi thông tin của người dùng "${editingUser?.name}"? ${updateSummary}`}
+        confirmLabel='Lưu thay đổi'
+        onConfirm={() => void confirmSaveUser()}
+        onCancel={() => {
+          setPendingUpdate(null)
+          setEditingUser(null)
+        }}
+      />
     </main>
   )
 }

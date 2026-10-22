@@ -1,5 +1,12 @@
 import { z } from 'zod'
 
+// Không coerce: '', null, false không được âm thầm biến thành 0 credit
+const creditBalanceValue = z
+  .number({ invalid_type_error: 'Số dư credit phải là số nguyên không âm' })
+  .int('Số dư credit phải là số nguyên')
+  .min(0, 'Số dư credit không được âm')
+  .max(Number.MAX_SAFE_INTEGER, 'Số dư credit vượt quá giới hạn cho phép')
+
 export const createUserSchema = z.object({
   name: z
     .string({ message: 'Tên không được để trống' })
@@ -13,17 +20,17 @@ export const createUserSchema = z.object({
   password: z
     .string({ message: 'Mật khẩu không được để trống' })
     .min(6, 'Mật khẩu tối thiểu 6 ký tự'),
-  creditBalance: z.coerce
-    .number({ message: 'Số dư credit phải là số hợp lệ' })
-    .min(0, 'Số dư credit không được âm')
-    .optional()
+  creditBalance: creditBalanceValue.optional()
 })
 
-export const updateUserSchema = z.object({
-  creditBalance: z.coerce
-    .number({ message: 'Số dư credit phải là số hợp lệ' })
-    .min(0, 'Số dư credit không được âm')
-})
+// Sửa thông tin: cùng quy tắc với tạo mới (trừ mật khẩu), gửi trường nào sửa trường đó
+export const updateUserSchema = createUserSchema
+  .omit({ password: true })
+  .partial()
+  .strict('Dữ liệu cập nhật chứa trường không hợp lệ')
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'Cần cung cấp ít nhất một thông tin để cập nhật'
+  })
 
 const positiveCreditValue = (label: string) =>
   z
