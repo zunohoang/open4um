@@ -27,6 +27,7 @@ adminRouter.patch('/users/:id/restore', adminController.restoreUser)
 adminRouter.delete('/users/:id', adminController.deleteUser)
 
 adminRouter.get('/ai-usage', adminController.listAiUsage)
+adminRouter.get('/dashboard', adminController.getDashboard)
 adminRouter.get('/credit-config', adminController.getCreditConfig)
 adminRouter.patch(
   '/credit-config',

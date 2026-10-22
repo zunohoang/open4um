@@ -13,7 +13,7 @@ const getErrorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data
     ?.message || 'Không thể tải lịch sử AI, vui lòng thử lại'
 
-const getUserInfo = (log: AiUsageLog) => {
+export const getUserInfo = (log: AiUsageLog) => {
   if (typeof log.userId === 'object' && log.userId !== null) {
     return {
       name: log.userId.name || log.userId.email || log.userId._id.slice(-6),

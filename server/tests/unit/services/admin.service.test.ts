@@ -9,7 +9,8 @@ import {
   cleanupExpiredLockedUsers,
   getCreditConfig,
   updateCreditConfig,
-  listAiUsage
+  listAiUsage,
+  getDashboardStats
 } from '@/services/admin.service'
 import { UserModel } from '@/models/user.model'
 import { LectureModel } from '@/models/lecture.model'
@@ -443,6 +444,128 @@ describe('admin.service unit tests', () => {
       ).rejects.toMatchObject({ statusCode: 422 })
 
       expect(AiUsageLogModel.find).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('getDashboardStats', () => {
+    const mockRecentFind = (rows: unknown[]) => {
+      const chain = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue(rows)
+      }
+      ;(AiUsageLogModel.find as jest.Mock).mockReturnValue(chain)
+      return chain
+    }
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('gom theo ngày giờ Việt Nam, điền 0 cho ngày trống và cộng tổng trong khoảng', async () => {
+      ;(UserModel.aggregate as jest.Mock).mockResolvedValue([
+        { _id: '2026-01-01', count: 2 },
+        { _id: '2026-01-03', count: 1 }
+      ])
+      ;(LectureModel.aggregate as jest.Mock).mockResolvedValue([
+        { _id: '2026-01-02', count: 4 }
+      ])
+      ;(AiUsageLogModel.aggregate as jest.Mock)
+        .mockResolvedValueOnce([
+          { _id: '2026-01-02', usages: 3, slides: 12, credits: 30 }
+        ])
+        .mockResolvedValueOnce([
+          { _id: null, usages: 10, slides: 50, credits: 200 }
+        ])
+      ;(UserModel.countDocuments as jest.Mock).mockResolvedValue(20)
+      ;(LectureModel.countDocuments as jest.Mock).mockResolvedValue(40)
+      const recentFind = mockRecentFind([{ _id: 'log-1' }])
+
+      const result = await getDashboardStats('2026-01-01', '2026-01-03')
+
+      expect(result.series).toEqual([
+        { date: '2026-01-01', users: 2, lectures: 0, creditsSpent: 0 },
+        { date: '2026-01-02', users: 0, lectures: 4, creditsSpent: 30 },
+        { date: '2026-01-03', users: 1, lectures: 0, creditsSpent: 0 }
+      ])
+      expect(result.totals).toEqual({
+        users: 3,
+        lectures: 4,
+        aiUsages: 3,
+        aiSlides: 12,
+        creditsSpent: 30
+      })
+      expect(result.allTime).toEqual({
+        users: 20,
+        lectures: 40,
+        aiUsages: 10,
+        aiSlides: 50,
+        creditsSpent: 200
+      })
+      expect(result.recentActivities).toEqual([{ _id: 'log-1' }])
+
+      // 00:00 giờ VN ngày 01/01 đến trước 00:00 giờ VN ngày 04/01
+      const createdAt = {
+        $gte: new Date('2025-12-31T17:00:00.000Z'),
+        $lt: new Date('2026-01-03T17:00:00.000Z')
+      }
+      expect(UserModel.aggregate).toHaveBeenCalledWith([
+        { $match: { role: 'user', createdAt } },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'Asia/Ho_Chi_Minh'
+              }
+            },
+            count: { $sum: 1 }
+          }
+        }
+      ])
+      expect(AiUsageLogModel.find).toHaveBeenCalledWith({ createdAt })
+      expect(recentFind.populate).toHaveBeenCalledWith('userId', 'name email')
+      expect(recentFind.sort).toHaveBeenCalledWith({ createdAt: -1 })
+      expect(recentFind.limit).toHaveBeenCalledWith(10)
+    })
+
+    it('mặc định lấy 30 ngày gần nhất tính theo giờ Việt Nam', async () => {
+      // 18:00 UTC ngày 31/01 = 01:00 ngày 01/02 giờ Việt Nam
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(new Date('2026-01-31T18:00:00.000Z').getTime())
+      ;(UserModel.aggregate as jest.Mock).mockResolvedValue([])
+      ;(LectureModel.aggregate as jest.Mock).mockResolvedValue([])
+      ;(AiUsageLogModel.aggregate as jest.Mock).mockResolvedValue([])
+      ;(UserModel.countDocuments as jest.Mock).mockResolvedValue(0)
+      ;(LectureModel.countDocuments as jest.Mock).mockResolvedValue(0)
+      mockRecentFind([])
+
+      const result = await getDashboardStats()
+
+      expect(result.from).toBe('2026-01-03')
+      expect(result.to).toBe('2026-02-01')
+      expect(result.series).toHaveLength(30)
+      expect(result.allTime).toEqual({
+        users: 0,
+        lectures: 0,
+        aiUsages: 0,
+        aiSlides: 0,
+        creditsSpent: 0
+      })
+    })
+
+    it.each([
+      ['từ ngày sau đến ngày', '2026-01-03', '2026-01-02'],
+      ['khoảng vượt quá 366 ngày', '2025-01-01', '2026-01-02'],
+      ['ngày không tồn tại', '2026-02-30', '2026-03-01'],
+      ['sai định dạng', '01/01/2026', '2026-01-02']
+    ])('từ chối khoảng ngày %s', async (_caseName, from, to) => {
+      await expect(getDashboardStats(from, to)).rejects.toMatchObject({
+        statusCode: 422
+      })
+      expect(UserModel.aggregate).not.toHaveBeenCalled()
     })
   })
 })

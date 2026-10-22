@@ -4,6 +4,7 @@ import {
   type CreateUserPayload,
   type UpdateUserPayload
 } from '@/features/admin/api/admin.api'
+import { AdminDashboard } from '@/features/admin/components/AdminDashboard'
 import { AiUsageManagement } from '@/features/admin/components/AiUsageManagement'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { ConfirmDialog, Modal, Pagination, useToast } from '@/components/ui'
@@ -89,9 +90,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [isLoadingConfig, setIsLoadingConfig] = useState(true)
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<'users' | 'config' | 'logs'>(
-    'users'
-  )
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'users' | 'config' | 'logs'
+  >('dashboard')
 
   // State cho Modal chỉnh sửa người dùng
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
@@ -531,12 +532,22 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           Quản trị hệ thống
         </h1>
         <p className='mt-2 font-sans text-sm text-stone-600'>
-          Khu vực dành riêng cho quản trị viên: quản lý người dùng, cấu hình
-          credit và theo dõi nhật ký hoạt động AI.
+          Khu vực dành riêng cho quản trị viên: thống kê tổng quan, quản lý
+          người dùng, cấu hình credit và theo dõi nhật ký hoạt động AI.
         </p>
       </div>
 
-      <div className='mb-6 flex gap-2 border-b border-stone-300 pb-2'>
+      <div className='mb-6 flex flex-wrap gap-2 border-b border-stone-300 pb-2'>
+        <button
+          className={`px-4 py-2 font-sans text-sm font-semibold transition ${
+            activeTab === 'dashboard'
+              ? 'border-b-2 border-orange-700 font-bold text-orange-700'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+          onClick={() => setActiveTab('dashboard')}
+        >
+          Tổng quan
+        </button>
         <button
           className={`px-4 py-2 font-sans text-sm font-semibold transition ${
             activeTab === 'users'
@@ -568,6 +579,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           AI Usage
         </button>
       </div>
+
+      {/* Tab Tổng quan (Dashboard) */}
+      {activeTab === 'dashboard' && <AdminDashboard />}
 
       {/* Tab 1: Quản lý người dùng */}
       {activeTab === 'users' && (
