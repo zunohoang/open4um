@@ -12,6 +12,17 @@ const mockAiGenerateOutlineFromPrompt = jest.fn()
 const mockAiRefineOutlineWithFeedback = jest.fn()
 const mockAiGenerateSlidesFromOutline = jest.fn()
 const mockAiBuildSlidesFromOutline = jest.fn()
+const mockAiChatAndProposeSlideEdit = jest.fn()
+const mockDebitCredits = jest.fn(async (_userId: string, amount: number) => {
+  const user = await mockUserFindById()
+  if (!user || user.creditBalance < amount) throw new Error('Insufficient')
+  user.creditBalance -= amount
+  return user.creditBalance
+})
+const mockRefundCredits = jest.fn(async (_userId: string, amount: number) => {
+  const user = await mockUserFindById()
+  if (user) user.creditBalance += amount
+})
 
 jest.mock('@/models/user.model', () => ({
   UserModel: {
@@ -50,16 +61,24 @@ jest.mock('@/services/ai.service', () => ({
   generateSlidesFromOutline: (...args: any[]) =>
     mockAiGenerateSlidesFromOutline(...args),
   buildSlidesFromOutline: (...args: any[]) =>
-    mockAiBuildSlidesFromOutline(...args)
+    mockAiBuildSlidesFromOutline(...args),
+  chatAndProposeSlideEdit: (...args: any[]) =>
+    mockAiChatAndProposeSlideEdit(...args)
 }))
 
 jest.mock('@/services/admin.service', () => ({
   getCreditConfig: jest.fn().mockResolvedValue({
+    pricePerLecture: 20,
     pricePerSlide: 2,
     pricePerAiEdit: 1,
     pricePerOutline: 4,
     signupBonus: 20
   })
+}))
+
+jest.mock('@/services/credit.service', () => ({
+  debitCredits: (...args: any[]) => mockDebitCredits(...args),
+  refundCredits: (...args: any[]) => mockRefundCredits(...args)
 }))
 
 import {
@@ -68,6 +87,7 @@ import {
   createBlankLecture,
   getLecture,
   hardDeleteLecture,
+  aiChatInEditor,
   applySlideOperation
 } from '@/services/lecture.service'
 
@@ -150,7 +170,11 @@ describe('lecture.service unit tests', () => {
       const result = await generateOutline('user-rich', 'Học lập trình Go')
 
       expect(mockUser.creditBalance).toBe(46) // 50 - 4 (pricePerOutline)
-      expect(mockUser.save).toHaveBeenCalled()
+      expect(mockDebitCredits).toHaveBeenCalledWith(
+        'user-rich',
+        4,
+        expect.any(String)
+      )
       expect(mockLectureCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
@@ -240,10 +264,10 @@ describe('lecture.service unit tests', () => {
       ]
     }
 
-    it('ném lỗi 402 khi không đủ credit ước tính trước khi gọi AI (pre-check: cần tối thiểu 12 slides)', async () => {
+    it('ném lỗi 402 trước khi gọi AI nếu không đủ phí sinh bài giảng cố định', async () => {
       mockUserFindById.mockResolvedValue({
         _id: 'user-poor',
-        creditBalance: 20, // Cần tối thiểu 12 slides * 2 = 24 credits
+        creditBalance: 19,
         save: jest.fn()
       })
 
@@ -260,8 +284,8 @@ describe('lecture.service unit tests', () => {
       expect(mockAiGenerateSlidesFromOutline).not.toHaveBeenCalled()
     })
 
-    it('thành công: gọi AI sinh 15 slides nhưng chỉ tính phí 12 slides (AI gen nhiều hơn thì tặng luôn)', async () => {
-      const mockSlides = Array.from({ length: 15 }, (_, i) => ({
+    it('tính phí cố định khi sinh bài giảng, không phụ thuộc số slide', async () => {
+      const mockSlides = Array.from({ length: 8 }, (_, i) => ({
         id: `s-${i + 1}`,
         title: `Slide ${i + 1}`
       }))
@@ -292,18 +316,22 @@ describe('lecture.service unit tests', () => {
         outline: fakeOutline
       })
 
-      // 12 slides * 2 = 24 credits -> 50 - 24 = 26
-      expect(mockUser.creditBalance).toBe(26)
-      expect(mockUser.save).toHaveBeenCalled()
+      // Phí sinh bài giảng cố định là 20 credits -> 50 - 20 = 30
+      expect(mockUser.creditBalance).toBe(30)
+      expect(mockDebitCredits).toHaveBeenCalledWith(
+        'user-rich',
+        20,
+        expect.any(String)
+      )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
-          slideCount: 15,
-          creditSpent: 24
+          slideCount: 8,
+          creditSpent: 20
         })
       )
-      expect(result).toHaveProperty('creditSpent', 24)
-      expect(result).toHaveProperty('creditBalance', 26)
+      expect(result).toHaveProperty('creditSpent', 20)
+      expect(result).toHaveProperty('creditBalance', 30)
     })
 
     it('thành công cập nhật bài giảng đã có bằng lectureId', async () => {
@@ -340,7 +368,9 @@ describe('lecture.service unit tests', () => {
         { _id: 'existing-lec-123', userId: 'user-rich' },
         expect.objectContaining({
           title: 'TypeScript cơ bản',
-          slides: mockSlides
+          slides: expect.arrayContaining([
+            expect.objectContaining({ id: 's1', title: 'Slide 1' })
+          ])
         }),
         { new: true, upsert: true }
       )
@@ -453,6 +483,253 @@ describe('lecture.service unit tests', () => {
         userId: 'user-1'
       })
       expect(result).toEqual({ message: 'Đã xóa vĩnh viễn bài giảng' })
+    })
+  })
+
+  describe('aiChatInEditor', () => {
+    it('dùng snapshot canvas mới nhất làm context thay cho slide cũ trong database', async () => {
+      const persistedSlide = {
+        id: 'slide-1',
+        title: 'Tiêu đề cũ',
+        contentItems: [
+          { title: 'Dữ kiện cũ', description: 'Giá trị cũ là 10' }
+        ],
+        components: [
+          {
+            id: 'title-slide-1',
+            type: 'title',
+            content: 'Tiêu đề cũ',
+            x: 8,
+            y: 10
+          }
+        ]
+      }
+      const currentSlideSnapshot = {
+        ...persistedSlide,
+        title: 'Tiêu đề mới',
+        components: [
+          {
+            id: 'title-slide-1',
+            type: 'title',
+            content: 'Tiêu đề mới',
+            x: 8,
+            y: 10
+          },
+          {
+            id: 'body-slide-1',
+            type: 'text',
+            content: 'Giá trị mới là 42',
+            x: 8,
+            y: 30
+          }
+        ]
+      }
+      const mockLecture = {
+        _id: 'lecture-123',
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn((key: string) => {
+          if (key === 'aiChatHistory') return []
+          return ''
+        }),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      const mockUser = {
+        creditBalance: 10,
+        save: jest.fn().mockResolvedValue(true)
+      }
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockAiUsageLogCreate.mockResolvedValue({})
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Tiêu đề mới, giá trị mới là 42.',
+        action: 'CHAT_ONLY',
+        targetSlideIndex: 0,
+        proposals: []
+      })
+
+      await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Chỉ trả lời, không sửa slide: Nêu tiêu đề và nội dung chính.',
+        slideId: 'slide-1',
+        currentSlide: currentSlideSnapshot
+      })
+
+      expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          currentSlide: currentSlideSnapshot,
+          outlineOverview: 'Slide 1: Tiêu đề mới',
+          slidesCatalog: [
+            expect.objectContaining({
+              title: 'Tiêu đề mới',
+              visibleText: ['Giá trị mới là 42']
+            })
+          ]
+        })
+      )
+    })
+
+    it('bỏ qua snapshot có ID không khớp slide thuộc bài giảng', async () => {
+      const persistedSlide = {
+        id: 'slide-owned',
+        title: 'Tiêu đề thuộc bài giảng',
+        components: [
+          {
+            id: 'title-slide-owned',
+            type: 'title',
+            content: 'Tiêu đề thuộc bài giảng'
+          }
+        ]
+      }
+      const mockLecture = {
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn((key: string) => {
+          if (key === 'aiChatHistory') return []
+          return ''
+        }),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue({
+        creditBalance: 10,
+        save: jest.fn().mockResolvedValue(true)
+      })
+      mockAiUsageLogCreate.mockResolvedValue({})
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Tiêu đề thuộc bài giảng.',
+        action: 'CHAT_ONLY',
+        proposals: []
+      })
+
+      await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Chỉ trả lời: tiêu đề hiện tại là gì?',
+        slideId: 'slide-owned',
+        currentSlide: {
+          id: 'slide-not-owned',
+          title: 'Nội dung không hợp lệ'
+        }
+      })
+
+      expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ currentSlide: persistedSlide })
+      )
+    })
+
+    it('tính phí theo số slide mới được AI Chat tạo ra', async () => {
+      const persistedSlide = { id: 'slide-1', title: 'Slide hiện tại' }
+      const mockLecture = {
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn((key: string) => {
+          if (key === 'aiChatHistory') return []
+          return ''
+        }),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      const mockUser = {
+        creditBalance: 20,
+        save: jest.fn().mockResolvedValue(true)
+      }
+      const proposals = Array.from({ length: 3 }, (_, index) => ({
+        action: 'CREATE_SLIDE' as const,
+        targetSlideIndex: index + 1,
+        proposedSlide: {
+          id: `new-slide-${index + 1}`,
+          title: `Slide mới ${index + 1}`
+        }
+      }))
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockAiUsageLogCreate.mockResolvedValue({})
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Đã tạo 3 slide mới.',
+        action: 'BATCH_CHANGES',
+        proposals
+      })
+
+      const result = await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Tạo thêm 3 slide',
+        slideId: 'slide-1'
+      })
+
+      expect(mockUser.creditBalance).toBe(14)
+      expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slideCount: 3,
+          creditSpent: 6
+        })
+      )
+      expect(result.creditSpent).toBe(6)
+      expect(result.creditBalance).toBe(14)
+    })
+
+    it('không trừ credit hoặc lưu lịch sử nếu không đủ phí cho số slide AI Chat tạo ra', async () => {
+      const persistedSlide = { id: 'slide-1', title: 'Slide hiện tại' }
+      const mockLecture = {
+        title: 'Bài giảng kiểm thử',
+        deletedAt: null,
+        slides: [persistedSlide],
+        get: jest.fn(() => ''),
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(true)
+      }
+      const mockUser = {
+        creditBalance: 5,
+        save: jest.fn().mockResolvedValue(true)
+      }
+
+      mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockUserFindById.mockResolvedValue(mockUser)
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Đã tạo 3 slide mới.',
+        action: 'BATCH_CHANGES',
+        proposals: Array.from({ length: 3 }, (_, index) => ({
+          action: 'CREATE_SLIDE',
+          targetSlideIndex: index + 1,
+          proposedSlide: {
+            id: `new-slide-${index + 1}`,
+            title: `Slide mới ${index + 1}`
+          }
+        }))
+      })
+
+      const result = await aiChatInEditor('user-1', 'lecture-123', {
+        message: 'Tạo thêm 3 slide',
+        slideId: 'slide-1'
+      })
+
+      expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
+        'Tạo thêm 3 slide',
+        expect.objectContaining({
+          creditBalance: 5,
+          pricePerSlide: 2,
+          maxCreatableSlides: 2
+        })
+      )
+      expect(result.proposals).toHaveLength(2)
+      expect(result.creditSpent).toBe(4)
+      expect(result.creditBalance).toBe(1)
+      expect(mockUser.creditBalance).toBe(1)
+      expect(mockDebitCredits).toHaveBeenCalledWith(
+        'user-1',
+        4,
+        expect.any(String)
+      )
+      expect(mockLecture.save).toHaveBeenCalled()
+      expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ slideCount: 2, creditSpent: 4 })
+      )
     })
   })
 

@@ -1,8 +1,67 @@
 import { useCallback, useEffect, useState } from 'react'
-import { adminApi } from '@/features/admin/api/admin.api'
+import {
+  adminApi,
+  type CreateUserPayload,
+  type UpdateUserPayload
+} from '@/features/admin/api/admin.api'
+import { AdminDashboard } from '@/features/admin/components/AdminDashboard'
+import { AiUsageManagement } from '@/features/admin/components/AiUsageManagement'
 import { useAuthStore } from '@/features/auth/store/auth.store'
-import { Modal, Pagination } from '@/components/ui'
-import type { AdminUser, AiUsageLog, CreditConfig } from '@/lib/types'
+import { ConfirmDialog, Modal, Pagination, useToast } from '@/components/ui'
+import type { AdminUser, CreditConfig } from '@/lib/types'
+
+type CreditConfigField =
+  | 'pricePerLecture'
+  | 'pricePerOutline'
+  | 'pricePerSlide'
+  | 'pricePerAiEdit'
+  | 'signupBonus'
+type CreditConfigForm = Record<CreditConfigField, string>
+type CreditConfigErrors = Partial<Record<CreditConfigField, string>>
+
+const CREDIT_FIELD_LABELS: Record<CreditConfigField, string> = {
+  pricePerLecture: 'Credit sinh bài giảng',
+  pricePerOutline: 'Credit sinh dàn ý',
+  pricePerSlide: 'Credit tạo slide',
+  pricePerAiEdit: 'Credit chỉnh sửa AI',
+  signupBonus: 'Credit tặng khi đăng ký'
+}
+
+const EMPTY_CREDIT_FORM: CreditConfigForm = {
+  pricePerLecture: '',
+  pricePerOutline: '',
+  pricePerSlide: '',
+  pricePerAiEdit: '',
+  signupBonus: ''
+}
+
+const toCreditConfigForm = (config: CreditConfig): CreditConfigForm => ({
+  pricePerLecture: String(config.pricePerLecture),
+  pricePerOutline: String(config.pricePerOutline),
+  pricePerSlide: String(config.pricePerSlide),
+  pricePerAiEdit: String(config.pricePerAiEdit),
+  signupBonus: String(config.signupBonus)
+})
+
+const getRequestErrorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data
+    ?.message || fallback
+
+// Lỗi đầu tiên của form thêm/sửa người dùng, null nếu hợp lệ; credit undefined = bỏ qua kiểm tra credit
+const getUserFormError = (name: string, email: string, credit?: string) => {
+  if (!name.trim()) return 'Vui lòng nhập họ và tên người dùng'
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return 'Địa chỉ email không đúng định dạng'
+  }
+  // Ô trống không được âm thầm thành 0 credit
+  if (
+    credit !== undefined &&
+    (!/^\d+$/.test(credit.trim()) || !Number.isSafeInteger(Number(credit)))
+  ) {
+    return 'Số dư credit phải là số nguyên không âm'
+  }
+  return null
+}
 
 interface AdminPageProps {
   onBack?: () => void
@@ -11,34 +70,41 @@ interface AdminPageProps {
 export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const currentUser = useAuthStore((state) => state.user)
   const isAdminOnly = currentUser?.role === 'admin'
+  const { showToast } = useToast()
 
   // Phân trang & dữ liệu người dùng
   const [users, setUsers] = useState<AdminUser[]>([])
   const [usersTotal, setUsersTotal] = useState(0)
   const [usersPage, setUsersPage] = useState(1)
   const [usersLimit, setUsersLimit] = useState(10)
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
-
-  // Phân trang & dữ liệu nhật ký AI
-  const [logs, setLogs] = useState<AiUsageLog[]>([])
-  const [logsTotal, setLogsTotal] = useState(0)
-  const [logsPage, setLogsPage] = useState(1)
-  const [logsLimit, setLogsLimit] = useState(10)
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false)
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true)
+  const [usersError, setUsersError] = useState<string | null>(null)
+  const [usersReloadKey, setUsersReloadKey] = useState(0)
 
   // Cấu hình credit & trạng thái chung
   const [config, setConfig] = useState<CreditConfig | null>(null)
+  const [creditForm, setCreditForm] =
+    useState<CreditConfigForm>(EMPTY_CREDIT_FORM)
+  const [creditErrors, setCreditErrors] = useState<CreditConfigErrors>({})
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true)
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<'users' | 'config' | 'logs'>(
-    'users'
-  )
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'users' | 'config' | 'logs'
+  >('dashboard')
 
   // State cho Modal chỉnh sửa người dùng
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
   const [editCredit, setEditCredit] = useState<string>('')
   const [editError, setEditError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Thay đổi đã kiểm tra, chờ Admin xác nhận
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateUserPayload | null>(
+    null
+  )
 
   // State cho Modal tạo tài khoản người dùng mới
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false)
@@ -48,6 +114,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [newCredit, setNewCredit] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  // Dữ liệu tạo mới đã kiểm tra, chờ Admin xác nhận
+  const [pendingCreate, setPendingCreate] = useState<CreateUserPayload | null>(
+    null
+  )
 
   // State cho Modal khóa tài khoản người dùng
   const [lockingUser, setLockingUser] = useState<AdminUser | null>(null)
@@ -64,117 +134,219 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  // Tải danh sách người dùng
-  const fetchUsers = useCallback(async () => {
-    setIsLoadingUsers(true)
-    try {
-      const response = await adminApi.getUsers({
-        search: search.trim() || undefined,
-        page: usersPage,
-        limit: usersLimit
-      })
-      setUsers(response.items)
-      setUsersTotal(response.total)
-    } catch (error) {
-      console.error('Lỗi tải danh sách người dùng:', error)
-    } finally {
+  // Tải danh sách người dùng (debounce 250ms); bỏ kết quả cũ khi tham số đổi hoặc vừa tải lại
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchUsers = async () => {
+      setIsLoadingUsers(true)
+      setUsersError(null)
+      try {
+        const response = await adminApi.getUsers({
+          search: search.trim() || undefined,
+          page: usersPage,
+          limit: usersLimit
+        })
+        if (cancelled) return
+
+        const lastPage = Math.max(1, Math.ceil(response.total / usersLimit))
+        // Trang hiện tại đã hết dữ liệu (vd: vừa xóa người cuối trang): lùi về trang cuối, effect sẽ tải lại
+        if (usersPage > lastPage) {
+          setUsersPage(lastPage)
+          return
+        }
+        setUsers(response.items)
+        setUsersTotal(response.total)
+      } catch (error) {
+        if (cancelled) return
+
+        setUsers([])
+        setUsersTotal(0)
+        setUsersError(
+          getRequestErrorMessage(
+            error,
+            'Không thể tải danh sách người dùng, vui lòng thử lại'
+          )
+        )
+      }
       setIsLoadingUsers(false)
     }
-  }, [search, usersPage, usersLimit])
 
-  // Tải nhật ký AI
-  const fetchLogs = useCallback(async () => {
-    setIsLoadingLogs(true)
-    try {
-      const response = await adminApi.getAiUsage({
-        page: logsPage,
-        limit: logsLimit
-      })
-      setLogs(response.items)
-      setLogsTotal(response.total)
-    } catch (error) {
-      console.error('Lỗi tải nhật ký AI:', error)
-    } finally {
-      setIsLoadingLogs(false)
+    const timer = setTimeout(() => void fetchUsers(), 250)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
     }
-  }, [logsPage, logsLimit])
+  }, [search, usersPage, usersLimit, usersReloadKey])
+
+  // Tải lại ngay sau thao tác; hiện trạng thái tải để không còn thấy dữ liệu cũ
+  const reloadUsers = () => {
+    setIsLoadingUsers(true)
+    setUsersReloadKey((key) => key + 1)
+  }
+
+  // Tải credit configs
+  const fetchCreditConfig = useCallback(async () => {
+    setIsLoadingConfig(true)
+    setConfigError(null)
+    try {
+      const currentConfig = await adminApi.getCreditConfig()
+      setConfig(currentConfig)
+      setCreditForm(toCreditConfigForm(currentConfig))
+      setCreditErrors({})
+    } catch (error) {
+      setConfigError(
+        getRequestErrorMessage(
+          error,
+          'Không thể tải cấu hình credit. Vui lòng thử lại.'
+        )
+      )
+    } finally {
+      setIsLoadingConfig(false)
+    }
+  }, [])
 
   // Tải cấu hình credit khi khởi tạo
   useEffect(() => {
-    void adminApi
-      .getCreditConfig()
-      .then(setConfig)
-      .catch((error) => console.error('Lỗi tải cấu hình credit:', error))
-  }, [])
-
-  // Tự động tải người dùng khi thay đổi từ khóa tìm kiếm hoặc trang
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchUsers()
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [fetchUsers])
-
-  // Tự động tải nhật ký AI khi đổi trang hoặc số lượng mỗi trang
-  useEffect(() => {
-    void fetchLogs()
-  }, [fetchLogs])
+    void fetchCreditConfig()
+  }, [fetchCreditConfig])
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value)
     setUsersPage(1)
   }
 
+  const handleCreditFieldChange = (field: CreditConfigField, value: string) => {
+    setCreditForm((previous) => ({ ...previous, [field]: value }))
+    setCreditErrors((previous) => {
+      if (!previous[field]) return previous
+      const nextErrors = { ...previous }
+      delete nextErrors[field]
+      return nextErrors
+    })
+    setConfigError(null)
+  }
+
+  const parseCreditConfigForm = () => {
+    const fields = Object.keys(creditForm) as CreditConfigField[]
+    const errors: CreditConfigErrors = {}
+    const values = {} as Record<CreditConfigField, number>
+
+    fields.forEach((field) => {
+      const rawValue = creditForm[field].trim()
+      const parsedValue = Number(rawValue)
+      if (!/^[1-9]\d*$/.test(rawValue) || !Number.isSafeInteger(parsedValue)) {
+        errors[field] =
+          `${CREDIT_FIELD_LABELS[field]} chỉ chấp nhận số nguyên dương`
+        return
+      }
+      values[field] = parsedValue
+    })
+
+    return { errors, values }
+  }
+
   const saveConfig = async () => {
-    if (config) {
+    if (!config || isSavingConfig) return
+
+    const { errors, values } = parseCreditConfigForm()
+    if (Object.keys(errors).length > 0) {
+      setCreditErrors(errors)
+      setConfigError('Vui lòng kiểm tra lại các giá trị chưa hợp lệ.')
+      return
+    }
+
+    try {
+      setIsSavingConfig(true)
+      setConfigError(null)
       const updated = await adminApi.updateCreditConfig({
-        pricePerSlide: config.pricePerSlide,
-        pricePerAiEdit: config.pricePerAiEdit,
-        signupBonus: config.signupBonus
+        pricePerLecture: values.pricePerLecture,
+        pricePerOutline: values.pricePerOutline,
+        pricePerSlide: values.pricePerSlide,
+        pricePerAiEdit: values.pricePerAiEdit,
+        signupBonus: values.signupBonus
       })
       setConfig(updated)
-      setSaveMessage('Đã lưu cấu hình credit thành công')
-      setTimeout(() => setSaveMessage(null), 3000)
+      setCreditForm(toCreditConfigForm(updated))
+      setCreditErrors({})
+      showToast('Đã lưu cấu hình credit thành công', 'success')
+    } catch (error) {
+      setConfigError(
+        getRequestErrorMessage(
+          error,
+          'Không thể lưu cấu hình credit. Vui lòng thử lại.'
+        )
+      )
+    } finally {
+      setIsSavingConfig(false)
     }
   }
 
   const openEditModal = (user: AdminUser) => {
     if (user._id === currentUser?.id || user.role === 'admin') return
     setEditingUser(user)
+    setEditName(user.name)
+    setEditEmail(user.email)
     setEditCredit(String(user.creditBalance))
     setEditError(null)
+    setPendingUpdate(null)
   }
 
-  const handleSaveUser = async () => {
+  // Kiểm tra form rồi chờ Admin xác nhận, chưa gọi API
+  const handleSaveUser = () => {
     if (!editingUser) return
-    const parsedCredit = Number(editCredit)
-    if (Number.isNaN(parsedCredit) || parsedCredit < 0) {
-      setEditError('Số credit phải là một số nguyên dương hoặc bằng 0')
+    // Số dư không đổi thì không kiểm tra lại (dữ liệu cũ có thể là số lẻ)
+    const creditChanged =
+      editCredit.trim() !== String(editingUser.creditBalance)
+    const formError = getUserFormError(
+      editName,
+      editEmail,
+      creditChanged ? editCredit : undefined
+    )
+    if (formError) {
+      setEditError(formError)
       return
     }
 
+    // Chỉ gửi trường đã đổi để không ghi đè credit bằng giá trị cũ trên màn hình
+    const changes: UpdateUserPayload = {}
+    const name = editName.trim()
+    const email = editEmail.trim().toLowerCase()
+    const creditBalance = Number(editCredit)
+    if (name !== editingUser.name) changes.name = name
+    if (email !== editingUser.email) changes.email = email
+    if (creditChanged && creditBalance !== editingUser.creditBalance) {
+      changes.creditBalance = creditBalance
+    }
+    if (Object.keys(changes).length === 0) {
+      setEditError('Không có thay đổi nào để lưu')
+      return
+    }
+    setEditError(null)
+    setPendingUpdate(changes)
+  }
+
+  const confirmSaveUser = async () => {
+    if (!editingUser || !pendingUpdate) return
+    const changes = pendingUpdate
+    // Đóng hộp xác nhận trước khi gọi API để bấm đúp không gửi 2 lần
+    setPendingUpdate(null)
     try {
       setIsSubmitting(true)
-      const updated = await adminApi.updateUser(editingUser._id, {
-        creditBalance: parsedCredit
-      })
-      setUsers((prev) =>
-        prev.map((u) =>
-          u._id === editingUser._id
-            ? {
-                ...u,
-                creditBalance: updated.creditBalance
-              }
-            : u
+      const updated = await adminApi.updateUser(editingUser._id, changes)
+      setEditingUser(null)
+      showToast(`Đã cập nhật thông tin người dùng ${updated.name}`, 'success')
+    } catch (error) {
+      setEditError(
+        getRequestErrorMessage(
+          error,
+          'Không thể cập nhật người dùng, vui lòng thử lại'
         )
       )
-      setEditingUser(null)
-      setSaveMessage(`Đã cập nhật số dư credit cho ${editingUser.name}`)
-      setTimeout(() => setSaveMessage(null), 3000)
-    } catch {
-      setEditError('Không thể cập nhật người dùng, vui lòng thử lại')
     } finally {
       setIsSubmitting(false)
+      // Tải lại cả khi lỗi (vd: 404 vì người dùng đã bị xóa ở phiên khác)
+      reloadUsers()
     }
   }
 
@@ -185,48 +357,52 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     setNewPassword('')
     setNewCredit(String(config?.signupBonus ?? 100))
     setCreateError(null)
+    setPendingCreate(null)
   }
 
-  const handleCreateUser = async () => {
-    if (!newName.trim()) {
-      setCreateError('Vui lòng nhập họ và tên người dùng')
+  // Kiểm tra form rồi chờ Admin xác nhận, chưa gọi API
+  const handleCreateUser = () => {
+    const formError =
+      getUserFormError(newName, newEmail, newCredit) ??
+      (newPassword.length < 6
+        ? 'Mật khẩu khởi tạo phải có tối thiểu 6 ký tự'
+        : null)
+    if (formError) {
+      setCreateError(formError)
       return
     }
-    if (
-      !newEmail.trim() ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim())
-    ) {
-      setCreateError('Địa chỉ email không đúng định dạng')
-      return
-    }
-    if (!newPassword || newPassword.length < 6) {
-      setCreateError('Mật khẩu khởi tạo phải có tối thiểu 6 ký tự')
-      return
-    }
-    const parsedCredit = Number(newCredit)
-    if (Number.isNaN(parsedCredit) || parsedCredit < 0) {
-      setCreateError('Số dư credit phải là số không âm')
-      return
-    }
+    setCreateError(null)
+    setPendingCreate({
+      name: newName.trim(),
+      email: newEmail.trim().toLowerCase(),
+      password: newPassword,
+      creditBalance: Number(newCredit)
+    })
+  }
 
+  const confirmCreateUser = async () => {
+    if (!pendingCreate) return
+    const payload = pendingCreate
+    // Đóng hộp xác nhận trước khi gọi API để bấm đúp không gửi 2 lần
+    setPendingCreate(null)
     try {
       setIsCreating(true)
-      const created = await adminApi.createUser({
-        name: newName.trim(),
-        email: newEmail.trim(),
-        password: newPassword,
-        creditBalance: parsedCredit
-      })
-      setUsers((prev) => [created, ...prev])
-      setUsersTotal((prev) => prev + 1)
+      const created = await adminApi.createUser(payload)
       setIsCreateUserOpen(false)
-      setSaveMessage(`Đã tạo thành công tài khoản người dùng ${created.name}`)
-      setTimeout(() => setSaveMessage(null), 3000)
+      showToast(
+        `Đã tạo thành công tài khoản người dùng ${created.name}`,
+        'success'
+      )
+      // Danh sách xếp mới nhất trước: về trang 1 để thấy người dùng vừa tạo
+      setUsersPage(1)
+      reloadUsers()
     } catch (err: unknown) {
-      const errorMsg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message || 'Không thể tạo tài khoản người dùng, vui lòng thử lại'
-      setCreateError(errorMsg)
+      setCreateError(
+        getRequestErrorMessage(
+          err,
+          'Không thể tạo tài khoản người dùng, vui lòng thử lại'
+        )
+      )
     } finally {
       setIsCreating(false)
     }
@@ -254,11 +430,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setUsers((prev) =>
         prev.map((u) => (u._id === lockingUser._id ? { ...u, ...updated } : u))
       )
-      setSaveMessage(
-        `Đã khóa tài khoản ${lockingUser.name}. Tài khoản sẽ tự động xóa sau 30 ngày nếu không được khôi phục.`
+      showToast(
+        `Đã khóa tài khoản ${lockingUser.name}. Tài khoản sẽ tự động xóa sau 30 ngày nếu không được khôi phục.`,
+        'success'
       )
       setLockingUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -284,11 +460,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           u._id === restoringUser._id ? { ...u, ...updated } : u
         )
       )
-      setSaveMessage(
-        `Đã khôi phục tài khoản ${restoringUser.name} về trạng thái hoạt động bình thường`
+      showToast(
+        `Đã khôi phục tài khoản ${restoringUser.name} về trạng thái hoạt động bình thường`,
+        'success'
       )
       setRestoringUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -310,13 +486,11 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
     try {
       setIsDeleting(true)
       await adminApi.deleteUser(deletingUser._id)
-      setUsers((prev) => prev.filter((u) => u._id !== deletingUser._id))
-      setUsersTotal((prev) => Math.max(0, prev - 1))
-      setSaveMessage(
-        `Đã xóa vĩnh viễn tài khoản ${deletingUser.name} cùng toàn bộ dữ liệu liên quan`
+      showToast(
+        `Đã xóa vĩnh viễn tài khoản ${deletingUser.name} cùng toàn bộ dữ liệu liên quan`,
+        'success'
       )
       setDeletingUser(null)
-      setTimeout(() => setSaveMessage(null), 4000)
     } catch (err: unknown) {
       const errorMsg =
         (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -324,8 +498,21 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setDeleteError(errorMsg)
     } finally {
       setIsDeleting(false)
+      // Tải lại cả khi lỗi (vd: 404 vì người dùng đã bị xóa ở phiên khác)
+      reloadUsers()
     }
   }
+
+  // Tóm tắt các trường sẽ đổi, hiện trong hộp xác nhận cập nhật
+  const updateSummary = [
+    pendingUpdate?.name !== undefined && `Họ tên mới: ${pendingUpdate.name}.`,
+    pendingUpdate?.email !== undefined &&
+      `Email mới: ${pendingUpdate.email} (người dùng sẽ phải đăng nhập bằng email này).`,
+    pendingUpdate?.creditBalance !== undefined &&
+      `Số dư credit: ${editingUser?.creditBalance} → ${pendingUpdate.creditBalance}.`
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <main className='mx-auto max-w-7xl px-5 py-12 sm:px-12'>
@@ -345,12 +532,22 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           Quản trị hệ thống
         </h1>
         <p className='mt-2 font-sans text-sm text-stone-600'>
-          Khu vực dành riêng cho quản trị viên: quản lý người dùng, cấu hình
-          credit và theo dõi nhật ký hoạt động AI.
+          Khu vực dành riêng cho quản trị viên: thống kê tổng quan, quản lý
+          người dùng, cấu hình credit và theo dõi nhật ký hoạt động AI.
         </p>
       </div>
 
-      <div className='mb-6 flex gap-2 border-b border-stone-300 pb-2'>
+      <div className='mb-6 flex flex-wrap gap-2 border-b border-stone-300 pb-2'>
+        <button
+          className={`px-4 py-2 font-sans text-sm font-semibold transition ${
+            activeTab === 'dashboard'
+              ? 'border-b-2 border-orange-700 font-bold text-orange-700'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+          onClick={() => setActiveTab('dashboard')}
+        >
+          Tổng quan
+        </button>
         <button
           className={`px-4 py-2 font-sans text-sm font-semibold transition ${
             activeTab === 'users'
@@ -379,15 +576,12 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           }`}
           onClick={() => setActiveTab('logs')}
         >
-          Nhật ký AI ({logsTotal})
+          AI Usage
         </button>
       </div>
 
-      {saveMessage && (
-        <div className='mb-6 rounded bg-emerald-100 p-3 font-sans text-xs font-bold text-emerald-800'>
-          ✅ {saveMessage}
-        </div>
-      )}
+      {/* Tab Tổng quan (Dashboard) */}
+      {activeTab === 'dashboard' && <AdminDashboard />}
 
       {/* Tab 1: Quản lý người dùng */}
       {activeTab === 'users' && (
@@ -398,12 +592,13 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
                 Danh sách người dùng
               </h2>
               <p className='font-sans text-xs text-stone-500'>
-                Quản lý phân quyền, thêm mới, xóa và điều chỉnh số dư credit của
-                từng thành viên
+                Tìm kiếm, thêm mới, chỉnh sửa thông tin, khóa và xóa tài khoản
+                người dùng
               </p>
             </div>
             <div className='flex items-center gap-2'>
               <input
+                aria-label='Tìm kiếm người dùng theo tên hoặc email'
                 className='w-full border border-stone-300 bg-white p-2.5 font-sans text-sm outline-orange-700 sm:w-64'
                 placeholder='Tìm theo tên hoặc email...'
                 value={search}
@@ -423,6 +618,20 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             {isLoadingUsers ? (
               <div className='py-8 text-center font-sans text-sm text-stone-500'>
                 Đang tải dữ liệu người dùng...
+              </div>
+            ) : usersError ? (
+              <div
+                className='flex flex-col gap-3 border border-red-200 bg-red-50 p-4 font-sans text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between'
+                role='alert'
+              >
+                <span>{usersError}</span>
+                <button
+                  className='self-start font-semibold underline underline-offset-2 sm:self-auto'
+                  onClick={reloadUsers}
+                  type='button'
+                >
+                  Thử lại
+                </button>
               </div>
             ) : (
               <>
@@ -525,56 +734,167 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           <h2 className='mb-5 text-2xl font-medium text-emerald-950'>
             Cấu hình hệ thống Credit
           </h2>
-          {config && (
+          {isLoadingConfig ? (
+            <div className='py-8 text-center font-sans text-sm text-stone-500'>
+              Đang tải cấu hình credit...
+            </div>
+          ) : !config ? (
+            <div className='rounded bg-red-50 p-3 font-sans'>
+              <p className='text-xs font-semibold text-red-700'>
+                {configError || 'Không thể tải cấu hình credit.'}
+              </p>
+              <button
+                className='mt-3 border border-stone-300 bg-white px-3 py-2 text-xs font-semibold hover:bg-stone-100'
+                onClick={() => void fetchCreditConfig()}
+                type='button'
+              >
+                Tải lại
+              </button>
+            </div>
+          ) : (
             <div className='space-y-4'>
               <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi slide tạo mới (credit)
+                Giá mỗi lượt sinh bài giảng
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.pricePerSlide}
+                  aria-invalid={Boolean(creditErrors.pricePerLecture)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerLecture
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerLecture}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      pricePerSlide: Number(event.target.value)
-                    })
+                    handleCreditFieldChange(
+                      'pricePerLecture',
+                      event.target.value
+                    )
                   }
                 />
+                {creditErrors.pricePerLecture && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerLecture}
+                  </span>
+                )}
               </label>
+
               <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi lượt AI chỉnh sửa slide (credit)
+                Giá mỗi slide tạo mới trong AI Chat
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.pricePerAiEdit}
+                  aria-invalid={Boolean(creditErrors.pricePerSlide)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerSlide
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerSlide}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      pricePerAiEdit: Number(event.target.value)
-                    })
+                    handleCreditFieldChange('pricePerSlide', event.target.value)
                   }
                 />
+                {creditErrors.pricePerSlide && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerSlide}
+                  </span>
+                )}
               </label>
+
+              <label className='block font-sans text-sm font-semibold text-stone-600'>
+                Giá mỗi lượt AI chỉnh sửa slide
+                <input
+                  aria-invalid={Boolean(creditErrors.pricePerAiEdit)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerAiEdit
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerAiEdit}
+                  onChange={(event) =>
+                    handleCreditFieldChange(
+                      'pricePerAiEdit',
+                      event.target.value
+                    )
+                  }
+                />
+                {creditErrors.pricePerAiEdit && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerAiEdit}
+                  </span>
+                )}
+              </label>
+
+              <label className='block font-sans text-sm font-semibold text-stone-600'>
+                Giá mỗi lượt AI sinh dàn ý
+                <input
+                  aria-invalid={Boolean(creditErrors.pricePerOutline)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.pricePerOutline
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.pricePerOutline}
+                  onChange={(event) =>
+                    handleCreditFieldChange(
+                      'pricePerOutline',
+                      event.target.value
+                    )
+                  }
+                />
+                {creditErrors.pricePerOutline && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.pricePerOutline}
+                  </span>
+                )}
+              </label>
+
               <label className='block font-sans text-sm font-semibold text-stone-600'>
                 Credit tặng khi người dùng đăng ký mới
                 <input
-                  className='mt-2 w-full border border-stone-300 bg-white p-3 font-normal outline-orange-700'
-                  type='number'
-                  value={config.signupBonus}
+                  aria-invalid={Boolean(creditErrors.signupBonus)}
+                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
+                    creditErrors.signupBonus
+                      ? 'border-red-500'
+                      : 'border-stone-300'
+                  }`}
+                  inputMode='numeric'
+                  pattern='[0-9]*'
+                  type='text'
+                  value={creditForm.signupBonus}
                   onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      signupBonus: Number(event.target.value)
-                    })
+                    handleCreditFieldChange('signupBonus', event.target.value)
                   }
                 />
+                {creditErrors.signupBonus && (
+                  <span className='mt-1 block text-xs font-semibold text-red-700'>
+                    {creditErrors.signupBonus}
+                  </span>
+                )}
               </label>
+
+              {configError && (
+                <div className='rounded bg-red-50 p-2 font-sans text-xs font-semibold text-red-700'>
+                  ❌ {configError}
+                </div>
+              )}
+
               <button
-                className='mt-5 bg-orange-700 px-5 py-3 font-sans text-sm font-bold text-white transition hover:bg-orange-800'
+                className='mt-5 bg-orange-700 px-5 py-3 font-sans text-sm font-bold text-white transition hover:bg-orange-800 disabled:opacity-50'
+                disabled={isSavingConfig}
                 onClick={() => void saveConfig()}
                 type='button'
               >
-                Lưu cấu hình
+                {isSavingConfig ? 'Đang lưu...' : 'Lưu cấu hình'}
               </button>
             </div>
           )}
@@ -582,130 +902,48 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       )}
 
       {/* Tab 3: Nhật ký AI */}
-      {activeTab === 'logs' && (
-        <section className='border border-stone-300 bg-stone-50 p-7'>
-          <div className='mb-5 flex flex-col gap-1'>
-            <h2 className='text-2xl font-medium text-emerald-950'>
-              Nhật ký hoạt động AI
-            </h2>
-            <p className='font-sans text-xs text-stone-500'>
-              Theo dõi lịch sử sinh bài giảng, nội dung prompt và lượng credit
-              tiêu thụ
-            </p>
-          </div>
+      {activeTab === 'logs' && <AiUsageManagement />}
 
-          <div className='overflow-x-auto'>
-            <table className='w-full text-left font-sans text-sm'>
-              <thead>
-                <tr className='border-b border-stone-300 text-xs tracking-wider text-stone-500 uppercase'>
-                  <th className='py-3'>Thời gian</th>
-                  <th className='py-3'>Người dùng</th>
-                  <th className='py-3'>Yêu cầu (Prompt)</th>
-                  <th className='py-3'>Số slide</th>
-                  <th className='py-3 text-right'>Credit tiêu thụ</th>
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-stone-200'>
-                {isLoadingLogs ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className='py-8 text-center text-xs text-stone-500'
-                    >
-                      Đang tải nhật ký...
-                    </td>
-                  </tr>
-                ) : (
-                  <>
-                    {logs.map((log) => {
-                      const userDisplay =
-                        typeof log.userId === 'object' && log.userId !== null
-                          ? log.userId.name ||
-                            log.userId.email ||
-                            log.userId._id.slice(-6)
-                          : typeof log.userId === 'string'
-                            ? log.userId.slice(-6)
-                            : 'Ẩn danh'
-
-                      const userEmail =
-                        typeof log.userId === 'object' && log.userId !== null
-                          ? log.userId.email
-                          : undefined
-
-                      return (
-                        <tr key={log._id} className='hover:bg-stone-100/60'>
-                          <td className='py-3 font-mono text-xs text-stone-500'>
-                            {new Date(log.createdAt).toLocaleString('vi-VN')}
-                          </td>
-                          <td className='py-3 text-xs text-stone-800'>
-                            <div className='font-semibold'>{userDisplay}</div>
-                            {userEmail && (
-                              <div className='font-mono text-[11px] text-stone-400'>
-                                {userEmail}
-                              </div>
-                            )}
-                          </td>
-                          <td
-                            className='max-w-xs truncate py-3 text-stone-800'
-                            title={log.prompt}
-                          >
-                            {log.prompt || '(Trống)'}
-                          </td>
-                          <td className='py-3 text-stone-600'>
-                            {log.slideCount}
-                          </td>
-                          <td className='py-3 text-right font-semibold text-orange-700'>
-                            -{log.creditSpent}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {logs.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className='py-8 text-center text-stone-500'
-                        >
-                          Chưa có nhật ký hoạt động nào
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <Pagination
-            page={logsPage}
-            total={logsTotal}
-            limit={logsLimit}
-            onPageChange={setLogsPage}
-            onLimitChange={(limit) => {
-              setLogsLimit(limit)
-              setLogsPage(1)
-            }}
-            itemName='nhật ký'
-          />
-        </section>
-      )}
-
-      {/* Modal Chỉnh sửa Credit người dùng */}
+      {/* Modal Chỉnh sửa thông tin người dùng */}
       <Modal
         open={Boolean(editingUser)}
-        onClose={() => setEditingUser(null)}
-        title='Chỉnh sửa credit người dùng'
+        onClose={() => {
+          if (!isSubmitting) setEditingUser(null)
+        }}
+        title='Chỉnh sửa thông tin người dùng'
       >
         {editingUser && (
           <div className='space-y-4 font-sans'>
             <div>
-              <div className='text-xs font-semibold text-stone-500 uppercase'>
-                Tên & Email
-              </div>
-              <div className='mt-1 text-sm font-bold text-stone-900'>
-                {editingUser.name}
-              </div>
-              <div className='text-xs text-stone-500'>{editingUser.email}</div>
+              <label
+                htmlFor='edit-user-name'
+                className='block text-xs font-semibold text-stone-600 uppercase'
+              >
+                Họ và tên
+              </label>
+              <input
+                id='edit-user-name'
+                type='text'
+                className='mt-1 w-full border border-stone-300 bg-white p-2.5 text-sm outline-orange-700'
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor='edit-user-email'
+                className='block text-xs font-semibold text-stone-600 uppercase'
+              >
+                Địa chỉ Email
+              </label>
+              <input
+                id='edit-user-email'
+                type='email'
+                className='mt-1 w-full border border-stone-300 bg-white p-2.5 text-sm outline-orange-700'
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
             </div>
 
             <div>
@@ -726,7 +964,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             </div>
 
             {editError && (
-              <div className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'>
+              <div
+                className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'
+                role='alert'
+              >
                 ❌ {editError}
               </div>
             )}
@@ -743,7 +984,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
               <button
                 type='button'
                 className='bg-orange-700 px-4 py-2 text-xs font-bold text-white hover:bg-orange-800 disabled:opacity-50'
-                onClick={() => void handleSaveUser()}
+                onClick={handleSaveUser}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? 'Đang lưu...' : 'Lưu thay đổi'}
@@ -756,7 +997,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       {/* Modal Thêm người dùng mới */}
       <Modal
         open={isCreateUserOpen}
-        onClose={() => setIsCreateUserOpen(false)}
+        onClose={() => {
+          if (!isCreating) setIsCreateUserOpen(false)
+        }}
         title='Thêm người dùng mới'
       >
         <div className='space-y-4 font-sans'>
@@ -829,7 +1072,10 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           </div>
 
           {createError && (
-            <div className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'>
+            <div
+              className='rounded bg-red-50 p-2 text-xs font-semibold text-red-700'
+              role='alert'
+            >
               ❌ {createError}
             </div>
           )}
@@ -846,7 +1092,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
             <button
               type='button'
               className='bg-emerald-950 px-4 py-2 text-xs font-bold text-white hover:bg-stone-900 disabled:opacity-50'
-              onClick={() => void handleCreateUser()}
+              onClick={handleCreateUser}
               disabled={isCreating}
             >
               {isCreating ? 'Đang tạo...' : 'Tạo người dùng'}
@@ -976,7 +1222,9 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       {/* Modal Xóa vĩnh viễn người dùng */}
       <Modal
         open={Boolean(deletingUser)}
-        onClose={() => setDeletingUser(null)}
+        onClose={() => {
+          if (!isDeleting) setDeletingUser(null)
+        }}
         title='Xóa vĩnh viễn người dùng'
       >
         {deletingUser && (
@@ -1039,6 +1287,30 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           </div>
         )}
       </Modal>
+
+      {/* Xác nhận thêm/sửa (SRS UC030 bước 6): đặt sau mọi Modal để nằm trên form (cùng z-50, phần tử sau ở trên). Hủy = đóng form, không gọi API (6a) */}
+      <ConfirmDialog
+        open={isCreateUserOpen && Boolean(pendingCreate)}
+        title='Xác nhận thêm người dùng'
+        message={`Bạn có chắc chắn muốn thêm người dùng "${pendingCreate?.name}" (${pendingCreate?.email}) với ${pendingCreate?.creditBalance} credit ban đầu?`}
+        confirmLabel='Thêm người dùng'
+        onConfirm={() => void confirmCreateUser()}
+        onCancel={() => {
+          setPendingCreate(null)
+          setIsCreateUserOpen(false)
+        }}
+      />
+      <ConfirmDialog
+        open={Boolean(editingUser && pendingUpdate)}
+        title='Xác nhận cập nhật người dùng'
+        message={`Bạn có chắc chắn muốn lưu thay đổi thông tin của người dùng "${editingUser?.name}"? ${updateSummary}`}
+        confirmLabel='Lưu thay đổi'
+        onConfirm={() => void confirmSaveUser()}
+        onCancel={() => {
+          setPendingUpdate(null)
+          setEditingUser(null)
+        }}
+      />
     </main>
   )
 }

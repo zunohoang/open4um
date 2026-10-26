@@ -62,7 +62,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
               {toast.type === 'success' && '✅'}
               {toast.type === 'info' && 'ℹ️'}
             </span>
-            <div className='flex-1 leading-relaxed wrap-break-word font-medium'>
+            <div className='flex-1 leading-relaxed break-words font-medium'>
               {toast.message}
             </div>
             <button

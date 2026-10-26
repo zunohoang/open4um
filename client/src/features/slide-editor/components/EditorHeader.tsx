@@ -3,6 +3,7 @@ import {
   Cloud,
   CloudOff,
   FileDown,
+  ListTree,
   Loader2,
   Play,
   Redo2,
@@ -10,6 +11,7 @@ import {
   Undo2
 } from 'lucide-react'
 import { BrandLogo } from '@/components/ui'
+import { UserAccountMenu } from '@/components/layout/UserAccountMenu'
 import { useEditorStore } from '../store/editor.store'
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
@@ -22,6 +24,7 @@ interface EditorHeaderProps {
   onRedo: () => void
   onManualSave: () => void
   onOpenExport: () => void
+  onOpenOutline?: () => void
   onPresent: () => void
   saveStatus: SaveStatus
   countdown: number | null
@@ -37,6 +40,7 @@ export const EditorHeader = ({
   onRedo,
   onManualSave,
   onOpenExport,
+  onOpenOutline,
   onPresent,
   saveStatus,
   countdown,
@@ -133,7 +137,7 @@ export const EditorHeader = ({
         </div>
 
         {/* Trạng thái lưu (Cố định chiều rộng w-[116px] để chống giật / xô lệch layout) */}
-        <div className='flex w-[116px] shrink-0 items-center justify-start'>
+        <div className='flex w-29 shrink-0 items-center justify-start'>
           {saveStatus === 'saving' ? (
             <div className='flex items-center gap-1.5 px-1 py-1 text-xs text-amber-300'>
               <Loader2
@@ -196,7 +200,7 @@ export const EditorHeader = ({
       </div>
 
       {/* KHU VỰC GIỮA: Tên bài giảng căn giữa tuyệt đối (Absolute Centering) */}
-      <div className='pointer-events-none absolute left-1/2 top-1/2 flex w-full max-w-[200px] -translate-x-1/2 -translate-y-1/2 items-center justify-center px-2 sm:max-w-xs md:max-w-sm lg:max-w-md'>
+      <div className='pointer-events-none absolute left-1/2 top-1/2 flex w-full max-w-50 -translate-x-1/2 -translate-y-1/2 items-center justify-center px-2 sm:max-w-xs md:max-w-sm lg:max-w-md'>
         <input
           type='text'
           value={title}
@@ -207,8 +211,21 @@ export const EditorHeader = ({
         />
       </div>
 
-      {/* KHU VỰC PHẢI: Nút AI Copilot, Xuất bản, Trình chiếu */}
+      {/* KHU VỰC PHẢI: Nút Dàn ý, AI Copilot, Xuất bản, Trình chiếu */}
       <div className='relative z-10 flex shrink-0 items-center gap-2'>
+        {/* Nút xem lại Dàn ý */}
+        {onOpenOutline && (
+          <button
+            type='button'
+            onClick={onOpenOutline}
+            className='flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold text-stone-300 transition hover:bg-emerald-900/40 hover:text-white cursor-pointer'
+            title='Xem lại dàn ý bài giảng (Outline)'
+          >
+            <ListTree size={14} />
+            <span className='hidden md:inline'>Dàn ý</span>
+          </button>
+        )}
+
         {/* Toggle AI Copilot Panel */}
         <button
           type='button'
@@ -245,6 +262,8 @@ export const EditorHeader = ({
           <Play size={14} />
           <span>Trình chiếu</span>
         </button>
+
+        <UserAccountMenu />
       </div>
     </header>
   )

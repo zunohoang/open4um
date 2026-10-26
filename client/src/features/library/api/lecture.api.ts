@@ -49,9 +49,13 @@ export const lectureApi = {
   // Khôi phục bài giảng về trạng thái hoạt động bình thường
   restore: async (id: string) => apiClient.post(`/lectures/${id}/restore`),
 
-  createBlank: async (title: string) =>
-    (await apiClient.post<{ data: Lecture }>('/lectures/blank', { title })).data
-      .data,
+  createBlank: async (title: string, theme?: string) =>
+    (
+      await apiClient.post<{ data: Lecture }>('/lectures/blank', {
+        title,
+        theme
+      })
+    ).data.data,
 
   export: async (id: string) =>
     (

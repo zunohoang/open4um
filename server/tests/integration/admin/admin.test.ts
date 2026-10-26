@@ -236,6 +236,102 @@ describe('Integration Tests — Admin Console', () => {
         expect(remainingLogs).toHaveLength(0)
       })
     })
+
+    describe('PATCH /api/v1/admin/users/:id', () => {
+      it('cập nhật họ tên, email và credit, lưu đúng vào DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { userId } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${userId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            name: 'Tên Mới',
+            email: 'New.Email@Example.com',
+            creditBalance: 75
+          })
+
+        expect(res.status).toBe(200)
+        expect(res.body.success).toBe(true)
+
+        const userInDb = await UserModel.findById(userId)
+        expect(userInDb?.name).toBe('Tên Mới')
+        expect(userInDb?.email).toBe('new.email@example.com')
+        expect(userInDb?.creditBalance).toBe(75)
+      })
+
+      it('trả 409 khi email đã thuộc về người dùng khác và không thay đổi DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { user: target } = await createUser()
+        const { user: other } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${target._id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ email: other.email })
+
+        expect(res.status).toBe(409)
+        expect(res.body.success).toBe(false)
+
+        const targetInDb = await UserModel.findById(target._id)
+        expect(targetInDb?.email).toBe(target.email)
+      })
+
+      it('trả 422 khi gửi trường không được phép sửa (role) và không thay đổi DB', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { userId } = await createUser()
+
+        const res = await request(app)
+          .patch(`/api/v1/admin/users/${userId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ name: 'Đổi tên', role: 'admin' })
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+
+        const userInDb = await UserModel.findById(userId)
+        expect(userInDb?.role).toBe('user')
+        expect(userInDb?.name).toBe('Normal User')
+      })
+    })
+
+    describe('GET /api/v1/admin/users?search=', () => {
+      it('tìm theo chuỗi nguyên văn, ký tự đặc biệt không gây lỗi', async () => {
+        const { token: adminToken } = await createAdmin()
+        await UserModel.create([
+          {
+            name: 'Plus User',
+            email: 'a+b@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          },
+          {
+            name: 'Other User',
+            email: 'ab@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          }
+        ])
+
+        const plusRes = await request(app)
+          .get('/api/v1/admin/users')
+          .query({ search: 'a+b' })
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(plusRes.status).toBe(200)
+        expect(
+          plusRes.body.data.items.map((u: { email: string }) => u.email)
+        ).toEqual(['a+b@example.com'])
+
+        const parenRes = await request(app)
+          .get('/api/v1/admin/users')
+          .query({ search: '(' })
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(parenRes.status).toBe(200)
+        expect(parenRes.body.data.items).toHaveLength(0)
+      })
+    })
   })
 
   describe('Credit & System Configurations', () => {
@@ -243,8 +339,10 @@ describe('Integration Tests — Admin Console', () => {
       it('trả 200 và cấu hình giá credit chính xác từ Database', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -254,8 +352,10 @@ describe('Integration Tests — Admin Console', () => {
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
+        expect(res.body.data.pricePerLecture).toBe(80)
         expect(res.body.data.pricePerSlide).toBe(2)
         expect(res.body.data.pricePerAiEdit).toBe(1)
+        expect(res.body.data.pricePerOutline).toBe(4)
         expect(res.body.data.signupBonus).toBe(20)
       })
     })
@@ -264,8 +364,10 @@ describe('Integration Tests — Admin Console', () => {
       it('cập nhật bảng giá credit thành công và lưu thay đổi vào DB', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -273,8 +375,10 @@ describe('Integration Tests — Admin Console', () => {
           .patch('/api/v1/admin/credit-config')
           .set('Authorization', `Bearer ${adminToken}`)
           .send({
+            pricePerLecture: 90,
             pricePerSlide: 10,
             pricePerAiEdit: 3,
+            pricePerOutline: 6,
             signupBonus: 50
           })
 
@@ -282,16 +386,20 @@ describe('Integration Tests — Admin Console', () => {
         expect(res.body.success).toBe(true)
 
         const configInDb = await CreditConfigModel.findOne()
+        expect(configInDb?.pricePerLecture).toBe(90)
         expect(configInDb?.pricePerSlide).toBe(10)
         expect(configInDb?.pricePerAiEdit).toBe(3)
+        expect(configInDb?.pricePerOutline).toBe(6)
         expect(configInDb?.signupBonus).toBe(50)
       })
 
       it('trả 422 khi truyền giá trị credit âm và không thay đổi DB', async () => {
         const { token: adminToken } = await createAdmin()
         await CreditConfigModel.create({
+          pricePerLecture: 80,
           pricePerSlide: 2,
           pricePerAiEdit: 1,
+          pricePerOutline: 4,
           signupBonus: 20
         })
 
@@ -307,6 +415,33 @@ describe('Integration Tests — Admin Console', () => {
 
         const configInDb = await CreditConfigModel.findOne()
         expect(configInDb?.pricePerSlide).toBe(2)
+      })
+
+      it.each([
+        ['giá trị bằng 0', 0],
+        ['số thập phân', 1.5],
+        ['chuỗi ký tự', 'abc'],
+        ['chuỗi số', '2']
+      ])('trả 422 khi truyền %s', async (_caseName, invalidValue) => {
+        const { token: adminToken } = await createAdmin()
+        await CreditConfigModel.create({
+          pricePerLecture: 80,
+          pricePerSlide: 2,
+          pricePerAiEdit: 1,
+          pricePerOutline: 4,
+          signupBonus: 20
+        })
+
+        const res = await request(app)
+          .patch('/api/v1/admin/credit-config')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ pricePerAiEdit: invalidValue })
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+
+        const configInDb = await CreditConfigModel.findOne()
+        expect(configInDb?.pricePerAiEdit).toBe(1)
       })
     })
   })
@@ -340,6 +475,201 @@ describe('Integration Tests — Admin Console', () => {
         expect(res.body.data.items[0].creditSpent).toBe(6)
         expect(res.body.data.items[0].userId.name).toBe('Tran Van B')
         expect(res.body.data.items[0].userId.email).toBe('b@example.com')
+      })
+
+      it('lọc theo khoảng ngày và phân trang đúng kết quả', async () => {
+        const { token: adminToken } = await createAdmin()
+        const { user } = await createUser()
+        const logs = await AiUsageLogModel.create([
+          {
+            userId: user._id,
+            prompt: 'Prompt trong khoảng lọc',
+            slideCount: 2,
+            creditSpent: 10
+          },
+          {
+            userId: user._id,
+            prompt: 'Prompt thứ hai trong khoảng lọc',
+            slideCount: 4,
+            creditSpent: 20
+          },
+          {
+            userId: user._id,
+            prompt: 'Prompt ngoài khoảng lọc',
+            slideCount: 5,
+            creditSpent: 25
+          }
+        ])
+        await Promise.all([
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[0]._id },
+            { $set: { createdAt: new Date('2026-01-15T12:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[1]._id },
+            { $set: { createdAt: new Date('2026-01-15T18:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: logs[2]._id },
+            { $set: { createdAt: new Date('2026-01-16T00:00:00.000Z') } }
+          )
+        ])
+
+        const res = await request(app)
+          .get(
+            '/api/v1/admin/ai-usage?page=1&limit=1&from=2026-01-15&to=2026-01-15'
+          )
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(200)
+        expect(res.body.data.items).toHaveLength(1)
+        expect(res.body.data.items[0].prompt).toBe(
+          'Prompt thứ hai trong khoảng lọc'
+        )
+      })
+
+      it('trả danh sách rỗng khi không có dữ liệu phù hợp', async () => {
+        const { token: adminToken } = await createAdmin()
+
+        const res = await request(app)
+          .get('/api/v1/admin/ai-usage?from=2030-01-01&to=2030-01-31')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(200)
+        expect(res.body.data.items).toEqual([])
+        expect(res.body.data.total).toBe(0)
+      })
+
+      it('từ chối khoảng ngày không hợp lệ', async () => {
+        const { token: adminToken } = await createAdmin()
+
+        const res = await request(app)
+          .get('/api/v1/admin/ai-usage?from=2026-02-02&to=2026-02-01')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
+      })
+    })
+  })
+
+  describe('Dashboard', () => {
+    describe('GET /api/v1/admin/dashboard', () => {
+      it('gom số liệu theo ngày giờ Việt Nam và trả hoạt động AI gần đây', async () => {
+        const { token: adminToken } = await createAdmin()
+        const [inRangeUser, outOfRangeUser] = await UserModel.create([
+          {
+            name: 'Người trong khoảng',
+            email: 'in-range@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          },
+          {
+            name: 'Người ngoài khoảng',
+            email: 'out-range@example.com',
+            passwordHash: 'hashed_password',
+            role: 'user'
+          }
+        ])
+        const lecture = await LectureModel.create({
+          userId: inRangeUser._id,
+          title: 'Bài giảng thống kê',
+          slides: []
+        })
+        const [inRangeLog, outOfRangeLog] = await AiUsageLogModel.create([
+          {
+            userId: inRangeUser._id,
+            prompt: 'Prompt trong khoảng',
+            slideCount: 3,
+            creditSpent: 6
+          },
+          {
+            userId: outOfRangeUser._id,
+            prompt: 'Prompt ngoài khoảng',
+            slideCount: 2,
+            creditSpent: 10
+          }
+        ])
+        // 18:30 UTC 14/01 = 01:30 ngày 15/01 giờ VN; 18:00 UTC 15/01 = 01:00 ngày 16/01;
+        // 17:30 UTC 16/01 = 00:30 ngày 17/01 -> nằm ngoài khoảng 15-16/01
+        await Promise.all([
+          UserModel.collection.updateOne(
+            { _id: inRangeUser._id },
+            { $set: { createdAt: new Date('2026-01-14T18:30:00.000Z') } }
+          ),
+          UserModel.collection.updateOne(
+            { _id: outOfRangeUser._id },
+            { $set: { createdAt: new Date('2026-01-16T17:30:00.000Z') } }
+          ),
+          LectureModel.collection.updateOne(
+            { _id: lecture._id },
+            { $set: { createdAt: new Date('2026-01-15T18:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: inRangeLog._id },
+            { $set: { createdAt: new Date('2026-01-15T18:00:00.000Z') } }
+          ),
+          AiUsageLogModel.collection.updateOne(
+            { _id: outOfRangeLog._id },
+            { $set: { createdAt: new Date('2026-01-16T17:30:00.000Z') } }
+          )
+        ])
+
+        const res = await request(app)
+          .get('/api/v1/admin/dashboard?from=2026-01-15&to=2026-01-16')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(200)
+        expect(res.body.success).toBe(true)
+        expect(res.body.data.series).toEqual([
+          { date: '2026-01-15', users: 1, lectures: 0, creditsSpent: 0 },
+          { date: '2026-01-16', users: 0, lectures: 1, creditsSpent: 6 }
+        ])
+        expect(res.body.data.totals).toEqual({
+          users: 1,
+          lectures: 1,
+          aiUsages: 1,
+          aiSlides: 3,
+          creditsSpent: 6
+        })
+        // Admin không tính là người dùng đăng ký
+        expect(res.body.data.allTime).toEqual({
+          users: 2,
+          lectures: 1,
+          aiUsages: 2,
+          aiSlides: 5,
+          creditsSpent: 16
+        })
+        expect(res.body.data.recentActivities).toHaveLength(1)
+        expect(res.body.data.recentActivities[0].prompt).toBe(
+          'Prompt trong khoảng'
+        )
+        expect(res.body.data.recentActivities[0].userId.name).toBe(
+          'Người trong khoảng'
+        )
+      })
+
+      it('trả 401 khi chưa đăng nhập và 403 với tài khoản user thường', async () => {
+        const { token: normalUserToken } = await createUser()
+
+        const anonymousRes = await request(app).get('/api/v1/admin/dashboard')
+        expect(anonymousRes.status).toBe(401)
+
+        const userRes = await request(app)
+          .get('/api/v1/admin/dashboard')
+          .set('Authorization', `Bearer ${normalUserToken}`)
+        expect(userRes.status).toBe(403)
+      })
+
+      it('từ chối khoảng ngày không hợp lệ', async () => {
+        const { token: adminToken } = await createAdmin()
+
+        const res = await request(app)
+          .get('/api/v1/admin/dashboard?from=2026-02-02&to=2026-02-01')
+          .set('Authorization', `Bearer ${adminToken}`)
+
+        expect(res.status).toBe(422)
+        expect(res.body.success).toBe(false)
       })
     })
   })

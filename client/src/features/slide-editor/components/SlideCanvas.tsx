@@ -1,12 +1,14 @@
 import type { Slide, SlideComponent } from '@/lib/types'
-import { Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
+import { Check, Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { FONT_MAP } from '../constants/theme-options'
+import { FONT_MAP, getThemeById } from '../constants/theme-options'
 import { getSlideComponents } from '../utils/slide'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
+  originalSlide?: Slide | null
   components?: SlideComponent[]
+  themeId?: string
   slideIndex: number
   totalSlides: number
   selectedCompId: string | null
@@ -20,11 +22,28 @@ interface SlideCanvasProps {
   onDeleteComponent: (id: string) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
   isAiLoading?: boolean
+  isPreview?: boolean
+  onAcceptPreview?: () => void
+  onExitPreview?: () => void
+}
+
+/**
+ * Chuyển đổi fontSize px sang đơn vị cqw (Container Query Width) để font chữ
+ * luôn co giãn tỷ lệ thuận 100% với kích thước khung hình Canvas 16:9.
+ * Chuẩn cơ sở: 960px chiều rộng (chuẩn slide 16:9 960x540).
+ * Ví dụ: 32px trên canvas 960px = 3.333cqw.
+ * Khi thu nhỏ canvas do mở sidebar AI, chữ tự thu nhỏ tương ứng để không bao giờ đè lên nhau.
+ */
+const getResponsiveFontSize = (fontSize: number = 20): string => {
+  const cqw = (fontSize / 9.6).toFixed(3)
+  return `clamp(8px, ${cqw}cqw, ${fontSize * 1.6}px)`
 }
 
 export const SlideCanvas = ({
   slide,
+  originalSlide,
   components: passedComponents,
+  themeId,
   slideIndex,
   totalSlides,
   selectedCompId,
@@ -33,11 +52,22 @@ export const SlideCanvas = ({
   onDuplicateComponent,
   onDeleteComponent,
   onAiQuickAction,
-  isAiLoading = false
+  isAiLoading = false,
+  isPreview = false,
+  onAcceptPreview,
+  onExitPreview
 }: SlideCanvasProps) => {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState<'proposed' | 'original'>(
+    'proposed'
+  )
   const hasRecordedHistoryRef = useRef(false)
+
+  // Tự động chuyển về bản đề xuất khi slide đề xuất thay đổi
+  useEffect(() => {
+    setPreviewMode('proposed')
+  }, [slide?.id])
 
   // Quản lý gõ tiếng Việt (IME composition), phiên sửa văn bản (Session-based Undo) và auto-expand
   const isComposingRef = useRef(false)
@@ -80,19 +110,6 @@ export const SlideCanvas = ({
   const handleStartMove = (e: React.MouseEvent, comp: SlideComponent) => {
     // Không di chuyển nếu đang trong chế độ soạn thảo văn bản
     if (editingTextId === comp.id) return
-
-    const target = e.target as HTMLElement
-    const isText = comp.type !== 'image' && comp.type !== 'shape'
-
-    // Nếu là text và đã được chọn: nếu người dùng click vào vùng chữ (text content),
-    // không kích hoạt di chuyển để người dùng có thể bôi đen văn bản tự nhiên
-    if (
-      comp.id === selectedCompId &&
-      isText &&
-      target.closest("[data-text-content='true']")
-    ) {
-      return
-    }
 
     e.stopPropagation()
     onSelectComponent(comp.id)
@@ -458,8 +475,99 @@ export const SlideCanvas = ({
     }
   }, [dragState, onUpdateComponent])
 
-  const components =
-    passedComponents ?? (slide ? getSlideComponents(slide) : [])
+  const isViewingOriginal =
+    isPreview && Boolean(originalSlide) && previewMode === 'original'
+  const activeSlideData =
+    isViewingOriginal && originalSlide ? originalSlide : slide
+  const theme = getThemeById(activeSlideData?.theme || themeId)
+  const components: SlideComponent[] =
+    isViewingOriginal && originalSlide
+      ? getSlideComponents(originalSlide, theme.id)
+      : (passedComponents ?? (slide ? getSlideComponents(slide, theme.id) : []))
+
+  // Helper tính toán màu chữ đảm bảo độ tương phản cao tuyệt đối theo theme
+  const getRenderTextColor = (comp: SlideComponent) => {
+    const rawColor = comp.color?.trim()
+    const isDarkBackground = Boolean(theme.isDark)
+    const darkPalette = [
+      '#173c39',
+      '#1c1917',
+      '#000000',
+      '#064e3b',
+      '#072b24',
+      '#0f172a',
+      '#1e293b',
+      '#334155',
+      '#57534e'
+    ]
+
+    // Nếu canvas là theme tối nhưng chữ mang màu tối của theme khác hoặc rỗng -> chuyển sang màu sáng tương ứng
+    if (
+      isDarkBackground &&
+      (!rawColor || darkPalette.includes(rawColor.toLowerCase()))
+    ) {
+      if (
+        comp.id.startsWith('header-') ||
+        comp.id.startsWith('step-num-') ||
+        comp.id.startsWith('callout-stat-') ||
+        comp.id.startsWith('list-tag-')
+      ) {
+        return theme.accentColor
+      }
+      if (
+        comp.type === 'subtitle' ||
+        comp.id.includes('-desc-') ||
+        comp.id.startsWith('footer-')
+      ) {
+        return theme.textSecondary
+      }
+      return theme.textPrimary
+    }
+
+    // Nếu là theme sáng nhưng chữ mang màu trắng/sáng của dark mode
+    const lightPalette = [
+      '#ffffff',
+      '#f8fafc',
+      '#f1f5f9',
+      '#a7f3d0',
+      '#94a3b8',
+      '#38bdf8',
+      '#34d399'
+    ]
+    if (
+      !isDarkBackground &&
+      rawColor &&
+      lightPalette.includes(rawColor.toLowerCase())
+    ) {
+      if (
+        comp.id.startsWith('header-') ||
+        comp.id.startsWith('step-num-') ||
+        comp.id.startsWith('callout-stat-') ||
+        comp.id.startsWith('list-tag-')
+      ) {
+        return theme.accentColor
+      }
+      if (
+        comp.type === 'subtitle' ||
+        comp.id.includes('-desc-') ||
+        comp.id.startsWith('footer-')
+      ) {
+        return theme.textSecondary
+      }
+      return theme.textPrimary
+    }
+
+    // Nếu là header nhưng mang màu đỏ gạch của theme classic trên theme khác
+    if (
+      comp.id.startsWith('header-') &&
+      rawColor === '#c45b3f' &&
+      theme.id !== 'classic-editorial'
+    ) {
+      return theme.accentColor
+    }
+
+    return rawColor || theme.textPrimary
+  }
 
   // Helper render hình khối
   const renderShapeElement = (comp: SlideComponent) => {
@@ -467,8 +575,8 @@ export const SlideCanvas = ({
     const fill =
       comp.fillColor === 'transparent'
         ? 'transparent'
-        : comp.fillColor || '#c45b3f'
-    const stroke = comp.borderColor || '#173c39'
+        : comp.fillColor || theme.cardBackground
+    const stroke = comp.borderColor || theme.cardBorder
     const strokeW = comp.borderWidth ?? 0
     const radius = comp.borderRadius ?? 0
 
@@ -562,10 +670,98 @@ export const SlideCanvas = ({
       {/* Khung Canvas tỷ lệ chuẩn 16:9 phong cách Canva */}
       <div
         ref={canvasRef}
-        className='relative aspect-video w-full max-w-4xl overflow-hidden rounded-md border border-stone-200 bg-white text-stone-900 shadow-xl select-none'
+        style={{
+          backgroundColor: activeSlideData?.backgroundColor || theme.background,
+          color: theme.textPrimary,
+          containerType: 'inline-size'
+        }}
+        className={`relative aspect-video w-full max-w-4xl overflow-hidden rounded-md border shadow-xl select-none transition-all ${
+          isPreview
+            ? 'border-amber-400 ring-4 ring-amber-400/40 shadow-amber-500/20'
+            : theme.isDark
+              ? 'border-slate-800'
+              : 'border-stone-200'
+        }`}
       >
+        {/* Banner chế độ xem trước đề xuất AI với nút gạt Before / After */}
+        {isPreview && (
+          <div className='absolute inset-x-0 top-0 z-40 flex items-center justify-between bg-amber-500/95 backdrop-blur-xs px-3.5 py-1.5 text-white shadow-md'>
+            <div className='flex items-center gap-3'>
+              <div className='flex items-center gap-1.5 text-xs font-bold'>
+                <Sparkles size={14} className='animate-pulse' />
+                <span className='hidden sm:inline'>
+                  {originalSlide
+                    ? `Slide ${(slideIndex ?? 0) + 1}:`
+                    : 'Slide mới tạo từ AI'}
+                </span>
+              </div>
+
+              {/* Nút gạt chuyển đổi Before / After xem thay đổi trực quan */}
+              {originalSlide && (
+                <div className='flex items-center rounded-lg bg-black/25 p-0.5 text-[11px] font-semibold'>
+                  <button
+                    type='button'
+                    onClick={() => setPreviewMode('original')}
+                    className={`rounded-md px-2.5 py-1 transition cursor-pointer ${
+                      previewMode === 'original'
+                        ? 'bg-white text-stone-900 shadow-xs font-bold'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                    title='Xem slide hiện tại (trước khi AI chỉnh sửa)'
+                  >
+                    Bản hiện tại
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setPreviewMode('proposed')}
+                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 transition cursor-pointer ${
+                      previewMode === 'proposed'
+                        ? 'bg-amber-600 text-white shadow-xs font-bold'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                    title='Xem đề xuất mới từ AI'
+                  >
+                    <Sparkles size={11} />
+                    <span>Bản AI đề xuất</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className='flex items-center gap-2'>
+              {onExitPreview && (
+                <button
+                  type='button'
+                  onClick={onExitPreview}
+                  className='rounded bg-black/20 px-2.5 py-1 text-[11px] font-medium hover:bg-black/30 transition cursor-pointer'
+                >
+                  Thoát xem trước
+                </button>
+              )}
+              {onAcceptPreview && (
+                <button
+                  type='button'
+                  onClick={onAcceptPreview}
+                  className='flex items-center gap-1 rounded bg-white px-3 py-1 text-[11px] font-bold text-amber-900 shadow-xs hover:bg-amber-50 transition cursor-pointer'
+                >
+                  <Check size={12} strokeWidth={2.5} />
+                  <span>
+                    {originalSlide
+                      ? 'Áp dụng đề xuất'
+                      : 'Chèn slide vào bài giảng'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Chỉ số slide góc trên */}
-        <span className='absolute right-4 top-3 z-10 font-mono text-xs font-semibold text-stone-400 pointer-events-none'>
+        <span
+          className={`absolute right-4 z-10 font-mono text-xs font-semibold pointer-events-none ${
+            isPreview ? 'top-10' : 'top-3'
+          } ${theme.isDark ? 'text-slate-500' : 'text-stone-400'}`}
+        >
           {slideIndex + 1} / {totalSlides}
         </span>
 
@@ -611,8 +807,8 @@ export const SlideCanvas = ({
               }}
               className={`group/comp cursor-move transition-shadow ${
                 isSelected
-                  ? 'ring-2 ring-brand-rust ring-offset-2 ring-offset-white z-30'
-                  : 'hover:ring-1 hover:ring-brand-rust/50 z-20'
+                  ? 'ring-2 ring-brand-rust ring-offset-2 ring-offset-white'
+                  : 'hover:ring-1 hover:ring-brand-rust/50'
               }`}
             >
               {/* KHUNG BOUNDING BOX VÀ CÁC NÚT ĐIỀU KHIỂN CANVA KHI ĐƯỢC CHỌN */}
@@ -852,52 +1048,54 @@ export const SlideCanvas = ({
                       isTextSessionRecordedRef.current = false
                     }
                   }}
-                  onBlur={() => {
+                  onBlur={(e) => {
                     isTextSessionRecordedRef.current = false
                     isComposingRef.current = false
                     setEditingTextId(null)
+                    // TC-18: Tự động xóa phần tử khỏi mảng components khi người dùng xóa hết nội dung và blur
+                    if (!comp.content.trim() || !e.target.value.trim()) {
+                      onDeleteComponent(comp.id)
+                    }
                   }}
                   style={{
-                    fontSize: `${comp.fontSize ?? 20}px`,
+                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
                     textAlign: comp.textAlign ?? 'left',
-                    color: comp.color || '#173c39',
+                    color: getRenderTextColor(comp),
                     fontFamily:
                       FONT_MAP[comp.fontFamily || 'sans'] ||
                       comp.fontFamily ||
                       'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
-                    lineHeight: 1.3
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere'
                   }}
                   className='w-full resize-none overflow-hidden rounded border border-brand-rust/40 bg-brand-paper/80 p-1 outline-none break-words'
                 />
               ) : (
                 /* Hiển thị văn bản bình thường */
                 <div
-                  data-text-content='true'
-                  onMouseDown={(e) => {
-                    if (isSelected) {
-                      e.stopPropagation()
-                    }
-                  }}
                   style={{
-                    fontSize: `${comp.fontSize ?? 20}px`,
+                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
                     textDecoration: comp.textDecoration ?? 'none',
                     textAlign: comp.textAlign ?? 'left',
-                    color: comp.color || '#173c39',
+                    color: getRenderTextColor(comp),
                     fontFamily:
                       FONT_MAP[comp.fontFamily || 'sans'] ||
                       comp.fontFamily ||
                       'inherit',
                     textTransform:
                       comp.textCase === 'uppercase' ? 'uppercase' : 'none',
-                    lineHeight: 1.3
+                    lineHeight: 1.3,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere'
                   }}
-                  className={`w-full break-words ${isSelected ? 'select-text cursor-text' : 'select-none'}`}
+                  className='w-full select-none break-words'
                 >
                   {comp.type === 'bullets' ? (
                     <ul className='space-y-1.5 list-disc pl-5'>

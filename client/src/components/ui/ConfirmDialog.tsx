@@ -22,7 +22,9 @@ export const ConfirmDialog = ({
   <Modal open={open} onClose={onCancel} title={title}>
     <p className='mb-6 font-sans text-sm text-stone-600'>{message}</p>
     <div className='flex justify-end gap-2 font-sans'>
+      {/* Focus vào Hủy (lựa chọn an toàn) để người dùng bàn phím/trình đọc màn hình biết hộp xác nhận đã mở */}
       <button
+        autoFocus
         className='border border-stone-300 px-4 py-2 text-xs font-semibold hover:bg-stone-100'
         onClick={onCancel}
         type='button'

@@ -15,5 +15,8 @@ const aiUsageLogSchema = new Schema(
   { timestamps: { createdAt: true, updatedAt: false } }
 )
 
+aiUsageLogSchema.index({ createdAt: -1 })
+aiUsageLogSchema.index({ userId: 1, createdAt: -1 })
+
 export type AiUsageLog = InferSchemaType<typeof aiUsageLogSchema>
 export const AiUsageLogModel = model<AiUsageLog>('AiUsageLog', aiUsageLogSchema)

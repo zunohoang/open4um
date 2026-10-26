@@ -3,6 +3,7 @@ import type {
   AdminUser,
   AiUsageLog,
   CreditConfig,
+  DashboardStats,
   Paginated
 } from '@/lib/types'
 
@@ -20,7 +21,9 @@ export interface CreateUserPayload {
 }
 
 export interface UpdateUserPayload {
-  creditBalance: number
+  name?: string
+  email?: string
+  creditBalance?: number
 }
 
 export interface ListAiUsageParams {
@@ -31,9 +34,16 @@ export interface ListAiUsageParams {
   to?: string
 }
 
+export interface DashboardParams {
+  from?: string
+  to?: string
+}
+
 export interface UpdateCreditConfigPayload {
+  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
+  pricePerOutline?: number
   signupBonus?: number
 }
 
@@ -71,6 +81,13 @@ export const adminApi = {
   getAiUsage: async (params?: ListAiUsageParams) =>
     (
       await apiClient.get<{ data: Paginated<AiUsageLog> }>('/admin/ai-usage', {
+        params
+      })
+    ).data.data,
+
+  getDashboard: async (params?: DashboardParams) =>
+    (
+      await apiClient.get<{ data: DashboardStats }>('/admin/dashboard', {
         params
       })
     ).data.data,
