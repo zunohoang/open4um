@@ -133,12 +133,12 @@ class Api:
             self.http.close()
 
 
-def new_manifest(api, directory, package):
+def new_manifest(api, directory, package, *, restore_config=True, fixture_letters="abc"):
     run_id = uuid.uuid4().hex
     manifest = {
         "schema": 1, "runId": run_id, "package": package, "started": now(),
-        "api": api.config["api"], "originalConfig": api.credit(),
-        "fixtureEmails": [f"qa-{run_id}-{letter}@example.com" for letter in ("a", "b", "c")],
+        "api": api.config["api"], "originalConfig": api.credit() if restore_config else None,
+        "fixtureEmails": [f"qa-{run_id}-{letter}@example.com" for letter in fixture_letters],
         "fixtureIds": [], "storageObjects": [], "cleanup": "pending",
     }
     path = Path(directory) / run_id / "recovery.json"
@@ -219,9 +219,10 @@ def import_postman_recovery(environment_path, output_path):
     if not re.fullmatch(r"[0-9a-f]{32}", run_id):
         raise ValueError("Environment has no valid runId")
     is_email = values.get("runMode") == "email"
+    is_outline = values.get("runMode") == "outline"
     manifest = {"schema": 1, "api": values["baseUrl"], "runId": run_id,
-                "originalConfig": None if is_email else json.loads(values["originalConfig"]),
-                "fixtureEmails": [] if is_email else [f"qa-{run_id}-{letter}@example.com" for letter in "abc"],
+                "originalConfig": None if is_email or is_outline else json.loads(values["originalConfig"]),
+                "fixtureEmails": [] if is_email else [f"qa-{run_id}-{letter}@example.com" for letter in ("a" if is_outline else "abc")],
                 "fixtureIds": [], "storageObjects": [], "cleanup": "pending"}
     if values.get("mailUserId"):
         manifest["mailFixture"] = {"id": values["mailUserId"], "email": values["mailbox"]}

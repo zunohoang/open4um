@@ -1,20 +1,23 @@
-# ABSlider development QA
+# ABSlider QA
 
-Start with [setup, execution and recovery](../docs/qa/automation-guide.md).
-Recorded live results and limitations are in
-[the verification summary](../docs/qa/automation-verification.md).
+Use [setup and execution](../docs/qa/automation-guide.md).
 
-- `postman/`: whole-backend API collection; core, public, AI and staged email modes.
-- `selenium/`: TC-73 / UC032-01 and TC-74 / UC032-02 (30 pytest scenarios).
-- `qa_support.py`: development-only preflight, fixture journal and recovery.
-- `test_harness.py`: offline checks for reports and recovery.
+- **Default API:** `postman/outline/AI-Outline.postman_collection.json` contains
+  three AI outline scenarios with 15 supporting HTTP requests. Run
+  `python tests/postman/run.py` using the QA venv. At most one Gemini request.
+- **Selenium:** `selenium/` keeps TC-73 / UC032-01 and TC-74 / UC032-02,
+  totaling 30 pytest scenarios. UC032-03 remains excluded.
+- **Retained, unused backend collection:** `postman/ABSlider.postman_collection.json`.
+  It is unchanged and only runs with an explicit `--mode core`, `--mode public`
+  or `--mode ai`. See the optional backend guide before resuming it.
 
-TC-75 / UC032-03 and CI integration are excluded. Generated reports and local
-credentials are ignored by Git. Authored coverage is not execution evidence.
+Open `postman/reports/latest_report.html` or
+`selenium/reports/latest_report.html` after execution. Reports distinguish feature
+scenarios from supporting requests. Verify a whole run directory with
+`python tests/verify_evidence.py <run-directory>` using the QA venv.
 
-Open `selenium/reports/latest_report.html` and `postman/reports/latest_report.html`
-for the latest local execution. [Evidence review](../docs/qa/evidence-review.md)
-explains step screenshots, transaction records and verification. Run
-`python tests/verify_evidence.py <run-directory>` using the QA venv before sharing
-an entire run folder. A screenshot or authored endpoint list alone is not proof
-that assertions passed.
+Credentials and generated artifacts are ignored by Git. Authored tests are not
+passing execution evidence. No CI or automatic Kiwi/Jira publication is added.
+
+[New outline execution record](../docs/qa/outline-verification.md): three scenarios,
+15 requests and 48 assertions passed on hosted development.

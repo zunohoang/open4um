@@ -1,279 +1,154 @@
-# ABSlider Postman and Selenium QA
+# ABSlider QA: small API suite and Selenium
 
-These packages run **locally** against hosted development. No local MongoDB,
-Redis, MinIO, backend, or frontend is needed. The existing Jest suites remain
-unchanged. GitHub stores the test source; no CI workflow is added (the project
-uses Jenkins).
+The default Postman suite covers **AI outline generation only**. Selenium keeps
+its existing Credit configuration scope. Run the packages sequentially.
 
-## Contents and target
+## Scope
 
-| Location | Purpose |
+| Tool | Feature scenarios |
 | --- | --- |
-| `tests/postman/ABSlider.postman_collection.json` | Importable Postman v2.1 collection covering all backend route families |
-| `tests/postman/Development.postman_environment.json` | Environment template, without credentials |
-| `tests/postman/generate.mjs` | Readable source for requests, data and assertions |
-| `tests/postman/run.py` | Local Postman CLI execution, sanitized reports and recovery |
-| `tests/postman/route-coverage.md` | Route-to-request mapping; authored coverage, not execution evidence |
-| `tests/selenium/` | Python/pytest/Selenium page objects and UC032 tests |
-| `tests/qa_support.py` | Shared preflight, run lock, snapshot and recovery tools |
-| `tests/test_harness.py` | Offline checks for recovery safeguards and honest reporting |
-| `docs/qa/automation-milestones.md` | Delivery milestones |
+| Postman | AI-OUTLINE-01: valid prompt returns a usable outline, charges the configured outline price, and persists the outline/balance |
+| Postman | AI-OUTLINE-02: empty prompt returns HTTP 422 without consuming credits |
+| Postman | AI-OUTLINE-03: unauthenticated request returns HTTP 401 |
+| Selenium | TC-73 / UC032-01 and TC-74 / UC032-02: 30 scenarios covering valid Credit saves, invalid input, correction and persistence |
 
-- Website: `https://dev-slides.sbltcup.dev`
-- API: `https://dev-slides-api.sbltcup.dev/api/v1`
-- The runners and collection refuse a different API base. The authenticated
-  runners also require the release to identify itself as `develop`.
-- Current field contract: `pricePerLecture`, `pricePerSlide`, `pricePerAiEdit`,
-  `pricePerOutline`, `signupBonus`.
-- TC-73 / TC-UC032-01 and TC-74 / TC-UC032-02 use the Sprint 4 definitions.
-  The older TC-40 mapping is not used. TC-75 / TC-UC032-03 is explicitly excluded.
+The outline endpoint accepts `prompt`, not a separate slide-count field. This
+suite checks the returned structure rather than inventing an exact-count contract.
+It does not establish semantic teaching quality, AI stability, full slide
+generation, editing/chat, email, or UC032-03 coverage.
+
+The small API collection has **15 HTTP requests supporting three feature
+scenarios**: five setup requests, six scenario/readback requests and four cleanup
+requests. Supporting requests are labeled in the report. It creates one disposable
+user, makes at most one Gemini generation request, and does not retry it. This can
+consume provider quota and the configured outline price from the fixture's test
+credits. No global Credit configuration is written. The account is funded with
+the current outline price plus 10 application credits and deleted afterward.
+
+## Files
+
+- Active collection: `tests/postman/outline/AI-Outline.postman_collection.json`
+- Active environment template: `tests/postman/outline/Development.postman_environment.json`
+- Readable generator/checker: `tests/postman/outline/generate.mjs` and `check.mjs`
+- Runner: `tests/postman/run.py` (defaults to `outline`)
+- Selenium: `tests/selenium/` (test scope unchanged)
+
+The previous whole-backend collection stays at
+`tests/postman/ABSlider.postman_collection.json`, unchanged. It is not invoked by
+the default run or used to populate new outline results. Historical backend
+reports remain intact. Its commands require an explicit legacy mode; see the
+[optional backend guide](backend-regression-guide.md) only when resuming that work.
 
 ## One-time Windows setup
 
-Run from the **test branch checkout root**. Install Python 3.12 and Chrome if they
-are not already available. Commands use the venv executable directly, so changing
-PowerShell's execution policy or activating a script is unnecessary.
+Run from the QA branch checkout root. Install Python 3.12, Chrome and the official
+Postman CLI. Use the repository Node version for JavaScript tooling.
 
 ```powershell
 py -3.12 -m venv tests/selenium/.venv
 & ./tests/selenium/.venv/Scripts/python.exe -m pip install -r tests/selenium/requirements.txt
 Copy-Item tests/selenium/.env.example tests/selenium/.env
-```
-
-If Python is installed but `py` is unavailable, use its full executable path in
-the first command. On Linux, use `python3.12 -m venv ...` and `.venv/bin/python`.
-
-Edit the ignored `tests/selenium/.env` locally:
-
-```dotenv
-QA_ADMIN_EMAIL=<development QA admin email>
-QA_ADMIN_PASSWORD=<development QA admin password>
-QA_ALLOW_MUTATIONS=true
-```
-
-Only enable mutations during an **exclusive Credit-configuration QA window**.
-Both suites modify global development prices temporarily. The shared local lock
-prevents overlapping runs in this checkout, but cannot prevent another Admin or
-a different machine from changing the server. Keep both suites sequential.
-
-Selenium Manager resolves ChromeDriver automatically. If a proxy or offline
-environment prevents this, supply the matching executable via `QA_CHROMEDRIVER`.
-`QA_CHROME_BINARY` can point to a non-default Chrome installation.
-
-For local collection execution, install the official Postman CLI:
-
-```powershell
 npm.cmd install -g postman-cli@1.82.0
-postman --version
 ```
 
-Alternatively set `QA_POSTMAN_BINARY` to an existing `postman.exe` or
-`postman.cmd`. Node is only needed for npm installation and collection
-regeneration, not Selenium or Postman desktop. Use the repository's `.nvmrc`
-version for project Node work; do not modify the server/client dependency locks.
+Put QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD in that ignored `.env`, and set
+`QA_ALLOW_MUTATIONS=true` to authorize disposable test fixtures. Never commit
+credentials or populated Postman environments. If needed, set QA_POSTMAN_BINARY,
+QA_CHROMEDRIVER or QA_CHROME_BINARY to local executables. Selenium Manager normally
+resolves ChromeDriver automatically. A Postman cloud account is unnecessary.
 
-We use the v2.1 JSON collection and local JSON reporter. A Postman cloud account
-is unnecessary for these runs; cloud event reporting is disabled. Do not use
-`--output`, cloud collection IDs or `postman login` to run this package.
-The CLI may print a sign-in reminder even though a local run succeeds.
+Both packages target hosted development only:
+`https://dev-slides.sbltcup.dev` and
+`https://dev-slides-api.sbltcup.dev/api/v1`. The runner requires a develop release,
+ready dependencies and a valid QA Admin for fixture creation/cleanup. Gemini
+credentials/quota must be available on the backend. No local app or database is
+needed. Avoid concurrent Admin Credit changes; the local lock cannot coordinate
+other machines.
 
-## Recommended execution sequence
+## Run and review
 
-### 1. Public API smoke — no credentials or application writes
+API (the new small suite is the default):
 
 ```powershell
-& ./tests/selenium/.venv/Scripts/python.exe tests/postman/run.py --mode public
+& ./tests/selenium/.venv/Scripts/python.exe tests/postman/run.py
 ```
 
-Checks health/version and unauthenticated rejection. It is not proof that
-authenticated CRUD, Credit configuration or AI work.
-
-### 2. Core API tests
+Selenium, after the API run finishes:
 
 ```powershell
-& ./tests/selenium/.venv/Scripts/python.exe tests/postman/run.py --mode core
+& ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium --headless
 ```
 
-The run logs in as the configured Admin, snapshots all five Credit settings and
-creates three uniquely named disposable users. It covers authentication/profile,
-roles and ownership, Admin user operations, folders, blank lectures, slide
-operations, autosave, trash/restore/delete, presentation/export, Credit updates,
-AI request rejection without provider calls, usage/date validation and dashboard
-contract checks. It then restores the original configuration and deletes only
-the recorded fixtures. No email or successful AI request is part of this mode.
+Omit `--headless` to watch Chrome. Open
+`tests/postman/reports/latest_report.html` and
+`tests/selenium/reports/latest_report.html` afterward. The API report shows three
+scenario outcomes plus the actual setup/scenario/cleanup HTTP records and
+assertions. A provider error, invalid output, missing readback or unsuccessful
+cleanup is not a pass. Failed/skipped/blocked requests are never replaced by mock
+AI output. Source snapshots identify the files actually used for each run.
 
-Positive export checks can create a JSON object in development storage. If a URL
-is returned, the collection downloads it and compares the exported lecture. The
-API has no storage-object deletion endpoint; the sanitized recovery report lists
-remaining object paths for the storage owner. Database fixture cleanup does not
-claim to remove these objects. The documented inline-data fallback is accepted
-when `downloadUrl` is null. PDF rendering belongs to the frontend and is excluded.
+Selenium records raw screenshots of inputs, visible success/error feedback and
+refreshed persistence, with browser HTTP transactions and independent API
+readback. Partial selections cannot establish a complete case pass. The original
+Credit configuration is restored after Selenium, even if different from its
+80/10/5/5/100 test baseline.
 
-### 3. Selenium Credit cases
+Verify a saved run offline:
 
 ```powershell
-& ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium --junitxml=tests/selenium/reports/junit.xml
+& ./tests/selenium/.venv/Scripts/python.exe tests/verify_evidence.py tests/postman/reports/<run-id>
 ```
 
-Chrome is visible by default. Add `--headless` for an unattended run. Select a
-case with `-m uc032_01` or `-m uc032_02`. Each scenario gets a fresh browser and
-baseline; it does not depend on another scenario passing.
+Share the entire run folder to include linked screenshots, source and checksums.
+Review personal data first. Hashes detect changes against the original manifest;
+they are not signatures or trusted timestamps. Reports, runtime secrets, browser
+artifacts and `.venv` remain Git-ignored. No results are automatically published
+to Kiwi, Jira or Postman cloud. Swagger explores APIs; it does not replace test
+assertion evidence.
 
-| Case | Executed scenarios |
-| --- | --- |
-| TC-73 / TC-UC032-01 | Baseline `80/10/5/5/100`; save Chat-slide `7`, edit `3`, lecture `81`, outline `6`, then Chat-slide `1`. Refresh and compare all fields after each save. Restore baseline through the UI. |
-| TC-74 / TC-UC032-02 | Four AI cost fields × `0`, `-1`, `1.5`, `abc`, `5abc`, empty string and whitespace = 28 independent variants. Verify rejection, explanatory error, no false success and no persisted invalid values. |
-| TC-74 correction | Chat-slide `6` + edit `0` must not partially save; correct edit to `6`, save and verify `80/6/6/5/100`, then restore the baseline through the UI. |
+## Recovery
 
-There are **30 pytest scenarios**, aggregated into **two Kiwi cases**. Selecting
-only part of a case reports partial coverage, never a full case pass. The original
-pre-run server configuration is restored after the suite, even if it differed
-from the documented case baseline. Step screenshots, visible feedback, browser HTTP transactions and independent API readback
-support verification; browser actions remain Selenium actions, not API substitutes.
-
-### 4. Real AI — separate, explicit launch
-
-```powershell
-& ./tests/selenium/.venv/Scripts/python.exe tests/postman/run.py --mode ai
-```
-
-This makes four successful-provider attempts: outline, full lecture, single-slide
-edit and Chat edit. Each call checks its result, expected price, persisted balance
-and the corresponding usage record. Fixtures receive 1,000 application credits;
-the server still requires a working Gemini key/quota. There are no automatic
-provider retries. Unexpected AI actions or unavailable providers are reported,
-not converted into passes. This does not exercise TC-75's cross-session price
-change scenario. Run this only when intending to use the provider.
-
-## Using Postman desktop and email/OTP tests
-
-1. Import the collection and environment JSON files. Use a private/local
-   environment and fill `adminEmail`/`adminPassword` locally.
-2. Set `runMode` to `core`, `public`, `ai` or `email`. For writes, set
-   `allowMutations` to the string `true` during the exclusive QA window.
-3. Run **one top-level folder**, not the entire collection. Core and AI folders
-   include their own Setup and Cleanup. The Python runner is recommended because
-   it journals recovery before sending mutations.
-4. For email tests, use a **controlled, unused test mailbox** in `mailbox` and
-   set `runMode=email`. The flow registers and later deletes that test account.
-5. Run `Email 1 - Request registration OTP`; check the mailbox yourself.
-6. Enter the received six-digit code as `registrationOtp`, then run
-   `Email 2 - Register with received OTP` before the code expires.
-7. Run `Email 3 - Request password reset`; enter the new code as `resetOtp`.
-8. Run `Email 4 - Reset password and cleanup`. It checks old/new login behavior
-   and deletes only the registered fixture. Preserve the same local environment
-   between stages. Do not rerun stage 1 to resume a later stage.
-
-Successful email delivery and OTP use are manual integration evidence. Schema
-rejections in Core do not establish that email was delivered. No mailbox scraping
-or verification bypass is implemented. Never commit a populated environment
-export; it may contain passwords, bearer tokens and OTPs.
-
-## Reports, interruption and recovery
-
-- Postman: `tests/postman/reports/<run-id>/report.html`, `summary.json`, `junit.xml`.
-  The summary points to the separate recovery journal when writes occurred.
-- Selenium: `tests/selenium/reports/<run-id>/report.html`, `summary.json`, step
-  PNGs, checkpoint JSON, source snapshots, integrity manifest and JUnit output. Reports contain timestamps and the
-  authenticated run journal records the deployment SHA.
-- `PASSED` means all required checks executed and passed. `FAILED` means an
-  assertion or cleanup failed. `BLOCKED` means missing credentials, unavailable
-  dependencies or browser setup prevented execution. Excluded AI/email folders
-  remain unexecuted until separately launched. Product failures are not silently
-  marked xfail or patched by this QA change.
-- Runner exit codes: `0` complete/pass, `1` failure, `2` blocked for Postman;
-  pytest uses its standard failure/error codes and returns nonzero for blocked
-  scenarios. `--collect-only` is discovery, not execution evidence.
-- Raw CLI reports and runtime credential files are removed by the runner on
-  normal completion/failure; all report folders are Git-ignored. A hard process
-  kill can leave private runtime files in that ignored directory. Remove those
-  private files after recovering the run.
-
-Recover an interrupted CLI/Selenium run with its exact journal:
+The Python runner journals exact fixture identities before creation and verifies
+cleanup even after failed assertions. Admin deletion removes the fixture and its
+owned lecture/usage records. If interrupted, inspect the run's recovery journal:
 
 ```powershell
 & ./tests/selenium/.venv/Scripts/python.exe tests/qa_support.py --recover "tests/postman/reports/<run-id>/recovery.json"
 ```
 
-If `.qa-lock` remains after a hard kill, inspect its PID and confirm the process
-has ended, then remove that single lock file before recovery. Never remove an
-active run's lock. Recovery verifies configuration readback and exact fixture
-identities, refuses other environments, and can be repeated safely.
+A stale `tests/.qa-lock` should be removed only after confirming its PID has ended.
+Never remove an active lock. Outline recovery deletes only the run-owned user;
+it does not write global prices. Raw CLI JSON/private runtime environments are
+removed on ordinary completion, but a hard kill can leave ignored private files.
+Recover first and remove those private leftovers afterward.
 
-For an interrupted **Postman desktop** run, export its private environment to an
-ignored `*.local.json` file and recover with:
+## Postman desktop (optional)
 
-```powershell
-& ./tests/selenium/.venv/Scripts/python.exe tests/qa_support.py --postman-environment "tests/postman/interrupted.local.json"
-```
+Import only the two files in `tests/postman/outline/`. Fill Admin credentials in a
+private local environment and set `allowMutations` to `true`; keep `runMode=outline`.
+Run the entire collection once, not isolated scenario folders: setup creates the
+fixture and cleanup deletes it. The Python runner is preferred for journaled
+recovery. For an interrupted desktop run, privately export the environment to an
+ignored `.local.json` file and use `tests/qa_support.py --postman-environment <file>`.
+Never share that populated export. Do not rerun setup while a run is unfinished.
 
-Keep the original environment until recovery succeeds, then remove the private
-export. Email recovery identifies the exact recorded mailbox account ID and QA
-name; it never deletes an existing unrelated mailbox account. Unsuccessful
-cleanup is a failure, not a green run.
-
-## Maintaining and reviewing the packages
-
-```powershell
-node tests/postman/generate.mjs
-node tests/postman/check.mjs
-& ./tests/selenium/.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py' -v
-& ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium --collect-only -q
-```
-
-The checker compiles every generated JavaScript script and maps every current
-backend route to request IDs. The offline Python tests verify failure accounting,
-secret omission and recovery boundaries; they are not server acceptance tests.
-
-Commit the source, sanitized templates, coverage map and docs on
-`test/api-selenium-uc032`; review through a PR into `develop`. Do not commit `.env`,
-runtime exports, tokens, `.venv`, browser caches, screenshots or raw reports.
-The source code does not automatically publish results to Kiwi/Jira or Postman
-cloud. If attaching selected evidence manually, review it for user data first.
-
-References: [Selenium waits](https://www.selenium.dev/documentation/webdriver/waits/),
-[Selenium Manager](https://www.selenium.dev/documentation/selenium_manager/),
-[Postman scripts](https://learning.postman.com/docs/tests-and-scripts/write-scripts/test-scripts/),
-[Postman CLI installation](https://learning.postman.com/docs/postman-cli/postman-cli-installation/),
-[local report options](https://learning.postman.com/docs/postman-cli/postman-cli-reporters/).
-
-## Opening and checking visual evidence
-
-Open `tests/selenium/reports/latest_report.html` or
-`tests/postman/reports/latest_report.html` after a run. The report shows the real
-target, deployment, browser, timestamps and coverage state. A partial selection
-cannot establish a complete case pass. Expected HTTP 4xx responses can pass a
-negative API test; inspect the expected status and assertions.
-
-Selenium captures entered values, visible save/validation feedback, and refreshed
-persisted state before cleanup. Each checkpoint pairs the raw screenshot with
-expected/observed values, relevant browser HTTP transactions and, where applicable,
-independent API readback. Identical screens can be legitimate; image uniqueness
-alone is not a pass criterion. Capture requirements must be met before passing.
-
-Each completed run includes `integrity.json` and a snapshot of its test source.
-Verify it offline (replace the directory with the exact run you are reviewing):
+## Offline maintenance
 
 ```powershell
-& ./tests/selenium/.venv/Scripts/python.exe tests/verify_evidence.py tests/selenium/reports/<run-id>
+node tests/postman/outline/generate.mjs
+node tests/postman/outline/check.mjs
+& ./tests/selenium/.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py' -q
 ```
 
-Share the whole run directory to preserve screenshots and linked evidence. Review
-it for personal data first. Hashes detect changes against the manifest; they do
-not provide a digital signature, trusted timestamp or independently witnessed run.
-Reports and screenshots remain ignored by Git.
+The checker validates the reduced scope, compiles scripts, rejects retry loops and
+configuration writes, and checks the sanitized environment. Offline checks are
+not live acceptance results. [Earlier evidence review](evidence-review.md) records
+the broader historical runs; it is not evidence for the new outline suite.
 
-To check failure capture intentionally, run this diagnostic separately:
+To check screenshot failure capture intentionally, separately run
+`python -m pytest tests/selenium/evidence_canary.py --headless --evidence-diagnostic`
+with the QA venv. It deliberately exits 1, restores configuration, and writes under
+`reports/diagnostics/` without replacing the main Selenium report. It is a harness
+check, not a product defect or Kiwi execution.
 
-```powershell
-& ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium/evidence_canary.py --headless --evidence-diagnostic
-```
-
-It deliberately fails after real validation feedback, restores configuration,
-and writes under `reports/diagnostics/`. Exit code 1 is expected. It is a harness
-check, not an application defect or a Kiwi result, and does not replace the main
-latest report. Normal suite discovery excludes it.
-
-See [the evidence review](evidence-review.md) for verified runs and limitations.
-Swagger documents and invokes APIs; it does not replace assertion results or
-prove that a scenario ran.
+See [the outline verification record](outline-verification.md) for the new suite's live result and its limits.

@@ -1,0 +1,757 @@
+{
+  "info": {
+    "name": "ABSlider - AI outline (3 scenarios)",
+    "description": "Default small suite: valid outline, empty prompt rejection, unauthenticated rejection. One disposable user, one successful-provider attempt, no retries. Setup/readback/cleanup requests are supporting evidence, not extra feature scenarios. Never run against production. Use the Python runner for journaled cleanup.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "AI outline - three scenarios",
+      "item": [
+        {
+          "name": "Setup - one disposable QA user",
+          "item": [
+            {
+              "name": "API-901 Verify development release",
+              "id": "e3fe291d4c83ee2970b5c1a2c4edae97",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/version",
+                "header": [],
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "\nif (pm.environment.get('managedRun') !== 'true') {\n  if (pm.environment.get('runId') && pm.environment.get('runComplete') !== 'true') { pm.execution.skipRequest(); pm.execution.setNextRequest(null); throw new Error('Recover the unfinished fixture run first'); }\n  pm.environment.set('runId', pm.variables.replaceIn('{{$guid}}').replace(/-/g,''));\n}\npm.environment.set('runComplete','false');\npm.environment.set('fixturePassword','Qa9!'+pm.variables.replaceIn('{{$guid}}'));\npm.environment.set('userAEmail','qa-'+pm.environment.get('runId')+'-a@example.com');\nfor (const key of ['userAId','userAToken','userARefresh','aiLectureId','expectedBalance','generatedOutline']) pm.environment.unset(key);\n"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Develop environment\", () => { pm.expect(d.release.environment).to.eql('develop'); });if(d.release.environment!=='develop'){pm.execution.setNextRequest(null);throw new Error('Development release required');} }",
+                      "if (pm.response.code !== 200 || j.success !== true) pm.execution.setNextRequest(null);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-902 Login QA Admin for fixture setup",
+              "id": "e2568d56bb087b0eae2ddecb341f2926",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/auth/login",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Admin role\", () => { pm.expect(d.user.role).to.eql('admin'); });if(d.user.role!=='admin'){pm.execution.setNextRequest(null);throw new Error('QA Admin required');}pm.environment.set(\"adminToken\", d.accessToken);pm.environment.set(\"adminRefresh\", d.refreshToken); }",
+                      "if (pm.response.code !== 200 || j.success !== true) pm.execution.setNextRequest(null);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-903 Read outline price - no configuration write",
+              "id": "17a6b80b8458a592940eae3659b0b9df",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/admin/credit-config",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Positive integer outline price\", () => { pm.expect(Number.isSafeInteger(d.pricePerOutline) && d.pricePerOutline>0).to.eql(true); });if(!Number.isSafeInteger(d.pricePerOutline)||d.pricePerOutline<=0){pm.execution.setNextRequest(null);throw new Error('Invalid outline price');}pm.environment.set(\"outlinePrice\", d.pricePerOutline);pm.environment.set(\"fixtureBalance\", d.pricePerOutline + 10); }",
+                      "if (pm.response.code !== 200 || j.success !== true) pm.execution.setNextRequest(null);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-904 Create one disposable user",
+              "id": "ec13b57b2da3b6dd44ce3e892d346705",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/admin/users",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"QA-{{runId}}-A\",\n  \"email\": \"{{userAEmail}}\",\n  \"password\": \"{{fixturePassword}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const body=JSON.parse(pm.request.body.raw); body.creditBalance=Number(pm.environment.get('fixtureBalance')); pm.request.body.update(JSON.stringify(body));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(201); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 201) { pm.test(\"Exact QA email\", () => { pm.expect(d.email).to.eql(pm.environment.get(\"userAEmail\")); });pm.test(\"Fixture role\", () => { pm.expect(d.role).to.eql('user'); });pm.test(\"Starting balance\", () => { pm.expect(d.creditBalance).to.eql(Number(pm.environment.get(\"fixtureBalance\"))); });pm.environment.set(\"userAId\", d._id); }",
+                      "if (pm.response.code !== 201 || j.success !== true) pm.execution.setNextRequest(null);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-905 Login disposable user",
+              "id": "486aa603562b7ffec8adb404798766c7",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/auth/login",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"{{userAEmail}}\",\n  \"password\": \"{{fixturePassword}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Exact fixture user\", () => { pm.expect(d.user.id).to.eql(pm.environment.get(\"userAId\")); });pm.environment.set(\"userAToken\", d.accessToken);pm.environment.set(\"userARefresh\", d.refreshToken); }",
+                      "if (pm.response.code !== 200 || j.success !== true) pm.execution.setNextRequest(null);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Scenario 3 - authentication required",
+          "item": [
+            {
+              "name": "API-906 AI-OUTLINE-03 Reject request without authentication",
+              "id": "ab203404f04e5e2511be8cc46172eab5",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/lectures/generate-outline",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Explain addition of natural numbers with simple examples.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(401); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(false); });",
+                      "pm.test(\"Explanatory error\", () => { pm.expect(j.message).to.be.a('string').and.not.empty; });",
+                      "if (pm.response.code === 401) {  }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Scenario 2 - invalid prompt",
+          "item": [
+            {
+              "name": "API-907 AI-OUTLINE-02 Reject empty prompt",
+              "id": "1aae6378507b971357547a0ba8e9f932",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/lectures/generate-outline",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{userAToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(422); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(false); });",
+                      "pm.test(\"Explanatory error\", () => { pm.expect(j.message).to.be.a('string').and.not.empty; });",
+                      "if (pm.response.code === 422) {  }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-908 Rejected requests did not consume credits",
+              "id": "438d3c3ce0f16a5936d1c2858b5cf104",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/auth/me",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{userAToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Balance unchanged\", () => { pm.expect(d.creditBalance).to.eql(Number(pm.environment.get(\"fixtureBalance\"))); }); }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Scenario 1 - real outline generation",
+          "item": [
+            {
+              "name": "API-909 AI-OUTLINE-01 Generate a real structured outline",
+              "id": "e69d4c20cbe4b1708015c30bf4cf01bb",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/lectures/generate-outline",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{userAToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"QA-{{runId}}: Create an introductory lesson outline explaining addition of natural numbers with examples 2 + 3 = 5 and 4 + 1 = 5.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.environment.set(\"aiLectureId\", d.lecture && d.lecture._id);pm.environment.set(\"generatedOutline\", JSON.stringify(d.outline));pm.environment.set(\"expectedBalance\", Number(pm.environment.get(\"fixtureBalance\"))-Number(pm.environment.get(\"outlinePrice\")));pm.test(\"Usable structured outline\", () => { pm.expect(d.outline.title).to.be.a('string').and.not.empty; pm.expect(d.outline.sections).to.be.an('array').and.not.empty; for(const section of d.outline.sections){pm.expect(section.heading).to.be.a('string').and.not.empty;pm.expect(section.bullets).to.be.an('array');for(const bullet of section.bullets)pm.expect(bullet).to.be.a('string');} });pm.test(\"Expected outline charge\", () => { pm.expect(d.creditSpent).to.eql(Number(pm.environment.get(\"outlinePrice\"))); });pm.test(\"Balance after charge\", () => { pm.expect(d.creditBalance).to.eql(Number(pm.environment.get(\"expectedBalance\"))); });pm.test(\"Lecture belongs to fixture\", () => { pm.expect(d.lecture.userId).to.eql(pm.environment.get(\"userAId\")); }); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-910 Verify charged balance independently",
+              "id": "809aa02b4e2c205d18ca5de51a923d26",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/auth/me",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{userAToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Persisted balance\", () => { pm.expect(d.creditBalance).to.eql(Number(pm.environment.get(\"expectedBalance\"))); }); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-911 Verify saved outline independently",
+              "id": "3dc5a5610b28f3d8c7c10f211936573a",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/lectures/{{aiLectureId}}",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{userAToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if(!/^[a-f0-9]{24}$/i.test(pm.environment.get('aiLectureId')||''))pm.execution.skipRequest();"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Persisted generated outline\", () => { pm.expect(d.outline).to.eql(JSON.parse(pm.environment.get(\"generatedOutline\"))); });pm.test(\"Correct owner\", () => { pm.expect(d.userId).to.eql(pm.environment.get(\"userAId\")); }); }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Cleanup - remove only this run fixture",
+          "item": [
+            {
+              "name": "API-912 Revoke fixture refresh session",
+              "id": "de007dd04213e82dc9ef41df62144f5e",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/auth/logout",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"{{userARefresh}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) {  }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-913 Delete disposable user and owned lecture",
+              "id": "de306a2e04f016a40523d5d30d4411aa",
+              "request": {
+                "method": "DELETE",
+                "url": "{{baseUrl}}/admin/users/{{userAId}}",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if(!/^[a-f0-9]{24}$/i.test(pm.environment.get('userAId')||'')){pm.execution.skipRequest();throw new Error('No verified fixture ID');}"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) {  }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-914 Verify fixture removed",
+              "id": "ef60851991a33090aa5491195a16bd48",
+              "request": {
+                "method": "GET",
+                "url": "{{baseUrl}}/admin/users?search={{userAEmail}}",
+                "header": [],
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminToken}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.test(\"Exact fixture absent\", () => { pm.expect(d.items.some(u=>u.email===pm.environment.get(\"userAEmail\"))).to.eql(false); }); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "API-915 Logout QA Admin",
+              "id": "9aa15dae9f58e838a9a08b98cfa17df6",
+              "request": {
+                "method": "POST",
+                "url": "{{baseUrl}}/auth/logout",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"{{adminRefresh}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Exact HTTP status\", () => { pm.expect(pm.response.code).to.eql(200); });",
+                      "let j; try { j = pm.response.json(); } catch (_) { j = {}; } const d = j.data;",
+                      "pm.test(\"Success envelope\", () => { pm.expect(j.success).to.eql(true); });",
+                      "if (pm.response.code === 200) { pm.environment.set(\"runComplete\", 'true'); }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.environment.get('baseUrl') !== 'https://dev-slides-api.sbltcup.dev/api/v1' || pm.environment.get('runMode') !== 'outline' || pm.environment.get('allowMutations') !== 'true') { pm.execution.skipRequest(); pm.execution.setNextRequest(null); throw new Error('Select outline mode on hosted development and explicitly enable fixture writes and one Gemini attempt'); }"
+        ]
+      }
+    }
+  ]
+}

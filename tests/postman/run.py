@@ -25,7 +25,30 @@ from evidence_support import SECRET_KEY, safe_text, safe_data, safe_url, source_
 from reporting import publish
 
 HERE = Path(__file__).resolve().parent
-FOLDERS = {"public": "Public smoke", "core": "Core", "ai": "AI integration"}
+FOLDERS = {"outline": "AI outline - three scenarios", "public": "Public smoke", "core": "Core", "ai": "AI integration"}
+
+
+def suite_paths(mode):
+    folder = HERE / "outline" if mode == "outline" else HERE
+    return (folder / ("AI-Outline.postman_collection.json" if mode == "outline" else "ABSlider.postman_collection.json"),
+            folder / "coverage.json")
+
+
+def scenario_results(inventory, rows):
+    observed = {row.get("id"): row for row in rows}
+    result = {}
+    for case in sorted({item["scenario"] for item in inventory if item.get("scenario")}):
+        required = [item for item in inventory if item.get("scenario") == case]
+        states = [observed.get(item["itemId"], {}).get("status", "NOT_RUN") for item in required]
+        result[case] = "FAILED" if "FAILED" in states else "PASSED" if all(s == "PASSED" for s in states) else "NOT_RUN"
+    return result
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Run the small AI outline suite (default); backend regression is optional.")
+    parser.add_argument("--mode", choices=FOLDERS, default="outline",
+                        help="Default: three outline scenarios. core/public/ai explicitly opt into the retained backend suite.")
+    return parser.parse_args(argv)
 
 
 def leaf_count(item):
@@ -86,11 +109,14 @@ def find_secrets(value):
     return result
 
 
-def sanitized_results(raw):
+def sanitized_results(raw, inventory=None):
     run = raw.get("run", raw)
     executions = run.get("executions", [])
     rows, objects = [], []
-    expected = {row["id"]: row["status"] for row in json.loads((HERE / "coverage.json").read_text(encoding="utf-8"))}
+    if inventory is None:
+        inventory = json.loads((HERE / "coverage.json").read_text(encoding="utf-8"))
+    expected = {row["id"]: row["status"] for row in inventory}
+    labels = {row["id"]: row for row in inventory}
     for execution in executions:
         request = execution.get("requestExecuted", execution.get("request", {}))
         response = execution.get("response") or {}
@@ -111,6 +137,7 @@ def sanitized_results(raw):
         method = request.get("method")
         name = request.get("name", execution.get("item", {}).get("name", "Unnamed request"))
         match = re.match(r"(API-\d+)\b", name)
+        label = labels.get(match.group(1), {}) if match else {}
         metadata_errors = []
         if not method or not endpoint:
             metadata_errors.append("Executed method or URL missing from CLI evidence")
@@ -127,6 +154,8 @@ def sanitized_results(raw):
                      "request": {"method": method or "UNKNOWN", "url": endpoint, "body": safe_data(request_body, secrets)},
                      "response": {"httpStatus": response.get("code"), "body": safe_data(body, secrets)},
                      "redaction": "Credentials, JWTs, OTPs, real email addresses and signed query parameters are redacted."})
+        rows[-1]["purpose"] = label.get("purpose", "Backend regression")
+        rows[-1]["scenario"] = label.get("scenario")
         if isinstance(body, dict) and isinstance(body.get("data"), dict) and body["data"].get("downloadUrl"):
             objects.append(urlparse(body["data"]["downloadUrl"]).path)
     errors = len(run.get("failures", [])) + int(bool(run.get("runError")))
@@ -178,15 +207,13 @@ def reports(directory, summary):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=FOLDERS, default="core")
-    args = parser.parse_args()
+    args = parse_args()
     directory = HERE / "reports" / uuid.uuid4().hex
     directory.mkdir(parents=True)
     summary = {"schemaVersion": 2, "kind": "postman", "runId": directory.name,
                "mode": args.mode, "started": now(), "status": "RUNNING", "requests": [],
                "expectedRequests": 0, "cleanup": "not-started", "runErrors": [],
-               "target": "Not yet verified", "source": source_snapshot(directory, "postman")}
+               "target": "Not yet verified", "source": source_snapshot(directory, "postman-outline" if args.mode == "outline" else "postman")}
     publish(directory, summary)
     api, recovery_path = None, None
     env_path, raw_path = directory / "runtime.local.json", directory / "raw.local.json"
@@ -196,13 +223,18 @@ def main():
         resolved = shutil.which(os.getenv("QA_POSTMAN_BINARY", "postman"))
         if not resolved:
             raise Blocked("Postman CLI not found. Set QA_POSTMAN_BINARY or install postman-cli.")
-        collection = json.loads((HERE / "ABSlider.postman_collection.json").read_text(encoding="utf-8"))
+        collection_path, inventory_path = suite_paths(args.mode)
+        collection = json.loads(collection_path.read_text(encoding="utf-8"))
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        summary["suite"] = "AI outline (3 scenarios)" if args.mode == "outline" else "Optional backend regression"
         folder = next(item for item in collection["item"] if item["name"] == FOLDERS[args.mode])
         def leaves(item):
             return [n for child in item["item"] for n in (leaves(child) if "item" in child else [child])]
         planned = leaves(folder)
         summary["plannedRequests"] = [{"id": item["id"], "name": item["name"]} for item in planned]
         summary["expectedRequests"] = len(summary["plannedRequests"])
+        if args.mode == "outline":
+            summary["cases"] = scenario_results(inventory, [])
         api = Api(config)
         with exclusive_run() if args.mode != "public" else nullcontext():
             try:
@@ -211,7 +243,10 @@ def main():
                           "managedRun": "true", "adminEmail": config["email"], "adminPassword": config["password"]}
                 if args.mode != "public":
                     summary["release"] = api.preflight()
-                    recovery_path, manifest = new_manifest(api, HERE / "reports", "postman-" + args.mode)
+                    if args.mode == "outline":
+                        summary["creditConfig"] = api.credit()
+                    recovery_path, manifest = new_manifest(api, HERE / "reports", "postman-" + args.mode,
+                        restore_config=args.mode != "outline", fixture_letters="a" if args.mode == "outline" else "abc")
                     summary["recoveryFile"] = str(recovery_path)
                     summary["originalConfig"] = manifest["originalConfig"]
                     values["runId"] = manifest["runId"]
@@ -221,9 +256,9 @@ def main():
                 publish(directory, summary)
                 write_json(env_path, {"name": "Runtime local only", "values": [
                     {"key": k, "value": v, "enabled": True} for k, v in values.items()]})
-                command = [resolved, "collection", "run", str(HERE / "ABSlider.postman_collection.json"),
+                command = [resolved, "collection", "run", str(collection_path),
                            "-e", str(env_path), "-i", FOLDERS[args.mode], "--no-report-events",
-                           "--ignore-redirects", "--timeout-request", "180000" if args.mode == "ai" else "30000",
+                           "--ignore-redirects", "--timeout-request", "180000" if args.mode in ("ai", "outline") else "30000",
                            "--timeout", "900000" if args.mode == "ai" else "300000",
                            "-r", "json", "--reporter-json-export", str(raw_path)]
                 completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -231,8 +266,10 @@ def main():
                 if not raw_path.exists():
                     raise Blocked("Postman CLI did not produce a local JSON report; check CLI installation/version.")
                 raw = json.loads(raw_path.read_text(encoding="utf-8"))
-                rows, objects, errors = sanitized_results(raw)
+                rows, objects, errors = sanitized_results(raw, inventory)
                 summary["requests"], summary["storageObjects"] = rows, objects
+                if args.mode == "outline":
+                    summary["cases"] = scenario_results(inventory, rows)
                 summary["runtimeSummary"] = safe_data(raw.get("run", raw).get("summary", {}))
                 if args.mode == "public":
                     for execution in raw.get("run", raw).get("executions", []):
@@ -257,6 +294,8 @@ def main():
                     try:
                         recover(api, recovery_path)
                         summary["cleanup"] = "verified"
+                        if args.mode == "outline":
+                            assert api.credit() == summary["creditConfig"], "Credit configuration changed during outline run; no global configuration was written by this suite."
                         summary["restoredConfig"] = api.credit_observation
                     except (AssertionError, Blocked) as error:
                         summary["status"], summary["cleanup"] = "FAILED", "failed"

@@ -75,8 +75,8 @@ def source_snapshot(directory, kind):
             ("conftest.py", "evidence.py", "evidence_canary.py", "test_uc032_01.py", "test_uc032_02.py", "requirements.txt", "pytest.ini")]
         files += sorted((ROOT / "selenium/pages").glob("*.py"))
     else:
-        files = common + [ROOT / "postman" / name for name in
-            ("run.py", "ABSlider.postman_collection.json", "coverage.json")]
+        names = ("run.py", "outline/generate.mjs", "outline/AI-Outline.postman_collection.json", "outline/coverage.json") if kind == "postman-outline" else ("run.py", "ABSlider.postman_collection.json", "coverage.json")
+        files = common + [ROOT / "postman" / name for name in names]
     entries = []
     for source in files:
         if not source.exists():
