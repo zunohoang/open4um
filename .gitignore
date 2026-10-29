@@ -35,6 +35,9 @@ minio_data/
 coverage/
 .nyc_output/
 
+# Generated professor report and validation outputs
+/docs/qa/reports/
+
 # IDE & Editor configs
 .vscode/*
 !.vscode/extensions.json
