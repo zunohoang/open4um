@@ -15,7 +15,9 @@ spec.loader.exec_module(runner)
 
 class ReportTests(unittest.TestCase):
     def execution(self, tests, errors=None):
-        return {"requestExecuted": {"name": "API-001 example", "headers": [{"value": "TOP_SECRET"}]},
+        return {"requestExecuted": {"name": "API-001 example", "method": "GET",
+                "url": {"protocol": "https", "host": ["dev-slides-api", "sbltcup", "dev"], "path": ["api", "v1", "health"]},
+                "headers": [{"value": "TOP_SECRET"}]},
                 "response": {"code": 200, "responseTime": 1}, "tests": tests, "errors": errors or []}
 
     def test_failed_and_skipped_assertions_are_not_passes(self):

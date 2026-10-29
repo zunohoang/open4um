@@ -128,8 +128,8 @@ baseline; it does not depend on another scenario passing.
 There are **30 pytest scenarios**, aggregated into **two Kiwi cases**. Selecting
 only part of a case reports partial coverage, never a full case pass. The original
 pre-run server configuration is restored after the suite, even if it differed
-from the documented case baseline. Failure screenshots and observed typed values
-support diagnosis; browser actions remain Selenium actions, not API substitutes.
+from the documented case baseline. Step screenshots, visible feedback, browser HTTP transactions and independent API readback
+support verification; browser actions remain Selenium actions, not API substitutes.
 
 ### 4. Real AI — separate, explicit launch
 
@@ -173,8 +173,8 @@ export; it may contain passwords, bearer tokens and OTPs.
 
 - Postman: `tests/postman/reports/<run-id>/report.html`, `summary.json`, `junit.xml`.
   The summary points to the separate recovery journal when writes occurred.
-- Selenium: `tests/selenium/reports/<run-id>/report.html`, `summary.json`, failure
-  PNGs, and the requested JUnit output. Reports contain timestamps and the
+- Selenium: `tests/selenium/reports/<run-id>/report.html`, `summary.json`, step
+  PNGs, checkpoint JSON, source snapshots, integrity manifest and JUnit output. Reports contain timestamps and the
   authenticated run journal records the deployment SHA.
 - `PASSED` means all required checks executed and passed. `FAILED` means an
   assertion or cleanup failed. `BLOCKED` means missing credentials, unavailable
@@ -217,7 +217,7 @@ cleanup is a failure, not a green run.
 ```powershell
 node tests/postman/generate.mjs
 node tests/postman/check.mjs
-& ./tests/selenium/.venv/Scripts/python.exe -m unittest discover -s tests -p test_harness.py -v
+& ./tests/selenium/.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py' -v
 & ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium --collect-only -q
 ```
 
@@ -236,3 +236,44 @@ References: [Selenium waits](https://www.selenium.dev/documentation/webdriver/wa
 [Postman scripts](https://learning.postman.com/docs/tests-and-scripts/write-scripts/test-scripts/),
 [Postman CLI installation](https://learning.postman.com/docs/postman-cli/postman-cli-installation/),
 [local report options](https://learning.postman.com/docs/postman-cli/postman-cli-reporters/).
+
+## Opening and checking visual evidence
+
+Open `tests/selenium/reports/latest_report.html` or
+`tests/postman/reports/latest_report.html` after a run. The report shows the real
+target, deployment, browser, timestamps and coverage state. A partial selection
+cannot establish a complete case pass. Expected HTTP 4xx responses can pass a
+negative API test; inspect the expected status and assertions.
+
+Selenium captures entered values, visible save/validation feedback, and refreshed
+persisted state before cleanup. Each checkpoint pairs the raw screenshot with
+expected/observed values, relevant browser HTTP transactions and, where applicable,
+independent API readback. Identical screens can be legitimate; image uniqueness
+alone is not a pass criterion. Capture requirements must be met before passing.
+
+Each completed run includes `integrity.json` and a snapshot of its test source.
+Verify it offline (replace the directory with the exact run you are reviewing):
+
+```powershell
+& ./tests/selenium/.venv/Scripts/python.exe tests/verify_evidence.py tests/selenium/reports/<run-id>
+```
+
+Share the whole run directory to preserve screenshots and linked evidence. Review
+it for personal data first. Hashes detect changes against the manifest; they do
+not provide a digital signature, trusted timestamp or independently witnessed run.
+Reports and screenshots remain ignored by Git.
+
+To check failure capture intentionally, run this diagnostic separately:
+
+```powershell
+& ./tests/selenium/.venv/Scripts/python.exe -m pytest tests/selenium/evidence_canary.py --headless --evidence-diagnostic
+```
+
+It deliberately fails after real validation feedback, restores configuration,
+and writes under `reports/diagnostics/`. Exit code 1 is expected. It is a harness
+check, not an application defect or a Kiwi result, and does not replace the main
+latest report. Normal suite discovery excludes it.
+
+See [the evidence review](evidence-review.md) for verified runs and limitations.
+Swagger documents and invokes APIs; it does not replace assertion results or
+prove that a scenario ran.

@@ -75,6 +75,9 @@ class Api:
                                          json=body, timeout=(10, 40), allow_redirects=False)
         except requests.RequestException as error:
             raise Blocked(f"API transport unavailable: {type(error).__name__}") from None
+        self.last_http = {"method": method, "url": self.config["api"] + path,
+                          "httpStatus": response.status_code,
+                          "responseMs": round(response.elapsed.total_seconds() * 1000, 2), "received": now()}
         if response.status_code != expected:
             # Never expose request headers, credentials or response bodies in exceptions.
             raise AssertionError(f"{method} {path.split('?')[0]}: expected {expected}, got {response.status_code}")
@@ -113,6 +116,7 @@ class Api:
         assert set(BASELINE).issubset(data), "Required five-field Credit contract is missing"
         result = {key: data[key] for key in BASELINE}
         assert all(type(v) is int and v > 0 for v in result.values()), "Invalid stored Credit configuration"
+        self.credit_observation = {**self.last_http, "body": result}
         return result
 
     def set_credit(self, values):

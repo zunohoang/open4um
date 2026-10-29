@@ -11,3 +11,10 @@ Recorded live results and limitations are in
 
 TC-75 / UC032-03 and CI integration are excluded. Generated reports and local
 credentials are ignored by Git. Authored coverage is not execution evidence.
+
+Open `selenium/reports/latest_report.html` and `postman/reports/latest_report.html`
+for the latest local execution. [Evidence review](../docs/qa/evidence-review.md)
+explains step screenshots, transaction records and verification. Run
+`python tests/verify_evidence.py <run-directory>` using the QA venv before sharing
+an entire run folder. A screenshot or authored endpoint list alone is not proof
+that assertions passed.
