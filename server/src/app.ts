@@ -5,6 +5,7 @@ import { authRouter } from '@/routes/auth.routes'
 import { lectureRouter } from '@/routes/lecture.routes'
 import { folderRouter } from '@/routes/folder.routes'
 import { adminRouter } from '@/routes/admin.routes'
+import { docsRouter } from '@/routes/docs.routes'
 import { errorMiddleware } from '@/middlewares/error.middleware'
 import { requestLogMiddleware } from '@/middlewares/requestLog.middleware'
 import { corsOptions } from '@/config/cors'
@@ -15,6 +16,7 @@ app.use(cors(corsOptions))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(requestLogMiddleware)
+app.use(docsRouter)
 app.use('/api/v1', healthRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/lectures', lectureRouter)
