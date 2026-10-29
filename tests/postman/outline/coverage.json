@@ -1,0 +1,152 @@
+[
+  {
+    "id": "API-901",
+    "itemId": "e3fe291d4c83ee2970b5c1a2c4edae97",
+    "name": "Verify development release",
+    "method": "GET",
+    "route": "/version",
+    "status": 200,
+    "purpose": "Setup - one disposable QA user",
+    "scenario": null
+  },
+  {
+    "id": "API-902",
+    "itemId": "e2568d56bb087b0eae2ddecb341f2926",
+    "name": "Login QA Admin for fixture setup",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "purpose": "Setup - one disposable QA user",
+    "scenario": null
+  },
+  {
+    "id": "API-903",
+    "itemId": "17a6b80b8458a592940eae3659b0b9df",
+    "name": "Read outline price - no configuration write",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "purpose": "Setup - one disposable QA user",
+    "scenario": null
+  },
+  {
+    "id": "API-904",
+    "itemId": "ec13b57b2da3b6dd44ce3e892d346705",
+    "name": "Create one disposable user",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "purpose": "Setup - one disposable QA user",
+    "scenario": null
+  },
+  {
+    "id": "API-905",
+    "itemId": "486aa603562b7ffec8adb404798766c7",
+    "name": "Login disposable user",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "purpose": "Setup - one disposable QA user",
+    "scenario": null
+  },
+  {
+    "id": "API-906",
+    "itemId": "ab203404f04e5e2511be8cc46172eab5",
+    "name": "AI-OUTLINE-03 Reject request without authentication",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 401,
+    "purpose": "Scenario 3 - authentication required",
+    "scenario": "AI-OUTLINE-03"
+  },
+  {
+    "id": "API-907",
+    "itemId": "1aae6378507b971357547a0ba8e9f932",
+    "name": "AI-OUTLINE-02 Reject empty prompt",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 422,
+    "purpose": "Scenario 2 - invalid prompt",
+    "scenario": "AI-OUTLINE-02"
+  },
+  {
+    "id": "API-908",
+    "itemId": "438d3c3ce0f16a5936d1c2858b5cf104",
+    "name": "Rejected requests did not consume credits",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "purpose": "Scenario 2 - invalid prompt",
+    "scenario": "AI-OUTLINE-02"
+  },
+  {
+    "id": "API-909",
+    "itemId": "e69d4c20cbe4b1708015c30bf4cf01bb",
+    "name": "AI-OUTLINE-01 Generate a real structured outline",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 200,
+    "purpose": "Scenario 1 - real outline generation",
+    "scenario": "AI-OUTLINE-01"
+  },
+  {
+    "id": "API-910",
+    "itemId": "809aa02b4e2c205d18ca5de51a923d26",
+    "name": "Verify charged balance independently",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "purpose": "Scenario 1 - real outline generation",
+    "scenario": "AI-OUTLINE-01"
+  },
+  {
+    "id": "API-911",
+    "itemId": "3dc5a5610b28f3d8c7c10f211936573a",
+    "name": "Verify saved outline independently",
+    "method": "GET",
+    "route": "/lectures/{{aiLectureId}}",
+    "status": 200,
+    "purpose": "Scenario 1 - real outline generation",
+    "scenario": "AI-OUTLINE-01"
+  },
+  {
+    "id": "API-912",
+    "itemId": "de007dd04213e82dc9ef41df62144f5e",
+    "name": "Revoke fixture refresh session",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "purpose": "Cleanup - remove only this run fixture",
+    "scenario": null
+  },
+  {
+    "id": "API-913",
+    "itemId": "de306a2e04f016a40523d5d30d4411aa",
+    "name": "Delete disposable user and owned lecture",
+    "method": "DELETE",
+    "route": "/admin/users/{{userAId}}",
+    "status": 200,
+    "purpose": "Cleanup - remove only this run fixture",
+    "scenario": null
+  },
+  {
+    "id": "API-914",
+    "itemId": "ef60851991a33090aa5491195a16bd48",
+    "name": "Verify fixture removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userAEmail}}",
+    "status": 200,
+    "purpose": "Cleanup - remove only this run fixture",
+    "scenario": null
+  },
+  {
+    "id": "API-915",
+    "itemId": "9aa15dae9f58e838a9a08b98cfa17df6",
+    "name": "Logout QA Admin",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "purpose": "Cleanup - remove only this run fixture",
+    "scenario": null
+  }
+]

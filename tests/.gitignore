@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+reports/
+*.local.json
+*.local
+.env
+.qa-lock
+postman-cli-reports/
