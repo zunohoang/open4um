@@ -96,7 +96,12 @@ export const autosaveLecture = asyncHandler(async (req, res) => {
     String(req.params.id),
     req.body
   )
-  ok(res, { lecture, savedAt: lecture.updatedAt })
+  ok(
+    res,
+    req.query.view === 'receipt'
+      ? { savedAt: lecture.updatedAt }
+      : { lecture, savedAt: lecture.updatedAt }
+  )
 })
 
 export const deleteLecture = asyncHandler(async (req, res) => {

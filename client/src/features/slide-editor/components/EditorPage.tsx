@@ -38,7 +38,7 @@ import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
 import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
-
+import { createSerialAutosaver } from '../utils/autosave'
 const resolveProposalTargetIndex = (
   slides: Slide[],
   proposedSlide: Slide,
@@ -168,6 +168,8 @@ export const EditorPage = ({
     null
   )
   const lectureRef = useRef(lecture)
+  const [autosaver] = useState(() => createSerialAutosaver(editorApi.autosave))
+  const pendingSavesRef = useRef(0)
   useEffect(() => {
     lectureRef.current = lecture
   }, [lecture])
@@ -222,17 +224,29 @@ export const EditorPage = ({
       }
 
       // 2. Nếu có mạng: gửi lên server
+      pendingSavesRef.current += 1
       try {
-        await editorApi.autosave(payload)
-        clearOfflineDraft(payload._id)
-        setSaveStatus('saved')
+        await autosaver.save(payload)
+        if (lectureRef.current?._id === payload._id) {
+          if (lectureRef.current === toSave) {
+            clearOfflineDraft(payload._id)
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'saved')
+          } else {
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'unsaved')
+          }
+        }
         if (!isAuto) {
           showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
         }
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
-        saveOfflineDraft(payload)
-        setSaveStatus('offline_saved')
+        const latestLecture =
+          lectureRef.current?._id === payload._id ? lectureRef.current : payload
+        saveOfflineDraft(latestLecture)
+        if (lectureRef.current?._id === payload._id)
+          setSaveStatus(
+            pendingSavesRef.current > 1 ? 'saving' : 'offline_saved'
+          )
         // Lưu tự động lỗi thì chỉ hiện trạng thái "Đang lưu offline", tránh toast lặp mỗi 2 giây
         if (!isAuto) {
           showToast(
@@ -240,9 +254,11 @@ export const EditorPage = ({
             'error'
           )
         }
+      } finally {
+        pendingSavesRef.current -= 1
       }
     },
-    [clearCountdownTimers, showToast]
+    [autosaver, clearCountdownTimers, showToast]
   )
 
   // Tải dữ liệu bài giảng từ server
@@ -499,7 +515,6 @@ export const EditorPage = ({
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
-  // Đồng bộ sourceMaterial từ bài giảng vào store nếu có
   useEffect(() => {
     if (lecture?.sourceMaterial && !sourceMaterial) {
       setSourceMaterial(lecture.sourceMaterial)

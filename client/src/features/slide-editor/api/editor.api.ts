@@ -1,5 +1,6 @@
 import { apiClient } from '@/lib/api'
 import type { Lecture, Slide } from '@/lib/types'
+import { buildAutosavePayload } from '../utils/autosave'
 
 export interface AiChatPayload {
   message: string
@@ -51,18 +52,12 @@ export const editorApi = {
   get: async (id: string) =>
     (await apiClient.get<{ data: Lecture }>(`/lectures/${id}`)).data.data,
 
-  autosave: async (lecture: Lecture) =>
+  autosave: async (lecture: Lecture, previous?: Lecture) =>
     (
-      await apiClient.patch<{ data: { lecture: Lecture } }>(
+      await apiClient.patch<{ data: { savedAt: string } }>(
         `/lectures/${lecture._id}/autosave`,
-        {
-          title: lecture.title,
-          slides: lecture.slides,
-          theme: lecture.theme,
-          contextSummary: lecture.contextSummary,
-          sourceMaterial: lecture.sourceMaterial,
-          aiChatHistory: lecture.aiChatHistory
-        }
+        buildAutosavePayload(lecture, previous),
+        { params: { view: 'receipt' } }
       )
     ).data.data,
 
