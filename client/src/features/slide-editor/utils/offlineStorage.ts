@@ -52,11 +52,3 @@ export const clearOfflineDraft = (lectureId: string): void => {
     console.warn('Lỗi xóa bản nháp offline từ localStorage:', error)
   }
 }
-
-/**
- * Kiểm tra xem có bản nháp offline chưa đồng bộ không
- */
-export const hasOfflineDraft = (lectureId: string): boolean => {
-  if (!lectureId) return false
-  return Boolean(localStorage.getItem(`${OFFLINE_DRAFT_PREFIX}${lectureId}`))
-}

@@ -220,10 +220,13 @@ export const EditorPage = ({
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
         saveOfflineDraft(payload)
         setSaveStatus('offline_saved')
-        showToast(
-          'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
-          'error'
-        )
+        // Lưu tự động lỗi thì chỉ hiện trạng thái "Đang lưu offline", tránh toast lặp mỗi 2 giây
+        if (!isAuto) {
+          showToast(
+            'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
+            'error'
+          )
+        }
       }
     },
     [clearCountdownTimers, showToast]
@@ -764,7 +767,7 @@ export const EditorPage = ({
     })
   }
 
-  // SRS UC012 7b-7d: phím Delete xóa đối tượng đang chọn; đang gõ chữ thì để trình duyệt xóa chữ
+  // SRS UC012 7b-7d / UC015: Delete xóa đối tượng đang chọn, không chọn đối tượng thì xóa slide; đang gõ chữ thì để trình duyệt xóa chữ
   useEffect(() => {
     const handleDeleteKey = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' || e.isComposing) return
@@ -774,9 +777,10 @@ export const EditorPage = ({
         target?.tagName === 'INPUT' ||
         target?.tagName === 'TEXTAREA' ||
         target?.tagName === 'SELECT'
-      if (isTyping || !selectedCompId) return
+      if (isTyping || showAiWizard) return
       e.preventDefault()
-      handleDeleteComponent(selectedCompId)
+      if (selectedCompId) handleDeleteComponent(selectedCompId)
+      else if (currentSlide) handleDeleteSlide(currentSlide.id)
     }
     window.addEventListener('keydown', handleDeleteKey)
     return () => window.removeEventListener('keydown', handleDeleteKey)
@@ -873,9 +877,16 @@ export const EditorPage = ({
       title: 'Tiêu đề slide',
       bullets: []
     }
-    const newSlide: Slide = {
-      ...rawSlide,
-      components: getSlideComponents(rawSlide, lecture.theme)
+    let newSlide: Slide
+    try {
+      newSlide = {
+        ...rawSlide,
+        components: getSlideComponents(rawSlide, lecture.theme)
+      }
+    } catch {
+      // SRS UC014 4a: không khởi tạo được slide -> giữ nguyên bài giảng
+      showToast('Không thể tạo slide mới. Vui lòng thử lại.', 'error')
+      return
     }
 
     const nextSlides = [...lecture.slides]
@@ -912,16 +923,21 @@ export const EditorPage = ({
     const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
     if (sourceIndex === -1) return
 
-    const sourceSlide = lecture.slides[sourceIndex]
-    const clonedSlide: Slide = {
-      ...sourceSlide,
-      id: `slide-${crypto.randomUUID()}`,
-      components: getSlideComponents(sourceSlide, lecture.theme).map(
-        (comp) => ({
-          ...comp,
-          id: `comp-${crypto.randomUUID()}`
-        })
-      )
+    let clonedSlide: Slide
+    try {
+      // Bản sao độc lập hoàn toàn (SRS UC016): không dùng chung mảng với slide gốc
+      const sourceSlide = structuredClone(lecture.slides[sourceIndex])
+      clonedSlide = {
+        ...sourceSlide,
+        id: `slide-${crypto.randomUUID()}`,
+        components: getSlideComponents(sourceSlide, lecture.theme).map(
+          (comp) => ({ ...comp, id: `comp-${crypto.randomUUID()}` })
+        )
+      }
+    } catch {
+      // SRS UC016 3a: không sao chép được -> không tạo slide mới
+      showToast('Không thể nhân bản slide. Vui lòng thử lại.', 'error')
+      return
     }
 
     const nextSlides = [...lecture.slides]
@@ -942,14 +958,9 @@ export const EditorPage = ({
     nextSlides.splice(toIndex, 0, moved)
 
     mutateLecture({ ...lecture, slides: nextSlides })
-
-    if (sourceIndex === activeSlideIndex) {
-      setActiveSlideIndex(toIndex)
-    } else if (sourceIndex < activeSlideIndex && toIndex >= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex - 1)
-    } else if (sourceIndex > activeSlideIndex && toIndex <= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex + 1)
-    }
+    // SRS UC017 bước 8: slide vừa di chuyển giữ trạng thái được chọn
+    setSelectedCompId(null)
+    setActiveSlideIndex(toIndex)
   }
 
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ

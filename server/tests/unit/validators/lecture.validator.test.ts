@@ -3,8 +3,7 @@ import {
   createLectureSchema,
   createBlankLectureSchema,
   updateLectureSchema,
-  aiChatSchema,
-  slideOperationSchema
+  aiChatSchema
 } from '@/validators/lecture.validator'
 
 describe('generateOutlineSchema', () => {
@@ -166,32 +165,6 @@ describe('aiChatSchema', () => {
       }
     })
 
-    expect(result.success).toBe(false)
-  })
-})
-
-describe('slideOperationSchema', () => {
-  it('thành công với operation add', () => {
-    const result = slideOperationSchema.safeParse({
-      operation: 'add',
-      index: 0
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it('thành công với operation delete', () => {
-    const result = slideOperationSchema.safeParse({
-      operation: 'delete',
-      slideId: 'slide-1'
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it('thất bại với operation không hợp lệ', () => {
-    const result = slideOperationSchema.safeParse({
-      operation: 'invalid_op',
-      slideId: 'slide-1'
-    })
     expect(result.success).toBe(false)
   })
 })

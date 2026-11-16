@@ -35,10 +35,16 @@ describe('Integration Tests — Upload ảnh slide (/api/v1/lectures/images, /ap
     process.env.MINIO_ENDPOINT = `${minio.getHost()}:${minio.getMappedPort(9000)}`
     jest.resetModules()
     // Nạp lại module sau khi đổi env để minioClient trỏ vào container
-    app = (await import('@/app')).app
-    await (await import('@/lib/minio')).connectMinio()
+    app = (jest.requireActual('@/app') as { app: Express }).app
+    await (
+      jest.requireActual('@/lib/minio') as {
+        connectMinio: () => Promise<void>
+      }
+    ).connectMinio()
     // Route ảnh không dùng Redis; ngắt client được nạp lại để jest thoát được
-    ;(await import('@/lib/redis')).redis.disconnect()
+    ;(
+      jest.requireActual('@/lib/redis') as { redis: { disconnect: () => void } }
+    ).redis.disconnect()
   }, 180000)
 
   afterAll(async () => {

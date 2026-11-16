@@ -8,7 +8,6 @@ import {
   createBlankLectureSchema,
   updateLectureSchema,
   aiChatSchema,
-  slideOperationSchema,
   uploadImageSchema
 } from '@/validators/lecture.validator'
 
@@ -53,11 +52,6 @@ lectureRouter.post(
   '/:id/ai-chat',
   validate(aiChatSchema),
   lectureController.aiChat
-)
-lectureRouter.post(
-  '/:id/slides',
-  validate(slideOperationSchema),
-  lectureController.applySlideOperation
 )
 lectureRouter.post('/:id/duplicate', lectureController.duplicateLecture)
 lectureRouter.delete('/:id', lectureController.deleteLecture)

@@ -86,15 +86,6 @@ export const duplicateLecture = asyncHandler(async (req, res) => {
   ok(res, lecture, 201)
 })
 
-export const applySlideOperation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.applySlideOperation(
-    req.user.id,
-    String(req.params.id),
-    req.body
-  )
-  ok(res, lecture)
-})
-
 export const autosaveLecture = asyncHandler(async (req, res) => {
   const lecture = await lectureService.updateLecture(
     req.user.id,

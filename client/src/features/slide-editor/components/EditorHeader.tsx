@@ -167,7 +167,7 @@ export const EditorHeader = ({
             >
               <CloudOff size={14} className='text-orange-400 shrink-0' />
               <span className='text-[11px] font-bold truncate'>
-                Đã lưu offline
+                Đang lưu offline
               </span>
             </button>
           ) : saveStatus === 'unsaved' ? (
@@ -192,7 +192,7 @@ export const EditorHeader = ({
                 <Check size={11} className='-ml-1' />
               </div>
               <span className='hidden text-[11px] font-medium sm:inline truncate'>
-                Đã lưu
+                Đã lưu...
               </span>
             </div>
           )}
