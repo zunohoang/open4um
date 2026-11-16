@@ -54,15 +54,5 @@ export const lectureApi = {
         title,
         theme
       })
-    ).data.data,
-
-  export: async (id: string) =>
-    (
-      await apiClient.post<{
-        data: {
-          downloadUrl: string | null
-          data: Record<string, unknown>
-        }
-      }>(`/lectures/${id}/export`)
     ).data.data
 }

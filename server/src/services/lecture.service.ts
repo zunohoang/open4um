@@ -1,12 +1,11 @@
 import { AppError } from '@/utils/AppError'
-import { logger } from '@/lib/logger'
 import { LectureModel } from '@/models/lecture.model'
 import { AiUsageLogModel } from '@/models/aiUsageLog.model'
 import { UserModel } from '@/models/user.model'
 import { getCreditConfig } from '@/services/admin.service'
 import { debitCredits, refundCredits } from '@/services/credit.service'
 import { FolderModel } from '@/models/folder.model'
-import { minioClient, minioPresignClient, BUCKET_MEDIA } from '@/lib/minio'
+import { minioClient, BUCKET_MEDIA } from '@/lib/minio'
 import { buildSlideComponents, THEME_PRESETS } from '@/constants/theme-options'
 import { getAiReadableSlideContext } from '@/utils/aiChatContext'
 import {
@@ -415,62 +414,6 @@ export const hardDeleteLecture = async (userId: string, id: string) => {
   await LectureModel.deleteOne({ _id: lecture._id, userId })
   return {
     message: 'Đã xóa vĩnh viễn bài giảng'
-  }
-}
-
-export const exportLecture = async (userId: string, id: string) => {
-  const lecture = await findOwnedLecture(userId, id)
-
-  const exportBundle = {
-    id: lecture._id,
-    title: lecture.title,
-    prompt: lecture.prompt,
-    slideCount: lecture.slides.length,
-    slides: lecture.slides,
-    createdAt: lecture.createdAt,
-    updatedAt: lecture.updatedAt,
-    exportedAt: new Date().toISOString()
-  }
-
-  let downloadUrl: string | null = null
-
-  try {
-    const exists = await minioClient.bucketExists(BUCKET_MEDIA)
-    if (!exists) {
-      await minioClient.makeBucket(BUCKET_MEDIA)
-    }
-
-    const objectKey = `exports/${userId}/${lecture._id}-${Date.now()}.json`
-    const content = Buffer.from(JSON.stringify(exportBundle, null, 2), 'utf-8')
-
-    await minioClient.putObject(
-      BUCKET_MEDIA,
-      objectKey,
-      content,
-      content.length,
-      {
-        'Content-Type': 'application/json'
-      }
-    )
-
-    downloadUrl = await minioPresignClient.presignedGetObject(
-      BUCKET_MEDIA,
-      objectKey,
-      24 * 60 * 60
-    )
-  } catch (err) {
-    logger.warn(
-      { err },
-      'Không thể lưu tệp xuất lên MinIO, trả về dữ liệu xuất trực tiếp'
-    )
-  }
-
-  return {
-    message: 'Xuất bài giảng thành công',
-    lectureId: lecture._id,
-    title: lecture.title,
-    downloadUrl,
-    data: exportBundle
   }
 }
 

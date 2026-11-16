@@ -246,10 +246,10 @@ export const EditorHeader = ({
           type='button'
           onClick={onOpenExport}
           className='flex items-center gap-1.5 rounded-md border border-emerald-800 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-stone-200 shadow-2xs transition hover:bg-emerald-800 hover:text-white active:scale-95 cursor-pointer'
-          title='Xuất bài giảng (PNG, PDF...)'
+          title='Xuất bài giảng (ảnh PNG hoặc PDF)'
         >
           <FileDown size={14} />
-          <span className='hidden sm:inline'>Xuất</span>
+          <span className='hidden sm:inline'>Xuất file</span>
         </button>
 
         {/* Nút Trình chiếu theo chuẩn màu Brand Rust (#c45b3f) */}

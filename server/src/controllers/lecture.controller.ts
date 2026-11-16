@@ -119,14 +119,6 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
   ok(res, result)
 })
 
-export const exportLecture = asyncHandler(async (req, res) => {
-  const result = await lectureService.exportLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, result)
-})
-
 export const aiChat = asyncHandler(async (req, res) => {
   const result = await lectureService.aiChatInEditor(
     req.user.id,

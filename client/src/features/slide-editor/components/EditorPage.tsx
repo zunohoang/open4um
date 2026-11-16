@@ -1,4 +1,4 @@
-import { ExportModal } from '@/components/ui/ExportModal'
+import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAuthStore } from '@/features/auth/store/auth.store'
@@ -1667,14 +1667,17 @@ export const EditorPage = ({
       </div>
 
       {/* MODAL XUẤT BÀI GIẢNG */}
-      <ExportModal
-        open={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        lecture={lecture}
-        initialSlideIndex={activeSlideIndex}
-        onSuccess={(msg) => showToast(msg, 'success')}
-        onError={(msg) => showToast(msg, 'error')}
-      />
+      {/* Mount lại mỗi lần mở để 'slide hiện tại' luôn đúng slide đang chọn (SRS UC029) */}
+      {isExportModalOpen && (
+        <ExportModal
+          open={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          lecture={lecture}
+          initialSlideIndex={activeSlideIndex}
+          onSuccess={(msg) => showToast(msg, 'success')}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
 
       {/* MODAL TÀI LIỆU NGUỒN */}
       <SourceMaterialModal
