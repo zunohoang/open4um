@@ -2,7 +2,7 @@ import type { Slide } from '@/lib/types'
 import { create } from 'zustand'
 
 export type LeftRailTab =
-  'text' | 'shapes' | 'uploads' | 'templates' | 'theme' | null
+  'text' | 'shapes' | 'uploads' | 'templates' | 'theme' | 'layers' | null
 
 export interface UploadedImage {
   id: string
@@ -194,7 +194,8 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
         lastSnapshot &&
         JSON.stringify(lastSnapshot) === JSON.stringify(snapshot)
       ) {
-        return state
+        // Vẫn là một thay đổi mới sau Undo -> phải xóa Redo stack (SRS UC013 10a)
+        return { redoStack: [] }
       }
       return {
         undoStack: [...state.undoStack.slice(-30), snapshot],

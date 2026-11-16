@@ -1,6 +1,7 @@
 import type { Lecture, Slide } from '@/lib/types'
 import { toPng } from 'html-to-image'
 import { jsPDF } from 'jspdf'
+import { cropClipPath } from '@/features/slide-editor/utils/slide'
 
 /**
  * Tạo DOM element chuẩn tỷ lệ 16:9 (1280x720) cho một slide để xuất hình ảnh / PDF
@@ -82,6 +83,7 @@ const createSlideElement = (
         img.style.width = '100%'
         img.style.height = comp.height ? '100%' : 'auto'
         img.style.objectFit = 'contain'
+        img.style.clipPath = cropClipPath(comp.crop) ?? ''
         compEl.appendChild(img)
       } else if (comp.type === 'bullets') {
         const ul = document.createElement('ul')

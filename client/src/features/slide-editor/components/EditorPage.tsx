@@ -1,5 +1,6 @@
 import { ExportModal } from '@/components/ui/ExportModal'
 import { useToast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type {
@@ -75,7 +76,7 @@ export const EditorPage = ({
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
-  const { user, updateUser } = useAuthStore()
+  const { updateUser } = useAuthStore()
 
   const {
     activeSlideIndex,
@@ -96,7 +97,8 @@ export const EditorPage = ({
     sourceMaterial,
     setSourceMaterial,
     isSourceMaterialModalOpen,
-    setIsSourceMaterialModalOpen
+    setIsSourceMaterialModalOpen,
+    clearHistory
   } = useEditorStore()
 
   const routeState = location.state as {
@@ -108,16 +110,11 @@ export const EditorPage = ({
   const [showAiWizard, setShowAiWizard] = useState(Boolean(routeState?.startAi))
   const lectureId = params.id || initialLecture?._id || lectureFromState?._id
 
-  // Kiểm tra ngay khi khởi tạo xem có bản nháp offline trong localStorage không
-  const [lecture, setLecture] = useState<Lecture | null>(() => {
-    if (lectureId) {
-      const draft = getOfflineDraft(lectureId)
-      if (draft) {
-        return draft.lecture
-      }
-    }
-    return initialLecture || lectureFromState || null
-  })
+  // Bản nháp offline (nếu có) được hỏi Khôi phục/Bỏ qua sau khi tải xong (SRS UC009 5a/5b)
+  const [lecture, setLecture] = useState<Lecture | null>(
+    () => initialLecture || lectureFromState || null
+  )
+  const [pendingDraft, setPendingDraft] = useState<Lecture | null>(null)
   const [isLoading, setIsLoading] = useState(!lecture)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isUnauthorized, setIsUnauthorized] = useState(false)
@@ -137,12 +134,7 @@ export const EditorPage = ({
   })
 
   // Trạng thái lưu: nếu mở từ bản nháp offline chưa đồng bộ, khởi tạo là 'offline_saved'
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
-    if (lectureId && getOfflineDraft(lectureId)) {
-      return 'offline_saved'
-    }
-    return 'saved'
-  })
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [countdown, setCountdown] = useState<number | null>(null)
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -245,21 +237,11 @@ export const EditorPage = ({
     }
     setLoadError(null)
     setIsUnauthorized(false)
+    // Undo/Redo stack là global: không để lịch sử của bài giảng trước lọt sang bài này
+    clearHistory()
 
     try {
       const loaded = await editorApi.get(params.id)
-
-      // Kiểm tra quyền truy cập theo Use-case
-      if (
-        user &&
-        loaded.userId &&
-        loaded.userId !== user.id &&
-        user.role !== 'admin'
-      ) {
-        setIsUnauthorized(true)
-        setIsLoading(false)
-        return
-      }
 
       // Kiểm tra xem có bản nháp offline chưa đồng bộ không
       const draft = getOfflineDraft(params.id)
@@ -269,18 +251,10 @@ export const EditorPage = ({
           JSON.stringify(loaded.slides) ||
           draft.lecture.title !== loaded.title)
 
-      if (draft && hasUnsyncedChanges) {
-        setLecture(draft.lecture)
-        setSaveStatus('offline_saved')
-        showToast(
-          'Đã khôi phục bản nháp chỉnh sửa offline. Nhấn Ctrl+S hoặc nút Lưu để cập nhật lên máy chủ.',
-          'info'
-        )
-      } else {
-        setLecture(loaded)
-        setSaveStatus('saved')
-        if (draft) clearOfflineDraft(params.id)
-      }
+      setLecture(loaded)
+      setSaveStatus('saved')
+      if (draft && hasUnsyncedChanges) setPendingDraft(draft.lecture)
+      else if (draft) clearOfflineDraft(params.id)
 
       // Khôi phục lịch sử chat AI từ dữ liệu bài giảng trên máy chủ
       const chatHistory = draft?.lecture.aiChatHistory || loaded.aiChatHistory
@@ -296,21 +270,23 @@ export const EditorPage = ({
         }
       }
 
-      // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
-      const savedIndexStr = sessionStorage.getItem(
-        `open4um_last_slide_${loaded._id}`
+      // SRS UC009 bước 7: chọn slide mở gần nhất, nếu không có thì slide đầu tiên
+      const savedIndex = Number(
+        sessionStorage.getItem(`open4um_last_slide_${loaded._id}`)
       )
-      if (savedIndexStr !== null) {
-        const savedIndex = Number(savedIndexStr)
-        if (
-          !isNaN(savedIndex) &&
+      setActiveSlideIndex(
+        Number.isInteger(savedIndex) &&
           savedIndex >= 0 &&
           savedIndex < loaded.slides.length
-        ) {
-          setActiveSlideIndex(savedIndex)
-        }
-      }
+          ? savedIndex
+          : 0
+      )
     } catch (err) {
+      // SRS UC009 2a: không có quyền truy cập
+      if (isAxiosError(err) && err.response?.status === 403) {
+        setIsUnauthorized(true)
+        return
+      }
       // Khi server tắt hoặc offline: thử mở bản nháp offline từ localStorage
       const draft = getOfflineDraft(params.id)
       if (draft) {
@@ -330,7 +306,7 @@ export const EditorPage = ({
     } finally {
       setIsLoading(false)
     }
-  }, [params.id, user, setActiveSlideIndex, setAiMessages, showToast])
+  }, [params.id, clearHistory, setActiveSlideIndex, setAiMessages, showToast])
 
   useEffect(() => {
     if (params.id) {
@@ -771,6 +747,40 @@ export const EditorPage = ({
     mutateLecture({ ...lecture, slides: nextSlides })
     if (selectedCompId === compId) setSelectedCompId(null)
   }
+
+  // SRS UC012: đổi thứ tự lớp; phần tử đứng sau trong mảng được vẽ đè lên trên
+  const handleChangeLayer = (compId: string, direction: 'up' | 'down') => {
+    if (!lecture || !currentSlide) return
+    const comps = [...getSlideComponents(currentSlide, lecture.theme)]
+    const from = comps.findIndex((c) => c.id === compId)
+    const to = direction === 'up' ? from + 1 : from - 1
+    if (from < 0 || to < 0 || to >= comps.length) return
+    ;[comps[from], comps[to]] = [comps[to], comps[from]]
+    mutateLecture({
+      ...lecture,
+      slides: lecture.slides.map((s, idx) =>
+        idx === activeSlideIndex ? { ...currentSlide, components: comps } : s
+      )
+    })
+  }
+
+  // SRS UC012 7b-7d: phím Delete xóa đối tượng đang chọn; đang gõ chữ thì để trình duyệt xóa chữ
+  useEffect(() => {
+    const handleDeleteKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' || e.isComposing) return
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT'
+      if (isTyping || !selectedCompId) return
+      e.preventDefault()
+      handleDeleteComponent(selectedCompId)
+    }
+    window.addEventListener('keydown', handleDeleteKey)
+    return () => window.removeEventListener('keydown', handleDeleteKey)
+  })
 
   // Đổi giao diện bài giảng (Theme) và đồng bộ màu sắc các slide hiện có
   const handleThemeChange = (themeId: string) => {
@@ -1561,6 +1571,9 @@ export const EditorPage = ({
           outline={lecture.outline}
           currentThemeId={lecture.theme}
           onThemeChange={handleThemeChange}
+          layers={
+            currentSlide ? getSlideComponents(currentSlide, lecture.theme) : []
+          }
         />
 
         {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
@@ -1577,6 +1590,10 @@ export const EditorPage = ({
                   }}
                   onDuplicateComponent={handleDuplicateComponent}
                   onDeleteComponent={handleDeleteComponent}
+                  onChangeLayer={(direction) => {
+                    if (selectedCompId)
+                      handleChangeLayer(selectedCompId, direction)
+                  }}
                 />
               </div>
             </div>
@@ -1667,6 +1684,23 @@ export const EditorPage = ({
         lectureTitle={lecture.title}
         isLoading={isOutlineLoading}
         onRegenerateOutline={handleRegenerateOutline}
+      />
+
+      <ConfirmDialog
+        open={pendingDraft !== null}
+        title='Phát hiện dữ liệu chưa đồng bộ'
+        message='Trình duyệt còn lưu bản chỉnh sửa offline chưa được đồng bộ lên máy chủ. Bạn muốn khôi phục bản này hay bỏ qua để dùng dữ liệu trên máy chủ?'
+        confirmLabel='Khôi phục'
+        cancelLabel='Bỏ qua'
+        onConfirm={() => {
+          if (pendingDraft) setLecture(pendingDraft)
+          setSaveStatus('offline_saved')
+          setPendingDraft(null)
+        }}
+        onCancel={() => {
+          if (params.id) clearOfflineDraft(params.id)
+          setPendingDraft(null)
+        }}
       />
 
       {showAiWizard && (

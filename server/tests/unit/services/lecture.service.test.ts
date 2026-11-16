@@ -41,6 +41,7 @@ jest.mock('@/models/lecture.model', () => ({
   LectureModel: {
     create: (...args: any[]) => mockLectureCreate(...args),
     findOne: (...args: any[]) => mockLectureFindOne(...args),
+    exists: jest.fn().mockResolvedValue(null),
     find: (...args: any[]) => mockLectureFind(...args),
     deleteOne: (...args: any[]) => mockLectureDeleteOne(...args),
     findOneAndUpdate: (...args: any[]) => mockLectureFindOneAndUpdate(...args)

@@ -3,7 +3,10 @@ import {
   FONT_MAP,
   getThemeById
 } from '@/features/slide-editor/constants/theme-options'
-import { getSlideComponents } from '@/features/slide-editor/utils/slide'
+import {
+  cropClipPath,
+  getSlideComponents
+} from '@/features/slide-editor/utils/slide'
 import type { Lecture, SlideComponent } from '@/lib/types'
 import { BrandLogo } from '@/components/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -357,6 +360,7 @@ export const PresentationPage = ({
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide visual'
+                    style={{ clipPath: cropClipPath(comp.crop) }}
                     className={
                       comp.height
                         ? 'h-full w-full object-contain'

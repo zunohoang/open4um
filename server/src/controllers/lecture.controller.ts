@@ -164,3 +164,8 @@ export const aiChat = asyncHandler(async (req, res) => {
   )
   ok(res, result)
 })
+
+export const uploadImage = asyncHandler(async (req, res) => {
+  const result = await lectureService.uploadImage(req.user.id, req.body.dataUrl)
+  ok(res, result, 201)
+})

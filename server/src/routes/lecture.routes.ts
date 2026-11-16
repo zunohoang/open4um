@@ -8,7 +8,8 @@ import {
   createBlankLectureSchema,
   updateLectureSchema,
   aiChatSchema,
-  slideOperationSchema
+  slideOperationSchema,
+  uploadImageSchema
 } from '@/validators/lecture.validator'
 
 export const lectureRouter = Router()
@@ -18,6 +19,11 @@ lectureRouter.post(
   '/generate-outline',
   validate(generateOutlineSchema),
   lectureController.generateOutline
+)
+lectureRouter.post(
+  '/images',
+  validate(uploadImageSchema),
+  lectureController.uploadImage
 )
 lectureRouter.get('/trash', lectureController.listTrash)
 lectureRouter.get('/', lectureController.listLectures)

@@ -1348,3 +1348,9 @@ export const syncSlideWithTheme = (slide: Slide, themeId: string): Slide => {
     components: updatedComps
   }
 }
+
+// Vùng hiển thị ảnh sau khi crop, dùng chung cho canvas, trình chiếu, thumbnail và export
+export const cropClipPath = (crop?: SlideComponent['crop']) =>
+  crop
+    ? `inset(${crop.top}% ${crop.right}% ${crop.bottom}% ${crop.left}%)`
+    : undefined

@@ -123,3 +123,7 @@ export const slideOperationSchema = z.discriminatedUnion('operation', [
     patch: z.record(z.string(), z.unknown())
   })
 ])
+
+export const uploadImageSchema = z.object({
+  dataUrl: z.string().min(1, 'Dữ liệu ảnh không được để trống')
+})

@@ -38,6 +38,16 @@ export interface AiChatResponseData {
 }
 
 export const editorApi = {
+  // Trả URL ảnh do server phục vụ (SRS UC011 bước 5)
+  uploadImage: async (dataUrl: string) => {
+    const { key } = (
+      await apiClient.post<{ data: { key: string } }>('/lectures/images', {
+        dataUrl
+      })
+    ).data.data
+    return `${import.meta.env.VITE_API_BASE_URL}/media/${key}`
+  },
+
   get: async (id: string) =>
     (await apiClient.get<{ data: Lecture }>(`/lectures/${id}`)).data.data,
 

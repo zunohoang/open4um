@@ -1,5 +1,6 @@
 import type { Slide, SlideComponent } from '@/lib/types'
 import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
+import { cropClipPath } from '@/features/slide-editor/utils/slide'
 import React from 'react'
 
 interface SlidePreviewProps {
@@ -263,6 +264,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
               <image
                 key={comp.id}
                 href={comp.imageUrl || comp.content}
+                style={{ clipPath: cropClipPath(comp.crop) }}
                 x={x}
                 y={y}
                 width={w}

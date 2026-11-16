@@ -286,8 +286,57 @@ export const cleanupExpiredTrash = async () => {
 
 const findOwnedLecture = async (userId: string, id: string) => {
   const lecture = await LectureModel.findOne({ _id: id, userId })
-  if (!lecture) throw new AppError('Không tìm thấy bài giảng', 404)
-  return lecture
+  if (lecture) return lecture
+  // SRS UC009 2a: bài giảng tồn tại nhưng của người khác -> báo không có quyền
+  if (await LectureModel.exists({ _id: id }))
+    throw new AppError('Bạn không có quyền truy cập bài giảng này', 403)
+  throw new AppError('Không tìm thấy bài giảng', 404)
+}
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif'
+}
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const IMAGE_KEY_PATTERN =
+  /^images\/[a-f0-9]{24}\/[0-9a-f-]{36}\.(png|jpg|webp|gif)$/
+
+// SRS UC011 bước 5: tải ảnh lên server (MinIO) thay vì nhúng base64 vào slide
+export const uploadImage = async (userId: string, dataUrl: string) => {
+  const match = /^data:(image\/[a-z+]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
+  const ext = match ? IMAGE_EXTENSIONS[match[1]] : undefined
+  if (!match || !ext)
+    throw new AppError(
+      'Định dạng ảnh không được hỗ trợ (chỉ PNG, JPG, WEBP, GIF)',
+      422
+    )
+  const buffer = Buffer.from(match[2], 'base64')
+  if (buffer.length > MAX_IMAGE_BYTES)
+    throw new AppError('Ảnh vượt quá dung lượng cho phép (tối đa 5MB)', 413)
+
+  const key = `images/${userId}/${crypto.randomUUID()}.${ext}`
+  await minioClient.putObject(BUCKET_MEDIA, key, buffer, buffer.length, {
+    'Content-Type': match[1]
+  })
+  return { key }
+}
+
+// Ảnh trong slide được nhúng bằng thẻ <img> nên đọc công khai; key chứa UUID khó đoán
+export const getImage = async (key: string) => {
+  if (!IMAGE_KEY_PATTERN.test(key))
+    throw new AppError('Không tìm thấy ảnh', 404)
+  const stat = await minioClient.statObject(BUCKET_MEDIA, key).catch(() => null)
+  if (!stat) throw new AppError('Không tìm thấy ảnh', 404)
+  const stream = await minioClient.getObject(BUCKET_MEDIA, key)
+  return {
+    stream,
+    contentType:
+      (stat.metaData?.['content-type'] as string | undefined) ??
+      'application/octet-stream',
+    size: stat.size
+  }
 }
 
 export const getLecture = async (userId: string, id: string) => {
