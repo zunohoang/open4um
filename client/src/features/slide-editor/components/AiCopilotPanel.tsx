@@ -21,6 +21,7 @@ import {
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
+import { AiDataNotice } from '@/components/ui/AiDataNotice'
 
 interface AiCopilotPanelProps {
   onApplyAiPrompt: (instruction: string) => Promise<void>
@@ -995,6 +996,7 @@ export const AiCopilotPanel = ({
             </div>
           </div>
         </div>
+        <AiDataNotice className='mt-1.5 px-1' />
       </div>
     </aside>
   )

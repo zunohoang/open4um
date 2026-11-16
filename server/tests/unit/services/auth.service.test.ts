@@ -8,7 +8,8 @@ import {
   logout,
   forgotPassword,
   updateProfile,
-  resetPassword
+  resetPassword,
+  changePassword
 } from '@/services/auth.service'
 import * as emailService from '@/services/email.service'
 
@@ -327,6 +328,39 @@ describe('auth.service unit tests', () => {
     })
   })
 
+  // SRS UC005 (Bảng 2.6)
+  describe('changePassword', () => {
+    it('5a - ném lỗi 400 "Mật khẩu hiện tại không đúng" khi mật khẩu cũ sai', async () => {
+      const mockSave = jest.fn()
+      mockUserFindById.mockResolvedValue({
+        passwordHash: 'old_hash',
+        save: mockSave
+      })
+      ;(bcrypt.compare as jest.Mock).mockResolvedValue(false)
+
+      await expect(
+        changePassword('user-1', 'wrong_old', 'newpass123')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Mật khẩu hiện tại không đúng'
+      })
+      expect(mockSave).not.toHaveBeenCalled()
+    })
+
+    it('đổi thành công -> băm mật khẩu mới, lưu và trả "Đổi mật khẩu thành công"', async () => {
+      const user = { passwordHash: 'old_hash', save: jest.fn() }
+      mockUserFindById.mockResolvedValue(user)
+      ;(bcrypt.compare as jest.Mock).mockResolvedValue(true)
+      ;(bcrypt.hash as jest.Mock).mockResolvedValue('new_hash')
+
+      const result = await changePassword('user-1', 'old', 'newpass123')
+
+      expect(user.passwordHash).toBe('new_hash')
+      expect(user.save).toHaveBeenCalled()
+      expect(result.message).toBe('Đổi mật khẩu thành công')
+    })
+  })
+
   describe('login', () => {
     it('ném lỗi 401 khi không tìm thấy email', async () => {
       mockUserFindOne.mockResolvedValue(null)
@@ -335,7 +369,7 @@ describe('auth.service unit tests', () => {
         login('notfound@example.com', 'password123')
       ).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Email hoặc mật khẩu không đúng'
+        message: 'Email hoặc mật khẩu không chính xác'
       })
     })
 
@@ -351,7 +385,7 @@ describe('auth.service unit tests', () => {
         login('user@example.com', 'wrong_password')
       ).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Email hoặc mật khẩu không đúng'
+        message: 'Email hoặc mật khẩu không chính xác'
       })
       expect(bcrypt.compare).toHaveBeenCalledWith(
         'wrong_password',

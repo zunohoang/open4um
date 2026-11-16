@@ -134,10 +134,10 @@ export const register = async (
 
 export const login = async (email: string, password: string) => {
   const user = await UserModel.findOne({ email })
-  if (!user) throw new AppError('Email hoặc mật khẩu không đúng', 401)
+  if (!user) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
   const valid = await bcrypt.compare(password, user.passwordHash)
-  if (!valid) throw new AppError('Email hoặc mật khẩu không đúng', 401)
+  if (!valid) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
   if (user.status === 'locked') {
     const lockedAt = user.lockedAt || user.updatedAt || new Date()
@@ -334,7 +334,7 @@ export const changePassword = async (
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
 
   const valid = await bcrypt.compare(oldPassword, user.passwordHash)
-  if (!valid) throw new AppError('Mật khẩu cũ không đúng', 400)
+  if (!valid) throw new AppError('Mật khẩu hiện tại không đúng', 400)
 
   user.passwordHash = await bcrypt.hash(newPassword, 10)
   await user.save()

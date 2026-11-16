@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { useToast } from '@/components/ui/Toast'
+import { AiDataNotice } from '@/components/ui/AiDataNotice'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import type { Lecture, Outline } from '@/lib/types'
 import {
@@ -375,6 +376,7 @@ export const CreateLectureModal = ({
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                 />
+                <AiDataNotice className='mt-1.5' />
               </div>
 
               {/* BỘ CHỌN THEME (GIAO DIỆN) */}

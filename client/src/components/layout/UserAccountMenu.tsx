@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authApi } from '@/features/auth/api/auth.api'
+import { useLogoutConfirm } from '@/features/auth/hooks/useLogoutConfirm'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 const getInitial = (name?: string) => {
@@ -14,7 +14,8 @@ export const UserAccountMenu = () => {
   const navigate = useNavigate()
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const { user, refreshToken, clearSession } = useAuthStore()
+  const user = useAuthStore((state) => state.user)
+  const { requestLogout, logoutDialog } = useLogoutConfirm()
   const isAdmin = user?.role === 'admin'
   const initial = getInitial(user?.name)
 
@@ -43,8 +44,7 @@ export const UserAccountMenu = () => {
 
   const logout = () => {
     setOpen(false)
-    if (refreshToken) void authApi.logout(refreshToken)
-    clearSession()
+    requestLogout()
   }
 
   return (
@@ -174,6 +174,7 @@ export const UserAccountMenu = () => {
           </div>
         </div>
       )}
+      {logoutDialog}
     </div>
   )
 }

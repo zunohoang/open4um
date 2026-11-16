@@ -35,16 +35,11 @@ export const App = () => {
 
   const isAdmin = user.role === 'admin'
 
-  const logout = () => {
-    if (refreshToken) void authApi.logout(refreshToken)
-    clearSession()
-  }
-
   // Admin chỉ cần quản trị hệ thống, không cần các tab khác -> UI content container không có sidebar
   if (isAdmin) {
     return (
       <div className='min-h-screen bg-brand-paper font-sans'>
-        <WorkspaceHeader onAdmin={() => navigate('/admin')} onLogout={logout} />
+        <WorkspaceHeader onAdmin={() => navigate('/admin')} />
         <main className='pt-16 min-h-screen'>
           <Routes>
             <Route path='/admin' element={<AdminPage />} />
