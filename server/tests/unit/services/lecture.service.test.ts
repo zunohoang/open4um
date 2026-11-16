@@ -85,6 +85,7 @@ import {
   generateOutline,
   createLecture,
   createBlankLecture,
+  duplicateLecture,
   getLecture,
   hardDeleteLecture,
   aiChatInEditor
@@ -381,7 +382,12 @@ describe('lecture.service unit tests', () => {
       mockFolderFindOne.mockResolvedValue(null)
 
       await expect(
-        createBlankLecture('user-1', 'Bài giảng mới', 'invalid-folder-id')
+        createBlankLecture(
+          'user-1',
+          'Bài giảng mới',
+          undefined,
+          'invalid-folder-id'
+        )
       ).rejects.toMatchObject({
         statusCode: 404,
         message: 'Không tìm thấy thư mục'
@@ -451,6 +457,36 @@ describe('lecture.service unit tests', () => {
 
       const result = await getLecture('user-1', 'lecture-123')
       expect(result).toEqual(mockLecture)
+    })
+  })
+
+  // SRS UC025 (Bảng 2.26)
+  describe('duplicateLecture', () => {
+    it('tạo bản sao độc lập giữ nguyên theme, dàn ý và thêm hậu tố " - Copy"', async () => {
+      const outline = { title: 'TS', sections: [{ heading: 'A', bullets: [] }] }
+      mockLectureFindOne.mockResolvedValue({
+        _id: 'lec-1',
+        userId: 'user-1',
+        folderId: 'folder-1',
+        title: 'Bài gốc',
+        prompt: 'p',
+        theme: 'modern-obsidian',
+        outline,
+        contextSummary: 'tóm tắt',
+        sourceMaterial: '',
+        deletedAt: null,
+        slides: [{ id: 's1', components: [{ id: 'c1', type: 'title' }] }]
+      })
+      mockLectureCreate.mockImplementation(async (doc: unknown) => doc)
+
+      const copy = (await duplicateLecture('user-1', 'lec-1')) as any
+
+      expect(copy.title).toBe('Bài gốc - Copy')
+      expect(copy.theme).toBe('modern-obsidian')
+      expect(copy.outline).toEqual(outline)
+      expect(copy.folderId).toBe('folder-1')
+      expect(copy.slides[0].id).not.toBe('s1')
+      expect(copy.slides[0].components[0].id).not.toBe('c1')
     })
   })
 

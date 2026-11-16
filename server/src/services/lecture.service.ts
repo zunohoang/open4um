@@ -190,18 +190,11 @@ export const createBlankLecture = async (
   theme?: string,
   folderId?: string | null
 ) => {
-  let selectedTheme = 'classic-editorial'
-  let targetFolderId = folderId ?? null
-
-  if (folderId === undefined && theme) {
-    if (THEME_PRESETS.some((t) => t.id === theme)) {
-      selectedTheme = theme
-    } else {
-      targetFolderId = theme
-    }
-  } else if (theme) {
-    selectedTheme = theme
-  }
+  const selectedTheme =
+    theme && THEME_PRESETS.some((t) => t.id === theme)
+      ? theme
+      : 'classic-editorial'
+  const targetFolderId = folderId ?? null
 
   if (targetFolderId) {
     const folder = await FolderModel.findOne({ _id: targetFolderId, userId })
@@ -269,19 +262,6 @@ export const listTrash = async (userId: string) => {
   }).sort({
     deletedAt: -1
   })
-}
-
-export const cleanupExpiredTrash = async () => {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-  const result = await LectureModel.deleteMany({
-    deletedAt: { $ne: null, $lt: thirtyDaysAgo }
-  })
-  if (result.deletedCount > 0) {
-    logger.info(
-      `🧹 [CronJob] Đã xóa vĩnh viễn ${result.deletedCount} bài giảng trong thùng rác quá 30 ngày`
-    )
-  }
-  return result.deletedCount
 }
 
 const findOwnedLecture = async (userId: string, id: string) => {
@@ -403,6 +383,11 @@ export const duplicateLecture = async (userId: string, id: string) => {
     folderId: source.folderId,
     title: `${source.title} - Copy`,
     prompt: source.prompt,
+    // SRS UC025: bản sao "y hệt" bản gốc, gồm cả giao diện và dàn ý
+    theme: source.theme,
+    outline: source.outline,
+    contextSummary: source.contextSummary,
+    sourceMaterial: source.sourceMaterial,
     slides: clonedSlides
   })
 }

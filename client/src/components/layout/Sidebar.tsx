@@ -113,7 +113,7 @@ export const Sidebar = ({
                   d='M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25'
                 />
               </svg>
-              <span>Thư viện bài giảng</span>
+              <span>Trang chủ</span>
             </div>
             {typeof totalLectures === 'number' && (
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px] font-semibold text-stone-700'>

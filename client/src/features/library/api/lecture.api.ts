@@ -40,7 +40,6 @@ export const lectureApi = {
 
   // Soft delete: Chuyển bài giảng vào thùng rác (đếm ngược 30 ngày)
   moveToTrash: async (id: string) => apiClient.delete(`/lectures/${id}`),
-  remove: async (id: string) => apiClient.delete(`/lectures/${id}`),
 
   // Xóa vĩnh viễn bài giảng khỏi database (hard delete)
   permanentDelete: async (id: string) =>

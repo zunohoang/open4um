@@ -25,7 +25,10 @@ export const UserLayout = ({ totalLectures }: UserLayoutProps = {}) => {
 
       {/* Vùng nội dung chính cuộn độc lập bên phải */}
       <main className='ml-60 pt-16 min-h-screen'>
-        <Outlet />
+        {/* Thư viện dùng để mở modal từ nút CTA khi chưa có bài giảng (SRS UC020 2a) */}
+        <Outlet
+          context={{ openCreateLecture: () => setIsCreateModalOpen(true) }}
+        />
       </main>
 
       {/* Modal Tạo bài giảng */}
