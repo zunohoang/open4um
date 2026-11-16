@@ -167,7 +167,7 @@ export const EditorHeader = ({
             >
               <CloudOff size={14} className='text-orange-400 shrink-0' />
               <span className='text-[11px] font-bold truncate'>
-                Đã lưu offline
+                Đang lưu offline
               </span>
             </button>
           ) : saveStatus === 'unsaved' ? (
@@ -192,7 +192,7 @@ export const EditorHeader = ({
                 <Check size={11} className='-ml-1' />
               </div>
               <span className='hidden text-[11px] font-medium sm:inline truncate'>
-                Đã lưu
+                Đã lưu...
               </span>
             </div>
           )}
@@ -246,10 +246,10 @@ export const EditorHeader = ({
           type='button'
           onClick={onOpenExport}
           className='flex items-center gap-1.5 rounded-md border border-emerald-800 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-stone-200 shadow-2xs transition hover:bg-emerald-800 hover:text-white active:scale-95 cursor-pointer'
-          title='Xuất bài giảng (PNG, PDF...)'
+          title='Xuất bài giảng (ảnh PNG hoặc PDF)'
         >
           <FileDown size={14} />
-          <span className='hidden sm:inline'>Xuất</span>
+          <span className='hidden sm:inline'>Xuất file</span>
         </button>
 
         {/* Nút Trình chiếu theo chuẩn màu Brand Rust (#c45b3f) */}
@@ -257,7 +257,7 @@ export const EditorHeader = ({
           type='button'
           onClick={onPresent}
           className='flex items-center gap-1.5 rounded-md bg-brand-rust px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 cursor-pointer'
-          title='Trình chiếu toàn màn hình (F5/Present)'
+          title='Trình chiếu toàn màn hình'
         >
           <Play size={14} />
           <span>Trình chiếu</span>

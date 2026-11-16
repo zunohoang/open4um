@@ -29,7 +29,6 @@ export interface UpdateUserPayload {
 export interface ListAiUsageParams {
   page?: number
   limit?: number
-  userId?: string
   from?: string
   to?: string
 }
@@ -40,7 +39,6 @@ export interface DashboardParams {
 }
 
 export interface UpdateCreditConfigPayload {
-  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
   pricePerOutline?: number

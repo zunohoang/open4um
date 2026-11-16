@@ -86,15 +86,6 @@ export const duplicateLecture = asyncHandler(async (req, res) => {
   ok(res, lecture, 201)
 })
 
-export const applySlideOperation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.applySlideOperation(
-    req.user.id,
-    String(req.params.id),
-    req.body
-  )
-  ok(res, lecture)
-})
-
 export const autosaveLecture = asyncHandler(async (req, res) => {
   const lecture = await lectureService.updateLecture(
     req.user.id,
@@ -128,37 +119,6 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
   ok(res, result)
 })
 
-export const editSlideWithAi = asyncHandler(async (req, res) => {
-  const result = await lectureService.editSlideWithAi(
-    req.user.id,
-    String(req.params.id),
-    req.body.slideId,
-    req.body.instruction
-  )
-  ok(res, result)
-})
-
-export const getPresentation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.getLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, {
-    id: lecture._id,
-    title: lecture.title,
-    slides: lecture.slides,
-    updatedAt: lecture.updatedAt
-  })
-})
-
-export const exportLecture = asyncHandler(async (req, res) => {
-  const result = await lectureService.exportLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, result)
-})
-
 export const aiChat = asyncHandler(async (req, res) => {
   const result = await lectureService.aiChatInEditor(
     req.user.id,
@@ -173,4 +133,9 @@ export const aiChat = asyncHandler(async (req, res) => {
     }
   )
   ok(res, result)
+})
+
+export const uploadImage = asyncHandler(async (req, res) => {
+  const result = await lectureService.uploadImage(req.user.id, req.body.dataUrl)
+  ok(res, result, 201)
 })

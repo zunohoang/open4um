@@ -2,11 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { BrandLogo } from '@/components/ui'
+import { useLogoutConfirm } from '@/features/auth/hooks/useLogoutConfirm'
 
 interface WorkspaceHeaderProps {
   onCreate?: () => void
-  onAdmin?: () => void
-  onLogout: () => void
   children?: ReactNode
 }
 
@@ -18,14 +17,11 @@ const getInitial = (name?: string) => {
   return (lastWord?.[0] || trimmed[0] || 'U').toUpperCase()
 }
 
-export const WorkspaceHeader = ({
-  onAdmin,
-  onLogout,
-  children
-}: WorkspaceHeaderProps) => {
+export const WorkspaceHeader = ({ children }: WorkspaceHeaderProps) => {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const isAdmin = user?.role === 'admin'
+  const { requestLogout, logoutDialog } = useLogoutConfirm()
 
   const [open, setOpen] = useState(false)
   const [showBellToast, setShowBellToast] = useState(false)
@@ -322,25 +318,11 @@ export const WorkspaceHeader = ({
                   <span>Hồ sơ cá nhân & Đổi mật khẩu</span>
                 </button>
 
-                {!isAdmin && onAdmin && (
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setOpen(false)
-                      onAdmin()
-                    }}
-                    className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-stone-700 hover:bg-stone-100 transition'
-                  >
-                    <span>⚙️</span>
-                    <span>Trang Quản trị Hệ thống</span>
-                  </button>
-                )}
-
                 <button
                   type='button'
                   onClick={() => {
                     setOpen(false)
-                    onLogout()
+                    requestLogout()
                   }}
                   className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-red-700 hover:bg-red-50 hover:text-red-800 transition'
                 >
@@ -365,6 +347,7 @@ export const WorkspaceHeader = ({
           )}
         </div>
       </div>
+      {logoutDialog}
     </header>
   )
 }

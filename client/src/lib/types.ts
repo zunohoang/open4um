@@ -42,11 +42,20 @@ export type ShapeType =
   | 'star'
   | 'line'
 
+// Phần trăm cắt bớt mỗi cạnh ảnh (SRS UC011 Crop)
+export interface ImageCrop {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 export interface SlideComponent {
   id: string
   type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image' | 'shape'
   content: string
   imageUrl?: string
+  crop?: ImageCrop
   shapeType?: ShapeType
   fillColor?: string
   borderColor?: string
@@ -185,7 +194,6 @@ export interface DashboardStats {
 
 export interface CreditConfig {
   _id: string
-  pricePerLecture: number
   pricePerSlide: number
   pricePerAiEdit: number
   pricePerOutline: number

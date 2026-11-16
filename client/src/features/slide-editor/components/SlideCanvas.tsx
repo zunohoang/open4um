@@ -2,7 +2,7 @@ import type { Slide, SlideComponent } from '@/lib/types'
 import { Check, Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP, getThemeById } from '../constants/theme-options'
-import { getSlideComponents } from '../utils/slide'
+import { cropClipPath, getSlideComponents } from '../utils/slide'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
@@ -37,6 +37,20 @@ interface SlideCanvasProps {
 const getResponsiveFontSize = (fontSize: number = 20): string => {
   const cqw = (fontSize / 9.6).toFixed(3)
   return `clamp(8px, ${cqw}cqw, ${fontSize * 1.6}px)`
+}
+
+const SNAP_THRESHOLD = 1.5
+
+// SRS UC012 bước 5: hút mép trái/giữa/phải của đối tượng về mép và tâm slide (đơn vị %)
+const snapAxis = (start: number, size: number) => {
+  for (const target of [0, 50, 100]) {
+    for (const offset of [0, size / 2, size]) {
+      if (Math.abs(start + offset - target) <= SNAP_THRESHOLD) {
+        return { value: target - offset, guide: target }
+      }
+    }
+  }
+  return { value: start, guide: null }
 }
 
 export const SlideCanvas = ({
@@ -87,6 +101,11 @@ export const SlideCanvas = ({
     isTextSessionRecordedRef.current = false
     isComposingRef.current = false
   }, [editingTextId])
+
+  const [snapGuides, setSnapGuides] = useState<{
+    v: number | null
+    h: number | null
+  } | null>(null)
 
   // Quản lý trạng thái kéo thả di chuyển, co giãn hoặc xoay phần tử
   const [dragState, setDragState] = useState<{
@@ -283,7 +302,7 @@ export const SlideCanvas = ({
           shouldRecord
         )
       } else if (dragState.type === 'move') {
-        const nextX = Math.round(
+        const rawX = Math.round(
           Math.max(
             0,
             Math.min(
@@ -292,7 +311,7 @@ export const SlideCanvas = ({
             )
           )
         )
-        const nextY = Math.round(
+        const rawY = Math.round(
           Math.max(
             0,
             Math.min(
@@ -301,9 +320,12 @@ export const SlideCanvas = ({
             )
           )
         )
+        const snapX = snapAxis(rawX, dragState.initialWidth)
+        const snapY = snapAxis(rawY, dragState.initialHeight)
+        setSnapGuides({ v: snapX.guide, h: snapY.guide })
         onUpdateComponent(
           dragState.compId,
-          { x: nextX, y: nextY },
+          { x: snapX.value, y: snapY.value },
           shouldRecord
         )
       } else if (dragState.type === 'resize' && dragState.handle) {
@@ -386,7 +408,7 @@ export const SlideCanvas = ({
           }
 
           nextFontSize = Math.round(
-            Math.max(10, Math.min(160, dragState.initialFontSize * s))
+            Math.max(8, Math.min(120, dragState.initialFontSize * s))
           )
         } else {
           // Các đối tượng hình khối, ảnh hoặc kéo các chốt cạnh (e, w, n, s) của text
@@ -465,6 +487,7 @@ export const SlideCanvas = ({
 
     const handleMouseUp = () => {
       setDragState(null)
+      setSnapGuides(null)
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -683,6 +706,19 @@ export const SlideCanvas = ({
               : 'border-stone-200'
         }`}
       >
+        {snapGuides?.v != null && (
+          <div
+            className='pointer-events-none absolute inset-y-0 z-30 w-px bg-pink-500'
+            style={{ left: `${snapGuides.v}%` }}
+          />
+        )}
+        {snapGuides?.h != null && (
+          <div
+            className='pointer-events-none absolute inset-x-0 z-30 h-px bg-pink-500'
+            style={{ top: `${snapGuides.h}%` }}
+          />
+        )}
+
         {/* Banner chế độ xem trước đề xuất AI với nút gạt Before / After */}
         {isPreview && (
           <div className='absolute inset-x-0 top-0 z-40 flex items-center justify-between bg-amber-500/95 backdrop-blur-xs px-3.5 py-1.5 text-white shadow-md'>
@@ -928,6 +964,7 @@ export const SlideCanvas = ({
                       <>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('rewrite')}
                           disabled={isAiLoading}
                           className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -939,6 +976,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('shorten')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -949,6 +987,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('expand')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -990,6 +1029,7 @@ export const SlideCanvas = ({
                   <img
                     src={comp.imageUrl || comp.content}
                     alt='Slide graphic'
+                    style={{ clipPath: cropClipPath(comp.crop) }}
                     className={
                       comp.height
                         ? 'h-full w-full object-contain'

@@ -42,14 +42,6 @@ export const updateLectureSchema = z.object({
   aiChatHistory: z.array(z.record(z.string(), z.unknown())).optional()
 })
 
-export const aiEditSlideSchema = z.object({
-  slideId: z.string().min(1, 'Mã slide không được để trống'),
-  instruction: z
-    .string()
-    .min(2, 'Hướng dẫn chỉnh sửa phải có ít nhất 2 ký tự')
-    .max(2000, 'Hướng dẫn chỉnh sửa không được quá 2000 ký tự')
-})
-
 const aiChatSlideSnapshotSchema = z
   .object({
     id: z.string().min(1).max(200),
@@ -104,30 +96,6 @@ export const aiChatSchema = z.object({
     .optional()
 })
 
-export const slideOperationSchema = z.discriminatedUnion('operation', [
-  z.object({
-    operation: z.literal('add'),
-    index: z.number().int('Chỉ số slide phải là số nguyên').min(0).optional()
-  }),
-  z.object({
-    operation: z.literal('delete'),
-    slideId: z.string().min(1, 'Mã slide không được để trống')
-  }),
-  z.object({
-    operation: z.literal('duplicate'),
-    slideId: z.string().min(1, 'Mã slide không được để trống')
-  }),
-  z.object({
-    operation: z.literal('move'),
-    slideId: z.string().min(1, 'Mã slide không được để trống'),
-    toIndex: z
-      .number()
-      .int('Vị trí chuyển đến phải là số nguyên')
-      .min(0, 'Vị trí chuyển đến không được âm')
-  }),
-  z.object({
-    operation: z.literal('update'),
-    slideId: z.string().min(1, 'Mã slide không được để trống'),
-    patch: z.record(z.string(), z.unknown())
-  })
-])
+export const uploadImageSchema = z.object({
+  dataUrl: z.string().min(1, 'Dữ liệu ảnh không được để trống')
+})

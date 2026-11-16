@@ -8,7 +8,6 @@ export const seedCreditConfig = async () => {
   let config = await CreditConfigModel.findOne()
   if (!config) {
     config = await CreditConfigModel.create({
-      pricePerLecture: 80,
       pricePerSlide: 10,
       pricePerAiEdit: 5,
       pricePerOutline: 5,
@@ -16,9 +15,11 @@ export const seedCreditConfig = async () => {
     })
     logger.info('✅ Tạo cấu hình credit mặc định')
   } else {
+    // Giá sinh bài giảng nay tính theo pricePerSlide × số slide (SRS UC032)
     await CreditConfigModel.updateOne(
-      { _id: config._id, pricePerLecture: { $exists: false } },
-      { $set: { pricePerLecture: 80 } }
+      { _id: config._id, pricePerLecture: { $exists: true } },
+      { $unset: { pricePerLecture: 1 } },
+      { strict: false }
     )
   }
   return config

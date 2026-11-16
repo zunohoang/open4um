@@ -23,13 +23,23 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { COLOR_PALETTES, FONT_OPTIONS } from '../constants/theme-options'
+import { useToast } from '@/components/ui/Toast'
+import {
+  ImageCropButton,
+  ImageReplaceButton,
+  LayerOrderButtons
+} from './ImageTools'
 
 interface FloatingContextualToolbarProps {
   selectedComponent: SlideComponent | null
   onUpdateComponent: (patch: Partial<SlideComponent>) => void
   onDuplicateComponent: (comp: SlideComponent) => void
   onDeleteComponent: (id: string) => void
+  onChangeLayer: (direction: 'up' | 'down') => void
 }
+
+const MIN_FONT_SIZE = 8
+const MAX_FONT_SIZE = 120
 
 const BORDER_WIDTHS = [0, 1, 2, 4, 8]
 const BORDER_RADII = [0, 4, 8, 16, 9999]
@@ -139,8 +149,10 @@ export const FloatingContextualToolbar = ({
   selectedComponent,
   onUpdateComponent,
   onDuplicateComponent,
-  onDeleteComponent
+  onDeleteComponent,
+  onChangeLayer
 }: FloatingContextualToolbarProps) => {
+  const { showToast } = useToast()
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
   const [isFillPickerOpen, setIsFillPickerOpen] = useState(false)
   const [isBorderColorPickerOpen, setIsBorderColorPickerOpen] = useState(false)
@@ -224,6 +236,18 @@ export const FloatingContextualToolbar = ({
 
         <span className='h-4 w-px bg-stone-200' />
 
+        <ImageReplaceButton
+          onReplaced={(url) =>
+            onUpdateComponent({ imageUrl: url, content: url })
+          }
+        />
+        <ImageCropButton
+          component={selectedComponent}
+          onApply={(crop) => onUpdateComponent({ crop })}
+        />
+
+        <span className='h-4 w-px bg-stone-200' />
+
         {/* Xoay ảnh */}
         <div className='flex items-center gap-0.5'>
           <button
@@ -254,6 +278,8 @@ export const FloatingContextualToolbar = ({
         </div>
 
         <span className='h-4 w-px bg-stone-200' />
+
+        <LayerOrderButtons onChange={onChangeLayer} />
 
         {/* Nhân bản */}
         <button
@@ -544,6 +570,8 @@ export const FloatingContextualToolbar = ({
 
         <span className='h-4 w-px bg-stone-200' />
 
+        <LayerOrderButtons onChange={onChangeLayer} />
+
         {/* Nhân bản */}
         <button
           type='button'
@@ -575,6 +603,42 @@ export const FloatingContextualToolbar = ({
   const isUppercase = selectedComponent.textCase === 'uppercase'
   const textAlign = selectedComponent.textAlign || 'left'
 
+  // SRS UC010 6a: cỡ chữ không hợp lệ -> dùng cỡ hợp lệ gần nhất và cảnh báo
+  const commitFontSize = (input: HTMLInputElement) => {
+    const value = Number(input.value)
+    if (!input.value || Number.isNaN(value)) {
+      input.value = String(currentFontSize)
+      return
+    }
+    const clamped = Math.round(
+      Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, value))
+    )
+    if (clamped !== value) {
+      showToast(
+        `Cỡ chữ phải từ ${MIN_FONT_SIZE} đến ${MAX_FONT_SIZE}. Đã dùng cỡ chữ hợp lệ gần nhất: ${clamped}.`,
+        'info'
+      )
+      input.value = String(clamped)
+    }
+    if (clamped !== currentFontSize) onUpdateComponent({ fontSize: clamped })
+  }
+
+  // SRS UC010 6b: font không tải được -> trình duyệt dùng font dự phòng, báo cho người dùng
+  const handleFontChange = async (key: string) => {
+    onUpdateComponent({ fontFamily: key })
+    const family = FONT_OPTIONS.find((f) => f.key === key)?.fontFamily
+    if (!family || !document.fonts) return
+    const loaded = await document.fonts
+      .load(`16px ${family.split(',')[0]}`)
+      .catch(() => [])
+    if (loaded.length === 0) {
+      showToast(
+        'Không tải được phông chữ đã chọn, đang dùng phông chữ dự phòng.',
+        'info'
+      )
+    }
+  }
+
   return (
     <div className='flex h-10 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 px-2.5 sm:px-3 shadow-md backdrop-blur-xs select-none max-w-full overflow-x-auto no-scrollbar shrink-0'>
       {/* 1. Phông chữ (Canva font picker với 8 phông chữ phong phú) */}
@@ -582,11 +646,7 @@ export const FloatingContextualToolbar = ({
         <Type size={14} className='text-stone-500 shrink-0' />
         <select
           value={selectedComponent.fontFamily || 'sans'}
-          onChange={(e) =>
-            onUpdateComponent({
-              fontFamily: e.target.value
-            })
-          }
+          onChange={(e) => void handleFontChange(e.target.value)}
           className='h-7 max-w-[115px] sm:max-w-[140px] rounded-md border border-stone-200 bg-transparent px-1.5 text-xs font-medium text-stone-800 outline-none hover:bg-stone-50 cursor-pointer truncate'
           title='Chọn phông chữ'
         >
@@ -620,12 +680,12 @@ export const FloatingContextualToolbar = ({
         </button>
         <input
           type='number'
-          value={currentFontSize}
-          onChange={(e) =>
-            onUpdateComponent({
-              fontSize: Math.max(8, Math.min(120, Number(e.target.value) || 20))
-            })
-          }
+          key={currentFontSize}
+          defaultValue={currentFontSize}
+          min={MIN_FONT_SIZE}
+          max={MAX_FONT_SIZE}
+          onBlur={(e) => commitFontSize(e.target)}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
           className='h-7 w-9 border-y border-stone-200 text-center font-mono text-xs font-bold text-stone-800 outline-none'
           title='Nhập cỡ chữ'
         />
@@ -840,6 +900,8 @@ export const FloatingContextualToolbar = ({
       </div>
 
       <span className='h-4 w-px bg-stone-200' />
+
+      <LayerOrderButtons onChange={onChangeLayer} />
 
       {/* 8. Nhân bản & Xóa */}
       <button

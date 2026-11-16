@@ -171,7 +171,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
         .get(`/api/v1/lectures/${lectureB._id}`)
         .set('Authorization', `Bearer ${userAToken}`)
 
-      expect(res.status).toBe(404)
+      expect(res.status).toBe(403)
       expect(res.body.success).toBe(false)
     })
 
@@ -190,7 +190,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
         .set('Authorization', `Bearer ${userAToken}`)
         .send({ title: 'Hacked title' })
 
-      expect(res.status).toBe(404)
+      expect(res.status).toBe(403)
       expect(res.body.success).toBe(false)
 
       const lectureInDb = await LectureModel.findById(lectureB._id)
@@ -211,7 +211,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
         .delete(`/api/v1/lectures/${lectureB._id}`)
         .set('Authorization', `Bearer ${userAToken}`)
 
-      expect(res.status).toBe(404)
+      expect(res.status).toBe(403)
       expect(res.body.success).toBe(false)
 
       const lectureInDb = await LectureModel.findById(lectureB._id)
@@ -233,7 +233,7 @@ describe('Integration Tests — Lectures (/api/v1/lectures)', () => {
         .delete(`/api/v1/lectures/${lectureB._id}/permanent`)
         .set('Authorization', `Bearer ${userAToken}`)
 
-      expect(res.status).toBe(404)
+      expect(res.status).toBe(403)
       expect(res.body.success).toBe(false)
 
       const lectureInDb = await LectureModel.findById(lectureB._id)

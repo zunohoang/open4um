@@ -540,68 +540,6 @@ export const generateSlidesFromOutline = async (
   }
 }
 
-/**
- * Chỉnh sửa slide theo chỉ dẫn của người dùng.
- */
-export const editSlideWithInstruction = async <
-  T extends Record<string, unknown>
->(
-  slide: T,
-  instruction: string
-): Promise<T> => {
-  const normalizedInstruction = instruction.trim()
-  const ai = getAiClient()
-
-  try {
-    const systemInstruction =
-      'Bạn là một trợ lý AI chuyên nghiệp về thiết kế và tinh chỉnh slide thuyết trình. ' +
-      'Bạn nhận được thông tin một slide hiện tại (gồm title, bullets, subtitle, layout, speakerNotes) ' +
-      'và một yêu cầu chỉnh sửa từ người dùng. ' +
-      'Nhiệm vụ của bạn là thực hiện yêu cầu đó và trả về đối tượng JSON của slide sau khi chỉnh sửa. ' +
-      'BẮT BUỘC giữ nguyên trường "id" của slide gốc. ' +
-      'Chỉ trả về JSON thuần túy, không kèm bất kỳ giải thích nào.'
-
-    const userContent =
-      `Slide hiện tại:\n${JSON.stringify(slide, null, 2)}\n\n` +
-      `Yêu cầu chỉnh sửa của người dùng: "${normalizedInstruction}"\n\n` +
-      'Hãy cập nhật slide theo yêu cầu và trả về kết quả dưới dạng JSON hoàn chỉnh.'
-
-    const response = await ai.models.generateContent({
-      model: DEFAULT_AI_MODEL,
-      contents: userContent,
-      config: {
-        systemInstruction,
-        temperature: 0.4,
-        responseMimeType: 'application/json'
-      }
-    })
-
-    const rawText = response.text
-    if (!rawText) {
-      logger.error(
-        { err: 'Không nhận được nội dung từ AI' },
-        'ai.editSlide failed'
-      )
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
-
-    const parsed = safeParseAiJson<Record<string, unknown>>(rawText)
-
-    return {
-      ...slide,
-      ...parsed,
-      id: slide.id
-    }
-  } catch (err) {
-    if (err instanceof AppError) throw err
-    logger.error({ err }, 'ai.editSlide failed')
-    throw new AppError('Lỗi kết nối tới dịch vụ AI của Google', 502)
-  }
-}
-
 export interface AiChatSlideSummary {
   slideNumber: number
   id: string
@@ -719,7 +657,8 @@ export const chatAndProposeSlideEdit = async (
       '   - Chỉ dùng khi người dùng yêu cầu chỉnh sửa, tóm gọn, viết lại, hoặc thay đổi nội dung của một slide đã có sẵn.\n' +
       '   - TUYỆT ĐỐI KHÔNG dùng khi người dùng yêu cầu thêm slide mới hoặc viết slide sau slide khác!\n' +
       '   - "targetSlideIndex": 0-indexed vị trí slide cần cập nhật.\n' +
-      '   - "proposedSlide": đối tượng slide với nội dung sau khi cập nhật.\n\n' +
+      '   - "proposedSlide": đối tượng slide với nội dung sau khi cập nhật.\n' +
+      '   - Khi người dùng yêu cầu đổi màu, đặt mã HEX vào các trường của "proposedSlide": "backgroundColor" (màu nền), "accentColor" (màu nhấn), "textColor" (màu chữ tiêu đề). Chỉ đặt trường được yêu cầu.\n\n' +
       '4. "CHAT_ONLY":\n' +
       '   - Khi người dùng chỉ hỏi đáp, xin tư vấn mà không yêu cầu thay đổi hay tạo slide.\n\n' +
       'CẤU TRÚC JSON PHẢN HỒI MẪU CHO BATCH_CHANGES (Khi yêu cầu thêm slide ví dụ code sau các khái niệm/lý thuyết):\n' +

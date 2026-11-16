@@ -354,8 +354,6 @@ describe('admin.service unit tests', () => {
       ;(UserModel.findByIdAndDelete as jest.Mock).mockResolvedValue({})
       ;(LectureModel.deleteMany as jest.Mock).mockResolvedValue({})
       ;(FolderModel.deleteMany as jest.Mock).mockResolvedValue({})
-      ;(AiUsageLogModel.deleteMany as jest.Mock).mockResolvedValue({})
-
       const result = await deleteUser('user-1')
 
       expect(result).toEqual({
@@ -365,9 +363,8 @@ describe('admin.service unit tests', () => {
       expect(UserModel.findByIdAndDelete).toHaveBeenCalledWith('user-1')
       expect(LectureModel.deleteMany).toHaveBeenCalledWith({ userId: 'user-1' })
       expect(FolderModel.deleteMany).toHaveBeenCalledWith({ userId: 'user-1' })
-      expect(AiUsageLogModel.deleteMany).toHaveBeenCalledWith({
-        userId: 'user-1'
-      })
+      // Log AI được giữ lại cho báo cáo UC031
+      expect(AiUsageLogModel.deleteMany).not.toHaveBeenCalled()
     })
   })
 
@@ -427,20 +424,14 @@ describe('admin.service unit tests', () => {
       ;(AiUsageLogModel.find as jest.Mock).mockReturnValue(mockFind)
       ;(AiUsageLogModel.countDocuments as jest.Mock).mockResolvedValue(1)
 
-      const result = await listAiUsage(
-        1,
-        10,
-        '507f1f77bcf86cd799439011',
-        '2026-01-01',
-        '2026-01-02'
-      )
+      const result = await listAiUsage(1, 10, '2026-01-01', '2026-01-02')
       expect(result.items).toEqual(mockLogs)
       expect(result.total).toBe(1)
     })
 
     it('từ chối khoảng ngày không hợp lệ', async () => {
       await expect(
-        listAiUsage(1, 10, undefined, '2026-01-03', '2026-01-02')
+        listAiUsage(1, 10, '2026-01-03', '2026-01-02')
       ).rejects.toMatchObject({ statusCode: 422 })
 
       expect(AiUsageLogModel.find).not.toHaveBeenCalled()

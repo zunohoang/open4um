@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { AdminPage } from '@/features/admin/components/AdminPage'
 import { AuthPage } from '@/features/auth/components/AuthPage'
 import { authApi } from '@/features/auth/api/auth.api'
@@ -13,7 +13,6 @@ import { UserLayout } from '@/components/layout/UserLayout'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 export const App = () => {
-  const navigate = useNavigate()
   const { user, accessToken, refreshToken, setSession, clearSession } =
     useAuthStore()
 
@@ -35,16 +34,11 @@ export const App = () => {
 
   const isAdmin = user.role === 'admin'
 
-  const logout = () => {
-    if (refreshToken) void authApi.logout(refreshToken)
-    clearSession()
-  }
-
   // Admin chỉ cần quản trị hệ thống, không cần các tab khác -> UI content container không có sidebar
   if (isAdmin) {
     return (
       <div className='min-h-screen bg-brand-paper font-sans'>
-        <WorkspaceHeader onAdmin={() => navigate('/admin')} onLogout={logout} />
+        <WorkspaceHeader />
         <main className='pt-16 min-h-screen'>
           <Routes>
             <Route path='/admin' element={<AdminPage />} />

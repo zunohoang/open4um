@@ -1,5 +1,6 @@
-import { ExportModal } from '@/components/ui/ExportModal'
+import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type {
@@ -32,6 +33,7 @@ import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
 import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
+import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 
 const resolveProposalTargetIndex = (
@@ -74,7 +76,7 @@ export const EditorPage = ({
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
-  const { user, updateUser } = useAuthStore()
+  const { updateUser } = useAuthStore()
 
   const {
     activeSlideIndex,
@@ -95,22 +97,24 @@ export const EditorPage = ({
     sourceMaterial,
     setSourceMaterial,
     isSourceMaterialModalOpen,
-    setIsSourceMaterialModalOpen
+    setIsSourceMaterialModalOpen,
+    clearHistory
   } = useEditorStore()
 
-  const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
+  const routeState = location.state as {
+    lecture?: Lecture
+    startAi?: boolean
+  } | null
+  const lectureFromState = routeState?.lecture
+  // SRS UC021 bước 5: bài giảng vừa tạo mở kèm màn hình nhập Prompt AI
+  const [showAiWizard, setShowAiWizard] = useState(Boolean(routeState?.startAi))
   const lectureId = params.id || initialLecture?._id || lectureFromState?._id
 
-  // Kiểm tra ngay khi khởi tạo xem có bản nháp offline trong localStorage không
-  const [lecture, setLecture] = useState<Lecture | null>(() => {
-    if (lectureId) {
-      const draft = getOfflineDraft(lectureId)
-      if (draft) {
-        return draft.lecture
-      }
-    }
-    return initialLecture || lectureFromState || null
-  })
+  // Bản nháp offline (nếu có) được hỏi Khôi phục/Bỏ qua sau khi tải xong (SRS UC009 5a/5b)
+  const [lecture, setLecture] = useState<Lecture | null>(
+    () => initialLecture || lectureFromState || null
+  )
+  const [pendingDraft, setPendingDraft] = useState<Lecture | null>(null)
   const [isLoading, setIsLoading] = useState(!lecture)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isUnauthorized, setIsUnauthorized] = useState(false)
@@ -130,12 +134,7 @@ export const EditorPage = ({
   })
 
   // Trạng thái lưu: nếu mở từ bản nháp offline chưa đồng bộ, khởi tạo là 'offline_saved'
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
-    if (lectureId && getOfflineDraft(lectureId)) {
-      return 'offline_saved'
-    }
-    return 'saved'
-  })
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [countdown, setCountdown] = useState<number | null>(null)
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -221,10 +220,13 @@ export const EditorPage = ({
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
         saveOfflineDraft(payload)
         setSaveStatus('offline_saved')
-        showToast(
-          'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
-          'error'
-        )
+        // Lưu tự động lỗi thì chỉ hiện trạng thái "Đang lưu offline", tránh toast lặp mỗi 2 giây
+        if (!isAuto) {
+          showToast(
+            'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
+            'error'
+          )
+        }
       }
     },
     [clearCountdownTimers, showToast]
@@ -238,21 +240,11 @@ export const EditorPage = ({
     }
     setLoadError(null)
     setIsUnauthorized(false)
+    // Undo/Redo stack là global: không để lịch sử của bài giảng trước lọt sang bài này
+    clearHistory()
 
     try {
       const loaded = await editorApi.get(params.id)
-
-      // Kiểm tra quyền truy cập theo Use-case
-      if (
-        user &&
-        loaded.userId &&
-        loaded.userId !== user.id &&
-        user.role !== 'admin'
-      ) {
-        setIsUnauthorized(true)
-        setIsLoading(false)
-        return
-      }
 
       // Kiểm tra xem có bản nháp offline chưa đồng bộ không
       const draft = getOfflineDraft(params.id)
@@ -262,18 +254,10 @@ export const EditorPage = ({
           JSON.stringify(loaded.slides) ||
           draft.lecture.title !== loaded.title)
 
-      if (draft && hasUnsyncedChanges) {
-        setLecture(draft.lecture)
-        setSaveStatus('offline_saved')
-        showToast(
-          'Đã khôi phục bản nháp chỉnh sửa offline. Nhấn Ctrl+S hoặc nút Lưu để cập nhật lên máy chủ.',
-          'info'
-        )
-      } else {
-        setLecture(loaded)
-        setSaveStatus('saved')
-        if (draft) clearOfflineDraft(params.id)
-      }
+      setLecture(loaded)
+      setSaveStatus('saved')
+      if (draft && hasUnsyncedChanges) setPendingDraft(draft.lecture)
+      else if (draft) clearOfflineDraft(params.id)
 
       // Khôi phục lịch sử chat AI từ dữ liệu bài giảng trên máy chủ
       const chatHistory = draft?.lecture.aiChatHistory || loaded.aiChatHistory
@@ -289,21 +273,23 @@ export const EditorPage = ({
         }
       }
 
-      // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
-      const savedIndexStr = sessionStorage.getItem(
-        `open4um_last_slide_${loaded._id}`
+      // SRS UC009 bước 7: chọn slide mở gần nhất, nếu không có thì slide đầu tiên
+      const savedIndex = Number(
+        sessionStorage.getItem(`open4um_last_slide_${loaded._id}`)
       )
-      if (savedIndexStr !== null) {
-        const savedIndex = Number(savedIndexStr)
-        if (
-          !isNaN(savedIndex) &&
+      setActiveSlideIndex(
+        Number.isInteger(savedIndex) &&
           savedIndex >= 0 &&
           savedIndex < loaded.slides.length
-        ) {
-          setActiveSlideIndex(savedIndex)
-        }
-      }
+          ? savedIndex
+          : 0
+      )
     } catch (err) {
+      // SRS UC009 2a: không có quyền truy cập
+      if (isAxiosError(err) && err.response?.status === 403) {
+        setIsUnauthorized(true)
+        return
+      }
       // Khi server tắt hoặc offline: thử mở bản nháp offline từ localStorage
       const draft = getOfflineDraft(params.id)
       if (draft) {
@@ -323,7 +309,7 @@ export const EditorPage = ({
     } finally {
       setIsLoading(false)
     }
-  }, [params.id, user, setActiveSlideIndex, setAiMessages, showToast])
+  }, [params.id, clearHistory, setActiveSlideIndex, setAiMessages, showToast])
 
   useEffect(() => {
     if (params.id) {
@@ -765,6 +751,41 @@ export const EditorPage = ({
     if (selectedCompId === compId) setSelectedCompId(null)
   }
 
+  // SRS UC012: đổi thứ tự lớp; phần tử đứng sau trong mảng được vẽ đè lên trên
+  const handleChangeLayer = (compId: string, direction: 'up' | 'down') => {
+    if (!lecture || !currentSlide) return
+    const comps = [...getSlideComponents(currentSlide, lecture.theme)]
+    const from = comps.findIndex((c) => c.id === compId)
+    const to = direction === 'up' ? from + 1 : from - 1
+    if (from < 0 || to < 0 || to >= comps.length) return
+    ;[comps[from], comps[to]] = [comps[to], comps[from]]
+    mutateLecture({
+      ...lecture,
+      slides: lecture.slides.map((s, idx) =>
+        idx === activeSlideIndex ? { ...currentSlide, components: comps } : s
+      )
+    })
+  }
+
+  // SRS UC012 7b-7d / UC015: Delete xóa đối tượng đang chọn, không chọn đối tượng thì xóa slide; đang gõ chữ thì để trình duyệt xóa chữ
+  useEffect(() => {
+    const handleDeleteKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' || e.isComposing) return
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT'
+      if (isTyping || showAiWizard) return
+      e.preventDefault()
+      if (selectedCompId) handleDeleteComponent(selectedCompId)
+      else if (currentSlide) handleDeleteSlide(currentSlide.id)
+    }
+    window.addEventListener('keydown', handleDeleteKey)
+    return () => window.removeEventListener('keydown', handleDeleteKey)
+  })
+
   // Đổi giao diện bài giảng (Theme) và đồng bộ màu sắc các slide hiện có
   const handleThemeChange = (themeId: string) => {
     if (!lecture) return
@@ -856,9 +877,16 @@ export const EditorPage = ({
       title: 'Tiêu đề slide',
       bullets: []
     }
-    const newSlide: Slide = {
-      ...rawSlide,
-      components: getSlideComponents(rawSlide, lecture.theme)
+    let newSlide: Slide
+    try {
+      newSlide = {
+        ...rawSlide,
+        components: getSlideComponents(rawSlide, lecture.theme)
+      }
+    } catch {
+      // SRS UC014 4a: không khởi tạo được slide -> giữ nguyên bài giảng
+      showToast('Không thể tạo slide mới. Vui lòng thử lại.', 'error')
+      return
     }
 
     const nextSlides = [...lecture.slides]
@@ -895,16 +923,21 @@ export const EditorPage = ({
     const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
     if (sourceIndex === -1) return
 
-    const sourceSlide = lecture.slides[sourceIndex]
-    const clonedSlide: Slide = {
-      ...sourceSlide,
-      id: `slide-${crypto.randomUUID()}`,
-      components: getSlideComponents(sourceSlide, lecture.theme).map(
-        (comp) => ({
-          ...comp,
-          id: `comp-${crypto.randomUUID()}`
-        })
-      )
+    let clonedSlide: Slide
+    try {
+      // Bản sao độc lập hoàn toàn (SRS UC016): không dùng chung mảng với slide gốc
+      const sourceSlide = structuredClone(lecture.slides[sourceIndex])
+      clonedSlide = {
+        ...sourceSlide,
+        id: `slide-${crypto.randomUUID()}`,
+        components: getSlideComponents(sourceSlide, lecture.theme).map(
+          (comp) => ({ ...comp, id: `comp-${crypto.randomUUID()}` })
+        )
+      }
+    } catch {
+      // SRS UC016 3a: không sao chép được -> không tạo slide mới
+      showToast('Không thể nhân bản slide. Vui lòng thử lại.', 'error')
+      return
     }
 
     const nextSlides = [...lecture.slides]
@@ -925,14 +958,9 @@ export const EditorPage = ({
     nextSlides.splice(toIndex, 0, moved)
 
     mutateLecture({ ...lecture, slides: nextSlides })
-
-    if (sourceIndex === activeSlideIndex) {
-      setActiveSlideIndex(toIndex)
-    } else if (sourceIndex < activeSlideIndex && toIndex >= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex - 1)
-    } else if (sourceIndex > activeSlideIndex && toIndex <= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex + 1)
-    }
+    // SRS UC017 bước 8: slide vừa di chuyển giữ trạng thái được chọn
+    setSelectedCompId(null)
+    setActiveSlideIndex(toIndex)
   }
 
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ
@@ -1082,7 +1110,49 @@ export const EditorPage = ({
         }
       }
 
-      if (
+      // SRS UC008 bước 5: chỉnh sửa slide đang active được áp dụng trực tiếp (Undo để hoàn tác)
+      const shouldAutoApply =
+        canShowPreview &&
+        slideAction === 'UPDATE_SLIDE' &&
+        (response.proposals?.length ?? 0) <= 1
+      if (shouldAutoApply && slideToPreview && lectureRef.current) {
+        const latest = lectureRef.current
+        const appliedMessages = useEditorStore
+          .getState()
+          .aiMessages.map((m, idx, list) =>
+            idx === list.length - 1 && m.role === 'assistant'
+              ? {
+                  ...m,
+                  status: 'accepted' as const,
+                  proposals: m.proposals?.map((p) => ({
+                    ...p,
+                    status: 'accepted' as const
+                  }))
+                }
+              : m
+          )
+        setAiMessages(appliedMessages)
+        mutateLecture({
+          ...latest,
+          slides: latest.slides.map((s, idx) =>
+            idx === latestTargetIndex
+              ? {
+                  ...slideToPreview,
+                  components: getSlideComponents(slideToPreview, latest.theme)
+                }
+              : s
+          ),
+          aiChatHistory: appliedMessages as unknown as Array<
+            Record<string, unknown>
+          >
+        })
+        setPreviewSlide(null)
+        setSelectedCompId(null)
+        showToast(
+          `Đã áp dụng chỉnh sửa AI vào Slide ${latestTargetIndex + 1}`,
+          'success'
+        )
+      } else if (
         canShowPreview &&
         slideToPreview &&
         response.proposals &&
@@ -1362,7 +1432,18 @@ export const EditorPage = ({
       expand:
         'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
     }
-    void handleApplyAiPrompt(promptMap[action])
+    // SRS UC008 3a: nếu người dùng bôi đen một đoạn thì AI chỉ xử lý đoạn đó
+    const selectedText = window.getSelection()?.toString().trim()
+    const selectionPromptMap = {
+      rewrite: 'Viết lại cho mạch lạc, sắc nét hơn',
+      shorten: 'Rút gọn cho súc tích',
+      expand: 'Mở rộng chi tiết hơn'
+    }
+    void handleApplyAiPrompt(
+      selectedText
+        ? `${selectionPromptMap[action]} đúng đoạn văn bản sau trong slide, giữ nguyên các phần còn lại: "${selectedText}"`
+        : promptMap[action]
+    )
   }
 
   const handleBack = () => {
@@ -1377,7 +1458,10 @@ export const EditorPage = ({
   const handlePresent = () => {
     if (!lecture) return
     if (onPresent) onPresent(lecture)
-    else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
+    else
+      navigate(`/presentation/${lecture._id}`, {
+        state: { lecture, startIndex: activeSlideIndex }
+      })
   }
 
   // Tự động tạo lại Dàn ý bài giảng bằng AI khi người dùng yêu cầu
@@ -1501,6 +1585,9 @@ export const EditorPage = ({
           outline={lecture.outline}
           currentThemeId={lecture.theme}
           onThemeChange={handleThemeChange}
+          layers={
+            currentSlide ? getSlideComponents(currentSlide, lecture.theme) : []
+          }
         />
 
         {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
@@ -1517,6 +1604,10 @@ export const EditorPage = ({
                   }}
                   onDuplicateComponent={handleDuplicateComponent}
                   onDeleteComponent={handleDeleteComponent}
+                  onChangeLayer={(direction) => {
+                    if (selectedCompId)
+                      handleChangeLayer(selectedCompId, direction)
+                  }}
                 />
               </div>
             </div>
@@ -1576,14 +1667,17 @@ export const EditorPage = ({
       </div>
 
       {/* MODAL XUẤT BÀI GIẢNG */}
-      <ExportModal
-        open={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        lecture={lecture}
-        initialSlideIndex={activeSlideIndex}
-        onSuccess={(msg) => showToast(msg, 'success')}
-        onError={(msg) => showToast(msg, 'error')}
-      />
+      {/* Mount lại mỗi lần mở để 'slide hiện tại' luôn đúng slide đang chọn (SRS UC029) */}
+      {isExportModalOpen && (
+        <ExportModal
+          open={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          lecture={lecture}
+          initialSlideIndex={activeSlideIndex}
+          onSuccess={(msg) => showToast(msg, 'success')}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
 
       {/* MODAL TÀI LIỆU NGUỒN */}
       <SourceMaterialModal
@@ -1608,6 +1702,46 @@ export const EditorPage = ({
         isLoading={isOutlineLoading}
         onRegenerateOutline={handleRegenerateOutline}
       />
+
+      <ConfirmDialog
+        open={pendingDraft !== null}
+        title='Phát hiện dữ liệu chưa đồng bộ'
+        message='Trình duyệt còn lưu bản chỉnh sửa offline chưa được đồng bộ lên máy chủ. Bạn muốn khôi phục bản này hay bỏ qua để dùng dữ liệu trên máy chủ?'
+        confirmLabel='Khôi phục'
+        cancelLabel='Bỏ qua'
+        onConfirm={() => {
+          if (pendingDraft) setLecture(pendingDraft)
+          setSaveStatus('offline_saved')
+          setPendingDraft(null)
+        }}
+        onCancel={() => {
+          if (params.id) clearOfflineDraft(params.id)
+          setPendingDraft(null)
+        }}
+      />
+
+      {showAiWizard && (
+        <AiGenerationWizard
+          lecture={lecture}
+          onDone={(created) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { creditSpent, creditBalance, ...generated } =
+              created as Lecture & {
+                creditSpent?: number
+                creditBalance?: number
+              }
+            setLecture(generated)
+            setSaveStatus('saved')
+            setActiveSlideIndex(0)
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+          onSkip={() => {
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+        />
+      )}
     </div>
   )
 }

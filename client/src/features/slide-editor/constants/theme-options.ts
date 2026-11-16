@@ -192,6 +192,21 @@ export const getThemeById = (id?: string | null): SlideTheme => {
   return THEME_PRESETS.find((t) => t.id === id) || THEME_PRESETS[0]
 }
 
+const HEX_COLOR = /^#[0-9a-f]{3,8}$/i
+const pickColor = (value: unknown) =>
+  typeof value === 'string' && HEX_COLOR.test(value) ? value : undefined
+
+// Đồng bộ với server/src/constants/theme-options.ts: màu ghi đè theo từng slide (AI Chat đổi màu)
+export const withSlideColors = (
+  theme: SlideTheme,
+  slide: Record<string, unknown>
+): SlideTheme => ({
+  ...theme,
+  background: pickColor(slide.backgroundColor) ?? theme.background,
+  accentColor: pickColor(slide.accentColor) ?? theme.accentColor,
+  textPrimary: pickColor(slide.textColor) ?? theme.textPrimary
+})
+
 export interface ColorGroup {
   name: string
   colors: Array<{ name: string; value: string }>
