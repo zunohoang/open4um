@@ -1633,6 +1633,7 @@ export const EditorPage = ({
           {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
           <SlideFilmstrip
             slides={lecture.slides}
+            lectureTheme={lecture.theme}
             activeSlideIndex={activeSlideIndex}
             onSelectSlide={setActiveSlideIndex}
             onAddSlide={handleAddSlide}

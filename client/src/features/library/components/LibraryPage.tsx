@@ -483,6 +483,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           <SlidePreview
             slide={lecture.previewSlide}
             lectureTitle={lecture.title}
+            lectureTheme={lecture.theme}
           />
         </div>
 

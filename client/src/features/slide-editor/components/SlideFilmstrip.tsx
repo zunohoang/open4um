@@ -16,6 +16,7 @@ import { SlideThumbnail } from './SlideThumbnail'
 
 interface SlideFilmstripProps {
   slides: Slide[]
+  lectureTheme?: string
   activeSlideIndex: number
   onSelectSlide: (index: number) => void
   onAddSlide: (atIndex?: number) => void
@@ -26,6 +27,7 @@ interface SlideFilmstripProps {
 
 export const SlideFilmstrip = ({
   slides,
+  lectureTheme,
   activeSlideIndex,
   onSelectSlide,
   onAddSlide,
@@ -245,6 +247,7 @@ export const SlideFilmstrip = ({
               <SlideThumbnail
                 key={slide.id}
                 slide={slide}
+                lectureTheme={lectureTheme}
                 index={index}
                 isActive={index === activeSlideIndex}
                 isDragging={draggedSlideId === slide.id}
