@@ -1,18 +1,45 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { AdminPage } from '@/features/admin/components/AdminPage'
 import { AuthPage } from '@/features/auth/components/AuthPage'
 import { authApi } from '@/features/auth/api/auth.api'
-import { EditorPage } from '@/features/slide-editor/components/EditorPage'
 import { LibraryPage } from '@/features/library/components/LibraryPage'
-import { PresentationPage } from '@/features/presentation/components/PresentationPage'
-import { ProfilePage } from '@/features/auth/components/ProfilePage'
-import { ChangePasswordPage } from '@/features/auth/components/ChangePasswordPage'
 import { WorkspaceHeader } from '@/components/layout/WorkspaceHeader'
 import { UserLayout } from '@/components/layout/UserLayout'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
-export const App = () => {
+const AdminPage = lazy(() =>
+  import('@/features/admin/components/AdminPage').then((m) => ({
+    default: m.AdminPage
+  }))
+)
+const EditorPage = lazy(() =>
+  import('@/features/slide-editor/components/EditorPage').then((m) => ({
+    default: m.EditorPage
+  }))
+)
+const PresentationPage = lazy(() =>
+  import('@/features/presentation/components/PresentationPage').then((m) => ({
+    default: m.PresentationPage
+  }))
+)
+const ProfilePage = lazy(() =>
+  import('@/features/auth/components/ProfilePage').then((m) => ({
+    default: m.ProfilePage
+  }))
+)
+const ChangePasswordPage = lazy(() =>
+  import('@/features/auth/components/ChangePasswordPage').then((m) => ({
+    default: m.ChangePasswordPage
+  }))
+)
+
+export const App = () => (
+  <Suspense fallback={null}>
+    <AppRoutes />
+  </Suspense>
+)
+
+const AppRoutes = () => {
   const { user, accessToken, refreshToken, setSession, clearSession } =
     useAuthStore()
 
