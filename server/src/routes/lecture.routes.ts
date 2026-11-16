@@ -37,7 +37,6 @@ lectureRouter.post(
   lectureController.createBlankLecture
 )
 lectureRouter.get('/:id', lectureController.getLecture)
-lectureRouter.get('/:id/presentation', lectureController.getPresentation)
 lectureRouter.patch(
   '/:id',
   validate(updateLectureSchema),

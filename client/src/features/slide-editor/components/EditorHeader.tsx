@@ -257,7 +257,7 @@ export const EditorHeader = ({
           type='button'
           onClick={onPresent}
           className='flex items-center gap-1.5 rounded-md bg-brand-rust px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 cursor-pointer'
-          title='Trình chiếu toàn màn hình (F5/Present)'
+          title='Trình chiếu toàn màn hình'
         >
           <Play size={14} />
           <span>Trình chiếu</span>

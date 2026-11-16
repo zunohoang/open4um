@@ -25,12 +25,17 @@ export const PresentationPage = ({
   const params = useParams<{ id: string }>()
   const location = useLocation()
 
-  const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
+  const routeState = location.state as {
+    lecture?: Lecture
+    startIndex?: number
+  } | null
+  const lectureFromState = routeState?.lecture
   const [lecture, setLecture] = useState<Lecture | null>(
     initialLecture || lectureFromState || null
   )
   const [isLoading, setIsLoading] = useState(!lecture)
-  const [index, setIndex] = useState(0)
+  // SRS UC018 bước 4: bắt đầu từ slide đang chọn trong editor (mặc định slide đầu tiên)
+  const [index, setIndex] = useState(routeState?.startIndex ?? 0)
   const slideRef = useRef<HTMLDivElement>(null)
 
   // Bật chế độ toàn màn hình trình duyệt (True Browser Fullscreen)
@@ -92,6 +97,17 @@ export const PresentationPage = ({
     }
   }, [params.id, lecture])
 
+  // SRS UC019: tiến tới slide cuối rồi sang màn hình kết thúc (index = số slide); lùi ở slide 1 thì giữ nguyên
+  const slideCount = lecture?.slides.length ?? 0
+  const goNext = useCallback(
+    () => setIndex((value) => Math.min(value + 1, slideCount)),
+    [slideCount]
+  )
+  const goPrev = useCallback(
+    () => setIndex((value) => Math.max(value - 1, 0)),
+    []
+  )
+
   // Điều khiển slide bằng bàn phím
   useEffect(() => {
     if (!lecture) return
@@ -109,7 +125,7 @@ export const PresentationPage = ({
         event.key === 'PageDown' ||
         event.key === 'ArrowDown'
       ) {
-        setIndex((value) => Math.min(value + 1, lecture.slides.length - 1))
+        goNext()
       }
 
       // Các phím lùi slide trước
@@ -119,27 +135,27 @@ export const PresentationPage = ({
         event.key === 'PageUp' ||
         event.key === 'ArrowUp'
       ) {
-        setIndex((value) => Math.max(value - 1, 0))
+        goPrev()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [lecture, handleExit])
+  }, [lecture, handleExit, goNext, goPrev])
 
   // Click chuột trái tiến tới slide tiếp theo (đồng thời kích hoạt fullscreen nếu chưa có)
-  const handleScreenClick = () => {
+  const handleScreenClick = async () => {
     if (!document.fullscreenElement) {
-      void requestFullScreen()
+      await requestFullScreen()
+      // Click này chỉ dùng để bật lại fullscreen, không chuyển slide
+      if (document.fullscreenElement) return
     }
-    if (!lecture) return
-    setIndex((value) => Math.min(value + 1, lecture.slides.length - 1))
+    goNext()
   }
 
   // Click chuột phải quay lại slide trước
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    if (!lecture) return
-    setIndex((value) => Math.max(value - 1, 0))
+    goPrev()
   }
 
   if (isLoading) {
@@ -177,6 +193,41 @@ export const PresentationPage = ({
             ← Trở về Thư viện
           </button>
         </div>
+      </main>
+    )
+  }
+
+  const navButtons = (
+    <div className='fixed bottom-4 right-4 z-10 flex gap-2'>
+      {[
+        { label: 'Slide trước', icon: '‹', onClick: goPrev },
+        { label: 'Slide tiếp theo', icon: '›', onClick: goNext }
+      ].map((b) => (
+        <button
+          key={b.label}
+          type='button'
+          aria-label={b.label}
+          title={b.label}
+          onClick={(e) => {
+            e.stopPropagation()
+            b.onClick()
+          }}
+          className='h-10 w-10 rounded-full bg-white/10 text-2xl leading-none text-white/70 transition hover:bg-white/25 hover:text-white'
+        >
+          {b.icon}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (index >= lecture.slides.length) {
+    return (
+      <main
+        onContextMenu={handleContextMenu}
+        className='grid min-h-screen w-screen place-items-center bg-black font-sans text-stone-300 select-none'
+      >
+        <p className='text-lg'>Kết thúc bài trình chiếu - Bấm Esc để thoát</p>
+        {navButtons}
       </main>
     )
   }
@@ -281,7 +332,7 @@ export const PresentationPage = ({
 
   return (
     <main
-      onClick={handleScreenClick}
+      onClick={() => void handleScreenClick()}
       onContextMenu={handleContextMenu}
       className='flex min-h-screen w-screen cursor-default items-center justify-center overflow-hidden bg-black select-none'
       title='Click chuột trái để tới slide tiếp theo • Click chuột phải để lùi lại • Nhấn ESC để thoát'
@@ -509,13 +560,8 @@ export const PresentationPage = ({
             )}
           </div>
         )}
-
-        {slide?.speakerNotes && (
-          <div className='mt-4 border-t border-stone-200/20 pt-2 font-sans text-xs italic opacity-40 select-none'>
-            📝 {slide.speakerNotes}
-          </div>
-        )}
       </div>
+      {navButtons}
     </main>
   )
 }

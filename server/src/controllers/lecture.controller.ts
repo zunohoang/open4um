@@ -119,19 +119,6 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
   ok(res, result)
 })
 
-export const getPresentation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.getLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, {
-    id: lecture._id,
-    title: lecture.title,
-    slides: lecture.slides,
-    updatedAt: lecture.updatedAt
-  })
-})
-
 export const exportLecture = asyncHandler(async (req, res) => {
   const result = await lectureService.exportLecture(
     req.user.id,

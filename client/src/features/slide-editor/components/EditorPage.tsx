@@ -1458,7 +1458,10 @@ export const EditorPage = ({
   const handlePresent = () => {
     if (!lecture) return
     if (onPresent) onPresent(lecture)
-    else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
+    else
+      navigate(`/presentation/${lecture._id}`, {
+        state: { lecture, startIndex: activeSlideIndex }
+      })
   }
 
   // Tự động tạo lại Dàn ý bài giảng bằng AI khi người dùng yêu cầu
