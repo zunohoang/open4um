@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import {
   ArrowUp,
   BookOpen,
@@ -88,7 +89,19 @@ export const AiCopilotPanel = ({
     sourceMaterial,
     setSourceMaterial,
     setIsSourceMaterialModalOpen
-  } = useEditorStore()
+  } = useEditorStore(
+    useShallow((state) => ({
+      isAiPanelOpen: state.isAiPanelOpen,
+      toggleAiPanel: state.toggleAiPanel,
+      aiMessages: state.aiMessages,
+      previewSlide: state.previewSlide,
+      previewTargetSlideId: state.previewTargetSlideId,
+      setPreviewSlide: state.setPreviewSlide,
+      sourceMaterial: state.sourceMaterial,
+      setSourceMaterial: state.setSourceMaterial,
+      setIsSourceMaterialModalOpen: state.setIsSourceMaterialModalOpen
+    }))
+  )
 
   const [instruction, setInstruction] = useState('')
   const [activePromptTab, setActivePromptTab] = useState<PromptToolbarTab>(null)

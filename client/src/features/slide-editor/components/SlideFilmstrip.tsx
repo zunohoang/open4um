@@ -33,7 +33,8 @@ export const SlideFilmstrip = ({
   onDeleteSlide,
   onMoveSlide
 }: SlideFilmstripProps) => {
-  const { isFilmstripOpen, toggleFilmstrip } = useEditorStore()
+  const isFilmstripOpen = useEditorStore((state) => state.isFilmstripOpen)
+  const toggleFilmstrip = useEditorStore((state) => state.toggleFilmstrip)
   const stripRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)

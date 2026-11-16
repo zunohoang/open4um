@@ -1,7 +1,7 @@
 import type { Slide, SlideComponent } from '@/lib/types'
 import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
 import { cropClipPath } from '@/features/slide-editor/utils/slide'
-import React from 'react'
+import React, { memo } from 'react'
 
 interface SlidePreviewProps {
   slide?: Slide | null
@@ -28,7 +28,7 @@ const getStarPoints = (x: number, y: number, w: number, h: number): string => {
   return points.join(' ')
 }
 
-export const SlidePreview: React.FC<SlidePreviewProps> = ({
+const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
   slide,
   lectureTitle,
   className = ''
@@ -586,3 +586,5 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
     </svg>
   )
 }
+
+export const SlidePreview = memo(SlidePreviewContent)

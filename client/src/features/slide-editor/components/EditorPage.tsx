@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -101,7 +102,30 @@ export const EditorPage = ({
     isSourceMaterialModalOpen,
     setIsSourceMaterialModalOpen,
     clearHistory
-  } = useEditorStore()
+  } = useEditorStore(
+    useShallow((state) => ({
+      activeSlideIndex: state.activeSlideIndex,
+      setActiveSlideIndex: state.setActiveSlideIndex,
+      selectedCompId: state.selectedCompId,
+      setSelectedCompId: state.setSelectedCompId,
+      recordHistory: state.recordHistory,
+      undo: state.undo,
+      redo: state.redo,
+      addAiMessage: state.addAiMessage,
+      setAiMessages: state.setAiMessages,
+      updateAiMessageStatus: state.updateAiMessageStatus,
+      aiMessages: state.aiMessages,
+      previewSlide: state.previewSlide,
+      previewSlideAction: state.previewSlideAction,
+      previewTargetSlideId: state.previewTargetSlideId,
+      setPreviewSlide: state.setPreviewSlide,
+      sourceMaterial: state.sourceMaterial,
+      setSourceMaterial: state.setSourceMaterial,
+      isSourceMaterialModalOpen: state.isSourceMaterialModalOpen,
+      setIsSourceMaterialModalOpen: state.setIsSourceMaterialModalOpen,
+      clearHistory: state.clearHistory
+    }))
+  )
 
   const routeState = location.state as {
     lecture?: Lecture
@@ -331,6 +355,7 @@ export const EditorPage = ({
         recordHistory(lectureRef.current.slides)
       }
 
+      lectureRef.current = next
       setLecture(next)
       setSaveStatus('unsaved')
       clearCountdownTimers()
@@ -504,10 +529,19 @@ export const EditorPage = ({
       shouldRecordHistory = true
     ) => {
       const currentLecture = lectureRef.current
-      if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
+      if (!currentLecture || !currentLecture.slides[activeSlideIndex])
+        return false
 
       const sourceSlide = currentLecture.slides[activeSlideIndex]
       const comps = getSlideComponents(sourceSlide, currentLecture.theme)
+      const target = comps.find((component) => component.id === compId)
+      if (
+        !target ||
+        Object.entries(patch).every(
+          ([key, value]) => target[key as keyof SlideComponent] === value
+        )
+      )
+        return false
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
@@ -534,6 +568,7 @@ export const EditorPage = ({
         { ...currentLecture, slides: nextSlides },
         shouldRecordHistory
       )
+      return true
     },
     [activeSlideIndex, mutateLecture]
   )
