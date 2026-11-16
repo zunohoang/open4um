@@ -190,7 +190,7 @@ describe('Integration Tests — Admin Console', () => {
         expect(adminInDb).not.toBeNull()
       })
 
-      it('xóa vĩnh viễn người dùng và cascade xóa toàn bộ bài giảng, thư mục, ai log trong DB', async () => {
+      it('xóa vĩnh viễn người dùng, cascade xóa bài giảng và thư mục, giữ log AI cho báo cáo UC031', async () => {
         const { token: adminToken } = await createAdmin()
         const { userId: targetUserId } = await createUser()
 
@@ -233,7 +233,7 @@ describe('Integration Tests — Admin Console', () => {
         const remainingLogs = await AiUsageLogModel.find({
           userId: targetUserId
         })
-        expect(remainingLogs).toHaveLength(0)
+        expect(remainingLogs.length).toBeGreaterThan(0)
       })
     })
 

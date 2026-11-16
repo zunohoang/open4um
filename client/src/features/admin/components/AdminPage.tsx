@@ -56,13 +56,8 @@ const getUserFormError = (name: string, email: string, credit?: string) => {
   return null
 }
 
-interface AdminPageProps {
-  onBack?: () => void
-}
-
-export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
+export const AdminPage = () => {
   const currentUser = useAuthStore((state) => state.user)
-  const isAdminOnly = currentUser?.role === 'admin'
   const { showToast } = useToast()
 
   // Phân trang & dữ liệu người dùng
@@ -508,14 +503,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
 
   return (
     <main className='mx-auto max-w-7xl px-5 py-12 sm:px-12'>
-      {!isAdminOnly && (
-        <button
-          className='mb-8 font-sans text-sm font-semibold text-orange-700 hover:underline'
-          onClick={onBack}
-        >
-          ← Thư viện
-        </button>
-      )}
       <div className='mb-8'>
         <span className='font-sans text-xs font-bold tracking-widest text-orange-700'>
           ADMIN CONSOLE
@@ -558,7 +545,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           }`}
           onClick={() => setActiveTab('config')}
         >
-          Cấu hình Credit
+          Cấu hình AI Credit
         </button>
         <button
           className={`px-4 py-2 font-sans text-sm font-semibold transition ${
@@ -568,7 +555,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           }`}
           onClick={() => setActiveTab('logs')}
         >
-          AI Usage
+          Lịch sử AI Usage
         </button>
       </div>
 

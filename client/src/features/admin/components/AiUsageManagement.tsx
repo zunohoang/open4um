@@ -189,9 +189,9 @@ export const AiUsageManagement = () => {
           <thead>
             <tr className='border-b border-stone-300 text-xs tracking-wider text-stone-500 uppercase'>
               <th className='py-3 pr-4'>Thời gian</th>
-              <th className='py-3 pr-4'>Người dùng</th>
+              <th className='py-3 pr-4'>Tên User</th>
               <th className='py-3 pr-4'>Nội dung Prompt</th>
-              <th className='py-3 pr-4 text-right'>Số slide</th>
+              <th className='py-3 pr-4 text-right'>Số lượng Slide sinh ra</th>
               <th className='py-3 text-right'>Credit đã trừ</th>
             </tr>
           </thead>

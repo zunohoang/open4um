@@ -6,7 +6,6 @@ import { useLogoutConfirm } from '@/features/auth/hooks/useLogoutConfirm'
 
 interface WorkspaceHeaderProps {
   onCreate?: () => void
-  onAdmin?: () => void
   children?: ReactNode
 }
 
@@ -18,10 +17,7 @@ const getInitial = (name?: string) => {
   return (lastWord?.[0] || trimmed[0] || 'U').toUpperCase()
 }
 
-export const WorkspaceHeader = ({
-  onAdmin,
-  children
-}: WorkspaceHeaderProps) => {
+export const WorkspaceHeader = ({ children }: WorkspaceHeaderProps) => {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const isAdmin = user?.role === 'admin'
@@ -321,20 +317,6 @@ export const WorkspaceHeader = ({
                   </svg>
                   <span>Hồ sơ cá nhân & Đổi mật khẩu</span>
                 </button>
-
-                {!isAdmin && onAdmin && (
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setOpen(false)
-                      onAdmin()
-                    }}
-                    className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-stone-700 hover:bg-stone-100 transition'
-                  >
-                    <span>⚙️</span>
-                    <span>Trang Quản trị Hệ thống</span>
-                  </button>
-                )}
 
                 <button
                   type='button'

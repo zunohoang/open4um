@@ -29,7 +29,6 @@ export interface UpdateUserPayload {
 export interface ListAiUsageParams {
   page?: number
   limit?: number
-  userId?: string
   from?: string
   to?: string
 }
