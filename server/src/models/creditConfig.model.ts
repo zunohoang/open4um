@@ -20,7 +20,6 @@ const positiveIntegerField = (
 
 const creditConfigSchema = new Schema(
   {
-    pricePerLecture: positiveIntegerField(80),
     pricePerSlide: positiveIntegerField(10),
     pricePerAiEdit: positiveIntegerField(5),
     pricePerOutline: positiveIntegerField(5),

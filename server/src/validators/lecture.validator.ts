@@ -42,14 +42,6 @@ export const updateLectureSchema = z.object({
   aiChatHistory: z.array(z.record(z.string(), z.unknown())).optional()
 })
 
-export const aiEditSlideSchema = z.object({
-  slideId: z.string().min(1, 'Mã slide không được để trống'),
-  instruction: z
-    .string()
-    .min(2, 'Hướng dẫn chỉnh sửa phải có ít nhất 2 ký tự')
-    .max(2000, 'Hướng dẫn chỉnh sửa không được quá 2000 ký tự')
-})
-
 const aiChatSlideSnapshotSchema = z
   .object({
     id: z.string().min(1).max(200),

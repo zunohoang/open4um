@@ -185,7 +185,6 @@ export interface DashboardStats {
 
 export interface CreditConfig {
   _id: string
-  pricePerLecture: number
   pricePerSlide: number
   pricePerAiEdit: number
   pricePerOutline: number

@@ -123,11 +123,26 @@ export interface ServerSlideComponent {
  * và layout trực quan phong phú có các khối hình nền vuông/chữ nhật bo góc (Cards, Two-Column, Steps, Quote, Headline).
  * Tự động tính toán xếp tầng (Vertical Stacking) chống đè chữ 100%.
  */
+const HEX_COLOR = /^#[0-9a-f]{3,8}$/i
+const pickColor = (value: unknown) =>
+  typeof value === 'string' && HEX_COLOR.test(value) ? value : undefined
+
+// SRS UC008 bước 5: AI Chat đổi màu bằng cách ghi đè màu theme trên từng slide
+export const withSlideColors = (
+  theme: SlideTheme,
+  slide: Record<string, unknown>
+): SlideTheme => ({
+  ...theme,
+  background: pickColor(slide.backgroundColor) ?? theme.background,
+  accentColor: pickColor(slide.accentColor) ?? theme.accentColor,
+  textPrimary: pickColor(slide.textColor) ?? theme.textPrimary
+})
+
 export const buildSlideComponents = (
   slide: Record<string, unknown>,
   themeId?: string
 ): ServerSlideComponent[] => {
-  const theme = getThemeById(themeId)
+  const theme = withSlideColors(getThemeById(themeId), slide)
   const comps: ServerSlideComponent[] = []
   const slideId = (slide.id as string) || `slide-${Date.now()}`
   const title = ((slide.title as string) || 'Tiêu đề slide').trim()

@@ -32,6 +32,7 @@ import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
 import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
+import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 
 const resolveProposalTargetIndex = (
@@ -98,7 +99,13 @@ export const EditorPage = ({
     setIsSourceMaterialModalOpen
   } = useEditorStore()
 
-  const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
+  const routeState = location.state as {
+    lecture?: Lecture
+    startAi?: boolean
+  } | null
+  const lectureFromState = routeState?.lecture
+  // SRS UC021 bước 5: bài giảng vừa tạo mở kèm màn hình nhập Prompt AI
+  const [showAiWizard, setShowAiWizard] = useState(Boolean(routeState?.startAi))
   const lectureId = params.id || initialLecture?._id || lectureFromState?._id
 
   // Kiểm tra ngay khi khởi tạo xem có bản nháp offline trong localStorage không
@@ -1082,7 +1089,49 @@ export const EditorPage = ({
         }
       }
 
-      if (
+      // SRS UC008 bước 5: chỉnh sửa slide đang active được áp dụng trực tiếp (Undo để hoàn tác)
+      const shouldAutoApply =
+        canShowPreview &&
+        slideAction === 'UPDATE_SLIDE' &&
+        (response.proposals?.length ?? 0) <= 1
+      if (shouldAutoApply && slideToPreview && lectureRef.current) {
+        const latest = lectureRef.current
+        const appliedMessages = useEditorStore
+          .getState()
+          .aiMessages.map((m, idx, list) =>
+            idx === list.length - 1 && m.role === 'assistant'
+              ? {
+                  ...m,
+                  status: 'accepted' as const,
+                  proposals: m.proposals?.map((p) => ({
+                    ...p,
+                    status: 'accepted' as const
+                  }))
+                }
+              : m
+          )
+        setAiMessages(appliedMessages)
+        mutateLecture({
+          ...latest,
+          slides: latest.slides.map((s, idx) =>
+            idx === latestTargetIndex
+              ? {
+                  ...slideToPreview,
+                  components: getSlideComponents(slideToPreview, latest.theme)
+                }
+              : s
+          ),
+          aiChatHistory: appliedMessages as unknown as Array<
+            Record<string, unknown>
+          >
+        })
+        setPreviewSlide(null)
+        setSelectedCompId(null)
+        showToast(
+          `Đã áp dụng chỉnh sửa AI vào Slide ${latestTargetIndex + 1}`,
+          'success'
+        )
+      } else if (
         canShowPreview &&
         slideToPreview &&
         response.proposals &&
@@ -1362,7 +1411,18 @@ export const EditorPage = ({
       expand:
         'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
     }
-    void handleApplyAiPrompt(promptMap[action])
+    // SRS UC008 3a: nếu người dùng bôi đen một đoạn thì AI chỉ xử lý đoạn đó
+    const selectedText = window.getSelection()?.toString().trim()
+    const selectionPromptMap = {
+      rewrite: 'Viết lại cho mạch lạc, sắc nét hơn',
+      shorten: 'Rút gọn cho súc tích',
+      expand: 'Mở rộng chi tiết hơn'
+    }
+    void handleApplyAiPrompt(
+      selectedText
+        ? `${selectionPromptMap[action]} đúng đoạn văn bản sau trong slide, giữ nguyên các phần còn lại: "${selectedText}"`
+        : promptMap[action]
+    )
   }
 
   const handleBack = () => {
@@ -1608,6 +1668,29 @@ export const EditorPage = ({
         isLoading={isOutlineLoading}
         onRegenerateOutline={handleRegenerateOutline}
       />
+
+      {showAiWizard && (
+        <AiGenerationWizard
+          lecture={lecture}
+          onDone={(created) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { creditSpent, creditBalance, ...generated } =
+              created as Lecture & {
+                creditSpent?: number
+                creditBalance?: number
+              }
+            setLecture(generated)
+            setSaveStatus('saved')
+            setActiveSlideIndex(0)
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+          onSkip={() => {
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -56,14 +56,6 @@ export const editorApi = {
       )
     ).data.data,
 
-  aiEdit: async (id: string, slide: Slide, instruction: string) =>
-    (
-      await apiClient.post<{ data: { lecture: Lecture } }>(
-        `/lectures/${id}/ai-edit`,
-        { slideId: slide.id, instruction }
-      )
-    ).data.data.lecture,
-
   aiChat: async (
     id: string,
     payload: AiChatPayload

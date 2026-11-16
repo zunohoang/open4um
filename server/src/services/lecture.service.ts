@@ -13,7 +13,6 @@ import {
   generateOutlineFromPrompt,
   refineOutlineWithFeedback,
   generateSlidesFromOutline,
-  editSlideWithInstruction,
   chatAndProposeSlideEdit,
   type GeneratedOutline
 } from '@/services/ai.service'
@@ -71,11 +70,8 @@ export const generateOutline = async (
     if (options?.lectureId) {
       lecture = await LectureModel.findOneAndUpdate(
         { _id: options.lectureId, userId },
-        {
-          title: outline.title || 'Bài giảng mới',
-          prompt,
-          outline
-        },
+        // Giữ tên người dùng đã nhập ở bước tạo bài giảng (UC021)
+        { prompt, outline },
         { new: true }
       )
     }
@@ -125,10 +121,12 @@ export const createLecture = async (
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
 
+  // SRS UC032: giá tính theo từng slide được sinh ra (VD: tạo mới 1 slide = N credit)
   const config = await getCreditConfig()
-  if (user.creditBalance < config.pricePerLecture) {
+  const estimatedCredit = config.pricePerSlide * data.outline.sections.length
+  if (user.creditBalance < estimatedCredit) {
     throw new AppError(
-      `Không đủ credit để tạo bài giảng. Cần ${config.pricePerLecture} credit.`,
+      `Không đủ credit để tạo bài giảng. Cần ${estimatedCredit} credit.`,
       402
     )
   }
@@ -138,7 +136,7 @@ export const createLecture = async (
     data.prompt ?? ''
   )
 
-  const creditSpent = config.pricePerLecture
+  const creditSpent = config.pricePerSlide * slides.length
   const creditBalance = await debitCredits(
     userId,
     creditSpent,
@@ -457,64 +455,6 @@ export const hardDeleteLecture = async (userId: string, id: string) => {
   }
 }
 
-export const editSlideWithAi = async (
-  userId: string,
-  id: string,
-  slideId: string,
-  instruction: string
-) => {
-  const lecture = await findOwnedLecture(userId, id)
-  if (lecture.deletedAt) throw new AppError('Bài giảng đã bị xóa', 404)
-
-  const slideIndex = lecture.slides.findIndex(
-    (slide) =>
-      typeof slide === 'object' &&
-      slide !== null &&
-      (slide as { id?: unknown }).id === slideId
-  )
-  if (slideIndex < 0) throw new AppError('Không tìm thấy slide', 404)
-
-  const config = await getCreditConfig()
-  const user = await UserModel.findById(userId)
-  if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  if (user.creditBalance < config.pricePerAiEdit)
-    throw new AppError('Không đủ credit để chỉnh sửa slide bằng AI', 402)
-
-  const currentSlide = lecture.slides[slideIndex]
-  if (typeof currentSlide !== 'object' || currentSlide === null)
-    throw new AppError('Dữ liệu slide không hợp lệ', 422)
-  const editedSlide = await editSlideWithInstruction(
-    currentSlide as Record<string, unknown>,
-    instruction
-  )
-
-  const creditBalance = await debitCredits(
-    userId,
-    config.pricePerAiEdit,
-    'Không đủ credit để chỉnh sửa slide bằng AI'
-  )
-  try {
-    lecture.slides[slideIndex] = editedSlide
-    await lecture.save()
-    await AiUsageLogModel.create({
-      userId,
-      prompt: instruction,
-      slideCount: 1,
-      creditSpent: config.pricePerAiEdit
-    })
-  } catch (error) {
-    await refundCredits(userId, config.pricePerAiEdit)
-    throw error
-  }
-
-  return {
-    lecture,
-    slide: editedSlide,
-    creditSpent: config.pricePerAiEdit,
-    creditBalance
-  }
-}
-
 export const exportLecture = async (userId: string, id: string) => {
   const lecture = await findOwnedLecture(userId, id)
 
@@ -742,7 +682,9 @@ export const aiChatInEditor = async (
     createdSlideCount > 0
       ? createdSlideCount * config.pricePerSlide +
         (includesSlideUpdate ? config.pricePerAiEdit : 0)
-      : config.pricePerAiEdit
+      : includesSlideUpdate
+        ? config.pricePerAiEdit
+        : 0 // chỉ trả lời chat, không thay đổi slide -> không trừ credit
 
   if (user.creditBalance < creditSpent) {
     throw new AppError(
@@ -823,7 +765,9 @@ export const aiChatInEditor = async (
     await AiUsageLogModel.create({
       userId,
       prompt: payload.message,
-      slideCount: createdSlideCount || Math.max(1, proposals.length),
+      slideCount:
+        createdSlideCount ||
+        (includesSlideUpdate ? Math.max(1, proposals.length) : 0),
       creditSpent
     })
   } catch (error) {

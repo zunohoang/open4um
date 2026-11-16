@@ -35,7 +35,7 @@ export const UserLayout = ({ totalLectures }: UserLayoutProps = {}) => {
         onDone={(created) => {
           setIsCreateModalOpen(false)
           navigate(`/editor/${created._id}`, {
-            state: { lecture: created }
+            state: { lecture: created, startAi: true }
           })
         }}
       />

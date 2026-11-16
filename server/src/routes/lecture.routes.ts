@@ -7,7 +7,6 @@ import {
   createLectureSchema,
   createBlankLectureSchema,
   updateLectureSchema,
-  aiEditSlideSchema,
   aiChatSchema,
   slideOperationSchema
 } from '@/validators/lecture.validator'
@@ -43,11 +42,6 @@ lectureRouter.patch(
   '/:id/autosave',
   validate(updateLectureSchema),
   lectureController.autosaveLecture
-)
-lectureRouter.post(
-  '/:id/ai-edit',
-  validate(aiEditSlideSchema),
-  lectureController.editSlideWithAi
 )
 lectureRouter.post(
   '/:id/ai-chat',

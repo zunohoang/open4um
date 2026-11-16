@@ -3,7 +3,6 @@ import {
   createLectureSchema,
   createBlankLectureSchema,
   updateLectureSchema,
-  aiEditSlideSchema,
   aiChatSchema,
   slideOperationSchema
 } from '@/validators/lecture.validator'
@@ -130,23 +129,6 @@ describe('updateLectureSchema', () => {
       ]
     })
     expect(result.success).toBe(true)
-  })
-})
-
-describe('aiEditSlideSchema', () => {
-  it('thành công với slideId và instruction hợp lệ', () => {
-    const result = aiEditSlideSchema.safeParse({
-      slideId: 'slide-1',
-      instruction: 'Đổi màu nền sang xanh lam và làm nổi bật tiêu đề'
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it('thất bại khi thiếu instruction', () => {
-    const result = aiEditSlideSchema.safeParse({
-      slideId: 'slide-1'
-    })
-    expect(result.success).toBe(false)
   })
 })
 

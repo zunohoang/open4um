@@ -11,16 +11,11 @@ import { ConfirmDialog, Modal, Pagination, useToast } from '@/components/ui'
 import type { AdminUser, CreditConfig } from '@/lib/types'
 
 type CreditConfigField =
-  | 'pricePerLecture'
-  | 'pricePerOutline'
-  | 'pricePerSlide'
-  | 'pricePerAiEdit'
-  | 'signupBonus'
+  'pricePerOutline' | 'pricePerSlide' | 'pricePerAiEdit' | 'signupBonus'
 type CreditConfigForm = Record<CreditConfigField, string>
 type CreditConfigErrors = Partial<Record<CreditConfigField, string>>
 
 const CREDIT_FIELD_LABELS: Record<CreditConfigField, string> = {
-  pricePerLecture: 'Credit sinh bài giảng',
   pricePerOutline: 'Credit sinh dàn ý',
   pricePerSlide: 'Credit tạo slide',
   pricePerAiEdit: 'Credit chỉnh sửa AI',
@@ -28,7 +23,6 @@ const CREDIT_FIELD_LABELS: Record<CreditConfigField, string> = {
 }
 
 const EMPTY_CREDIT_FORM: CreditConfigForm = {
-  pricePerLecture: '',
   pricePerOutline: '',
   pricePerSlide: '',
   pricePerAiEdit: '',
@@ -36,7 +30,6 @@ const EMPTY_CREDIT_FORM: CreditConfigForm = {
 }
 
 const toCreditConfigForm = (config: CreditConfig): CreditConfigForm => ({
-  pricePerLecture: String(config.pricePerLecture),
   pricePerOutline: String(config.pricePerOutline),
   pricePerSlide: String(config.pricePerSlide),
   pricePerAiEdit: String(config.pricePerAiEdit),
@@ -260,7 +253,6 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
       setIsSavingConfig(true)
       setConfigError(null)
       const updated = await adminApi.updateCreditConfig({
-        pricePerLecture: values.pricePerLecture,
         pricePerOutline: values.pricePerOutline,
         pricePerSlide: values.pricePerSlide,
         pricePerAiEdit: values.pricePerAiEdit,
@@ -754,34 +746,7 @@ export const AdminPage = ({ onBack }: AdminPageProps = {}) => {
           ) : (
             <div className='space-y-4'>
               <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi lượt sinh bài giảng
-                <input
-                  aria-invalid={Boolean(creditErrors.pricePerLecture)}
-                  className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${
-                    creditErrors.pricePerLecture
-                      ? 'border-red-500'
-                      : 'border-stone-300'
-                  }`}
-                  inputMode='numeric'
-                  pattern='[0-9]*'
-                  type='text'
-                  value={creditForm.pricePerLecture}
-                  onChange={(event) =>
-                    handleCreditFieldChange(
-                      'pricePerLecture',
-                      event.target.value
-                    )
-                  }
-                />
-                {creditErrors.pricePerLecture && (
-                  <span className='mt-1 block text-xs font-semibold text-red-700'>
-                    {creditErrors.pricePerLecture}
-                  </span>
-                )}
-              </label>
-
-              <label className='block font-sans text-sm font-semibold text-stone-600'>
-                Giá mỗi slide tạo mới trong AI Chat
+                Giá mỗi slide tạo mới (sinh bài giảng và AI Chat)
                 <input
                   aria-invalid={Boolean(creditErrors.pricePerSlide)}
                   className={`mt-2 w-full border bg-white p-3 font-normal outline-orange-700 ${

@@ -196,35 +196,21 @@ export const AiCopilotPanel = ({
     const file = e.target.files?.[0]
     if (!file) return
 
-    setAttachedFileName(file.name)
     setIsAttachmentMenuOpen(false)
+    // shortcut: chỉ đọc tệp văn bản thuần; .docx/.pdf cần parser phía server nếu sau này SRS yêu cầu
+    if (!/\.(txt|md)$/i.test(file.name)) {
+      e.target.value = ''
+      setAttachedFileName(null)
+      return
+    }
+    setAttachedFileName(file.name)
 
     const reader = new FileReader()
-    if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-      reader.onload = (event) => {
-        const text = event.target?.result as string
-        if (text) {
-          setSourceMaterial(text)
-        }
-      }
-      reader.readAsText(file)
-    } else {
-      reader.onload = (event) => {
-        const text = (event.target?.result as string) || ''
-        const cleaned = text
-          // eslint-disable-next-line no-control-regex
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
-          .trim()
-        if (cleaned.length > 50) {
-          setSourceMaterial(cleaned.slice(0, 50000))
-        } else {
-          setSourceMaterial(
-            `[Tệp đính kèm: ${file.name} (${Math.round(file.size / 1024)} KB)]`
-          )
-        }
-      }
-      reader.readAsText(file)
+    reader.onload = (event) => {
+      const text = event.target?.result as string
+      if (text) setSourceMaterial(text.slice(0, 50000))
     }
+    reader.readAsText(file)
   }
 
   const handleRemoveAttachment = () => {
@@ -850,7 +836,7 @@ export const AiCopilotPanel = ({
         <input
           ref={fileInputRef}
           type='file'
-          accept='.docx,.pdf,.txt,.md'
+          accept='.txt,.md'
           onChange={handleFileUpload}
           className='hidden'
         />
@@ -902,7 +888,7 @@ export const AiCopilotPanel = ({
                 void handleSubmit()
               }
             }}
-            placeholder='Yêu cầu AI chỉnh sửa slide hoặc trao đổi...'
+            placeholder='Prompt vào đây'
             className='w-full resize-none border-0 bg-transparent p-0 text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0 leading-relaxed max-h-32 custom-scrollbar'
           />
 
@@ -931,7 +917,7 @@ export const AiCopilotPanel = ({
                     className='flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-stone-700 hover:bg-stone-100 transition cursor-pointer'
                   >
                     <FileUp size={14} className='text-brand-rust' />
-                    <span>Tải tệp (.docx, .pdf, .txt)</span>
+                    <span>Tải tệp văn bản (.txt, .md)</span>
                   </button>
                   <button
                     type='button'

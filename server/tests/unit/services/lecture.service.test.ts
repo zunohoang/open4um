@@ -68,7 +68,6 @@ jest.mock('@/services/ai.service', () => ({
 
 jest.mock('@/services/admin.service', () => ({
   getCreditConfig: jest.fn().mockResolvedValue({
-    pricePerLecture: 20,
     pricePerSlide: 2,
     pricePerAiEdit: 1,
     pricePerOutline: 4,
@@ -238,10 +237,8 @@ describe('lecture.service unit tests', () => {
       )
       expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'existing-lec-1', userId: 'user-refine' },
-        expect.objectContaining({
-          title: 'Bản mới điều chỉnh',
-          outline: refinedOutline
-        }),
+        // UC021: không ghi đè tên bài giảng người dùng đã đặt
+        { prompt: 'Prompt gốc', outline: refinedOutline },
         { new: true }
       )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
@@ -264,10 +261,11 @@ describe('lecture.service unit tests', () => {
       ]
     }
 
-    it('ném lỗi 402 trước khi gọi AI nếu không đủ phí sinh bài giảng cố định', async () => {
+    it('ném lỗi 402 trước khi gọi AI nếu không đủ credit cho số slide dự kiến', async () => {
+      // 2 phần dàn ý x 2 credit/slide = 4 credit dự kiến
       mockUserFindById.mockResolvedValue({
         _id: 'user-poor',
-        creditBalance: 19,
+        creditBalance: 3,
         save: jest.fn()
       })
 
@@ -284,7 +282,7 @@ describe('lecture.service unit tests', () => {
       expect(mockAiGenerateSlidesFromOutline).not.toHaveBeenCalled()
     })
 
-    it('tính phí cố định khi sinh bài giảng, không phụ thuộc số slide', async () => {
+    it('UC032 - tính phí theo số slide được sinh ra (pricePerSlide x số slide)', async () => {
       const mockSlides = Array.from({ length: 8 }, (_, i) => ({
         id: `s-${i + 1}`,
         title: `Slide ${i + 1}`
@@ -316,22 +314,22 @@ describe('lecture.service unit tests', () => {
         outline: fakeOutline
       })
 
-      // Phí sinh bài giảng cố định là 20 credits -> 50 - 20 = 30
-      expect(mockUser.creditBalance).toBe(30)
+      // 8 slide x 2 credit = 16 -> 50 - 16 = 34
+      expect(mockUser.creditBalance).toBe(34)
       expect(mockDebitCredits).toHaveBeenCalledWith(
         'user-rich',
-        20,
+        16,
         expect.any(String)
       )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
           slideCount: 8,
-          creditSpent: 20
+          creditSpent: 16
         })
       )
-      expect(result).toHaveProperty('creditSpent', 20)
-      expect(result).toHaveProperty('creditBalance', 30)
+      expect(result).toHaveProperty('creditSpent', 16)
+      expect(result).toHaveProperty('creditBalance', 34)
     })
 
     it('thành công cập nhật bài giảng đã có bằng lectureId', async () => {
@@ -556,6 +554,12 @@ describe('lecture.service unit tests', () => {
         slideId: 'slide-1',
         currentSlide: currentSlideSnapshot
       })
+
+      // Chỉ trả lời chat, không đổi slide -> không trừ credit
+      expect(mockUser.creditBalance).toBe(10)
+      expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ slideCount: 0, creditSpent: 0 })
+      )
 
       expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
         expect.any(String),

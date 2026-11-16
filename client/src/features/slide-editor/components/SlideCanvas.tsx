@@ -928,6 +928,7 @@ export const SlideCanvas = ({
                       <>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('rewrite')}
                           disabled={isAiLoading}
                           className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -939,6 +940,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('shorten')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -949,6 +951,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('expand')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'

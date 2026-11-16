@@ -128,16 +128,6 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
   ok(res, result)
 })
 
-export const editSlideWithAi = asyncHandler(async (req, res) => {
-  const result = await lectureService.editSlideWithAi(
-    req.user.id,
-    String(req.params.id),
-    req.body.slideId,
-    req.body.instruction
-  )
-  ok(res, result)
-})
-
 export const getPresentation = asyncHandler(async (req, res) => {
   const lecture = await lectureService.getLecture(
     req.user.id,

@@ -1,5 +1,5 @@
 import type { Slide, SlideComponent, SlideContentItem } from '@/lib/types'
-import { getThemeById } from '../constants/theme-options'
+import { getThemeById, withSlideColors } from '../constants/theme-options'
 
 /**
  * Lấy danh sách components của slide. Nếu slide đã có components lưu trong database,
@@ -17,7 +17,7 @@ export const getSlideComponents = (
     return slide.components
   }
 
-  const theme = getThemeById(themeId || slide.theme)
+  const theme = withSlideColors(getThemeById(themeId || slide.theme), slide)
   const comps: SlideComponent[] = []
   const slideId = slide.id || `slide-${Date.now()}`
   const title = (slide.title || 'Tiêu đề slide').trim()

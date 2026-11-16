@@ -40,7 +40,6 @@ export interface DashboardParams {
 }
 
 export interface UpdateCreditConfigPayload {
-  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
   pricePerOutline?: number
