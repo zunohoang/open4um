@@ -3,6 +3,7 @@ import { Check, Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP, getThemeById } from '../constants/theme-options'
 import { cropClipPath, getSlideComponents } from '../utils/slide'
+import { createFrameScheduler } from '../utils/frameScheduler'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
@@ -17,7 +18,7 @@ interface SlideCanvasProps {
     id: string,
     patch: Partial<SlideComponent>,
     recordHistory?: boolean
-  ) => void
+  ) => boolean | void
   onDuplicateComponent: (comp: SlideComponent) => void
   onDeleteComponent: (id: string) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
@@ -238,10 +239,14 @@ export const SlideCanvas = ({
   useEffect(() => {
     if (!dragState || !canvasRef.current) return
 
+    let rect = canvasRef.current.getBoundingClientRect()
+    const updateBounds = () => {
+      if (canvasRef.current) rect = canvasRef.current.getBoundingClientRect()
+    }
+    const observer = new ResizeObserver(updateBounds)
+    observer.observe(canvasRef.current)
+
     const handleMouseMove = (e: MouseEvent) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
       if (rect.width === 0 || rect.height === 0) return
 
       const deltaX = e.clientX - dragState.startX
@@ -251,10 +256,13 @@ export const SlideCanvas = ({
         return
       }
 
-      let shouldRecord = false
-      if (!hasRecordedHistoryRef.current) {
-        hasRecordedHistoryRef.current = true
-        shouldRecord = true
+      const updateComponent = (patch: Partial<SlideComponent>) => {
+        const changed = onUpdateComponent(
+          dragState.compId,
+          patch,
+          !hasRecordedHistoryRef.current
+        )
+        if (changed !== false) hasRecordedHistoryRef.current = true
       }
 
       const deltaPercentX = (deltaX / rect.width) * 100
@@ -296,11 +304,7 @@ export const SlideCanvas = ({
         }
         if (finalRotation >= 360) finalRotation = 0
 
-        onUpdateComponent(
-          dragState.compId,
-          { rotation: finalRotation },
-          shouldRecord
-        )
+        updateComponent({ rotation: finalRotation })
       } else if (dragState.type === 'move') {
         const rawX = Math.round(
           Math.max(
@@ -322,12 +326,12 @@ export const SlideCanvas = ({
         )
         const snapX = snapAxis(rawX, dragState.initialWidth)
         const snapY = snapAxis(rawY, dragState.initialHeight)
-        setSnapGuides({ v: snapX.guide, h: snapY.guide })
-        onUpdateComponent(
-          dragState.compId,
-          { x: snapX.value, y: snapY.value },
-          shouldRecord
+        setSnapGuides((previous) =>
+          previous?.v === snapX.guide && previous?.h === snapY.guide
+            ? previous
+            : { v: snapX.guide, h: snapY.guide }
         )
+        updateComponent({ x: snapX.value, y: snapY.value })
       } else if (dragState.type === 'resize' && dragState.handle) {
         const minW = 5
         const minH = 3
@@ -481,20 +485,29 @@ export const SlideCanvas = ({
           patch.fontSize = nextFontSize
         }
 
-        onUpdateComponent(dragState.compId, patch, shouldRecord)
+        updateComponent(patch)
       }
     }
 
+    const scheduler = createFrameScheduler(handleMouseMove)
+    const scheduleMove = (event: MouseEvent) => scheduler.schedule(event)
     const handleMouseUp = () => {
+      scheduler.flush()
       setDragState(null)
       setSnapGuides(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mousemove', scheduleMove)
     window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('scroll', updateBounds, true)
+    window.addEventListener('resize', updateBounds)
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
+      scheduler.cancel()
+      observer.disconnect()
+      window.removeEventListener('mousemove', scheduleMove)
       window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('scroll', updateBounds, true)
+      window.removeEventListener('resize', updateBounds)
     }
   }, [dragState, onUpdateComponent])
 

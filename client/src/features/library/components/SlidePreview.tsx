@@ -1,11 +1,15 @@
 import type { Slide, SlideComponent } from '@/lib/types'
-import { FONT_MAP } from '@/features/slide-editor/constants/theme-options'
+import {
+  FONT_MAP,
+  getThemeById
+} from '@/features/slide-editor/constants/theme-options'
 import { cropClipPath } from '@/features/slide-editor/utils/slide'
-import React from 'react'
+import React, { memo } from 'react'
 
 interface SlidePreviewProps {
   slide?: Slide | null
   lectureTitle?: string
+  lectureTheme?: string
   className?: string
 }
 
@@ -28,11 +32,14 @@ const getStarPoints = (x: number, y: number, w: number, h: number): string => {
   return points.join(' ')
 }
 
-export const SlidePreview: React.FC<SlidePreviewProps> = ({
+const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
   slide,
   lectureTitle,
+  lectureTheme,
   className = ''
 }) => {
+  const theme = getThemeById(slide?.theme || lectureTheme)
+  const background = slide?.backgroundColor || theme.background
   const hasComponents = Boolean(
     slide?.components && slide.components.length > 0
   )
@@ -60,12 +67,12 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             height='24'
             patternUnits='userSpaceOnUse'
           >
-            <circle cx='12' cy='12' r='1' fill='#e7e5e4' />
+            <circle cx='12' cy='12' r='1' fill={theme.cardBorder} />
           </pattern>
         </defs>
-        <rect width='960' height='540' fill='#fafaf9' />
+        <rect width='960' height='540' fill={background} />
         <rect width='960' height='540' fill='url(#grid-dots)' />
-        <rect width='960' height='6' fill='#c2410c' opacity='0.8' />
+        <rect width='960' height='6' fill={theme.accentColor} opacity='0.8' />
 
         {/* Khung nội dung tối giản */}
         <rect
@@ -74,8 +81,8 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
           width='640'
           height='300'
           rx='8'
-          fill='#ffffff'
-          stroke='#e7e5e4'
+          fill={theme.cardBackground}
+          stroke={theme.cardBorder}
           strokeWidth='2'
           strokeDasharray='6 6'
         />
@@ -88,8 +95,8 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               textAlign: 'center',
-              fontFamily: '"Lora", Georgia, serif',
-              color: '#064e3b'
+              fontFamily: FONT_MAP[theme.headingFont],
+              color: theme.textPrimary
             }}
           >
             <span style={{ fontSize: '32px', marginBottom: '8px' }}>📄</span>
@@ -97,7 +104,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
               style={{
                 fontSize: '22px',
                 fontWeight: 600,
-                color: '#1c1917',
+                color: theme.textPrimary,
                 maxWidth: '90%',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -109,8 +116,8 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             <span
               style={{
                 fontSize: '13px',
-                color: '#78716c',
-                fontFamily: '"Be Vietnam Pro", sans-serif',
+                color: theme.textSecondary,
+                fontFamily: FONT_MAP[theme.bodyFont],
                 marginTop: '4px'
               }}
             >
@@ -131,8 +138,8 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
     const fill =
       comp.fillColor === 'transparent'
         ? 'transparent'
-        : comp.fillColor || '#c45b3f'
-    const stroke = comp.borderColor || '#173c39'
+        : comp.fillColor || theme.cardBackground
+    const stroke = comp.borderColor || theme.cardBorder
     const strokeW = comp.borderWidth ?? 0
     const radius = comp.borderRadius ?? 0
     const shapeType = comp.shapeType || 'rectangle'
@@ -239,11 +246,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
         preserveAspectRatio='xMidYMid meet'
       >
         {/* Nền slide */}
-        <rect
-          width='960'
-          height='540'
-          fill={(slide.backgroundColor as string) || '#ffffff'}
-        />
+        <rect width='960' height='540' fill={background} />
 
         {/* Kết xuất các components */}
         {slide.components.map((comp) => {
@@ -281,11 +284,11 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
 
           // Các dạng văn bản (title, subtitle, bullets, text, quote)
           const fontFamily =
-            FONT_MAP[comp.fontFamily || 'sans'] ||
+            FONT_MAP[comp.fontFamily || theme.bodyFont] ||
             comp.fontFamily ||
             '"Lora", serif'
           const fontSize = comp.fontSize ?? 20
-          const color = comp.color || '#173c39'
+          const color = comp.color || theme.textPrimary
           const textAlign = comp.textAlign ?? 'left'
           const fontWeight = comp.fontWeight ?? 'normal'
           const fontStyle = comp.fontStyle ?? 'normal'
@@ -387,11 +390,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
       preserveAspectRatio='xMidYMid meet'
     >
       {/* Nền slide */}
-      <rect
-        width='960'
-        height='540'
-        fill={(slide?.backgroundColor as string) || '#ffffff'}
-      />
+      <rect width='960' height='540' fill={background} />
 
       <foreignObject
         x='64'
@@ -406,18 +405,18 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-start',
-            color: '#173c39',
-            fontFamily: '"Be Vietnam Pro", sans-serif'
+            color: theme.textPrimary,
+            fontFamily: FONT_MAP[theme.bodyFont]
           }}
         >
           {/* Tiêu đề & Phụ đề */}
           <div style={{ textAlign: titleAlign, marginBottom: '20px' }}>
             <h1
               style={{
-                fontFamily: '"Lora", Georgia, serif',
+                fontFamily: FONT_MAP[theme.headingFont],
                 fontSize: `${titleSize}px`,
                 fontWeight: 600,
-                color: '#064e3b',
+                color: theme.textPrimary,
                 lineHeight: 1.25,
                 margin: 0,
                 display: '-webkit-box',
@@ -432,7 +431,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
               <p
                 style={{
                   fontSize: '18px',
-                  color: '#64748b',
+                  color: theme.textSecondary,
                   fontStyle: 'italic',
                   margin: '8px 0 0 0',
                   lineHeight: 1.3
@@ -475,7 +474,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
                     >
                       <span
                         style={{
-                          color: '#c2410c',
+                          color: theme.accentColor,
                           fontWeight: 'bold',
                           flexShrink: 0
                         }}
@@ -512,7 +511,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
                     >
                       <span
                         style={{
-                          color: '#c2410c',
+                          color: theme.accentColor,
                           fontWeight: 'bold',
                           flexShrink: 0
                         }}
@@ -533,7 +532,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
               style={{
                 fontSize: '19px',
                 lineHeight: 1.5,
-                color: '#334155',
+                color: theme.textSecondary,
                 marginTop: '16px'
               }}
             >
@@ -562,7 +561,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
                   >
                     <span
                       style={{
-                        color: '#c2410c',
+                        color: theme.accentColor,
                         fontWeight: 'bold',
                         flexShrink: 0
                       }}
@@ -586,3 +585,5 @@ export const SlidePreview: React.FC<SlidePreviewProps> = ({
     </svg>
   )
 }
+
+export const SlidePreview = memo(SlidePreviewContent)

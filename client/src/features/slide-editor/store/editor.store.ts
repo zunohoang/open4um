@@ -122,6 +122,18 @@ const saveUploadsToStorage = (images: UploadedImage[]) => {
   }
 }
 
+export const createWelcomeMessages = (): AiChatMessage[] => [
+  {
+    id: 'welcome-msg',
+    role: 'assistant',
+    text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
+    timestamp: new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+]
+
 export const useEditorStore = create<EditorStoreState>((set, get) => ({
   activeSlideIndex: 0,
   selectedCompId: null,
@@ -134,17 +146,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   redoStack: [],
 
   uploadedImages: loadInitialUploads(),
-  aiMessages: [
-    {
-      id: 'welcome-msg',
-      role: 'assistant',
-      text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
-      timestamp: new Date().toLocaleTimeString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    }
-  ],
+  aiMessages: createWelcomeMessages(),
   previewSlide: null,
   previewSlideAction: null,
   previewTargetSlideId: null,

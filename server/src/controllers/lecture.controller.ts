@@ -51,13 +51,17 @@ export const listLectures = asyncHandler(async (req, res) => {
     sortBy,
     sortOrder,
     page,
-    limit
+    limit,
+    summary: req.query.view === 'summary'
   })
   okPaginated(res, items, total, page, limit)
 })
 
 export const listTrash = asyncHandler(async (req, res) => {
-  const items = await lectureService.listTrash(req.user.id)
+  const items = await lectureService.listTrash(
+    req.user.id,
+    req.query.view === 'summary'
+  )
   ok(res, items)
 })
 
@@ -92,7 +96,12 @@ export const autosaveLecture = asyncHandler(async (req, res) => {
     String(req.params.id),
     req.body
   )
-  ok(res, { lecture, savedAt: lecture.updatedAt })
+  ok(
+    res,
+    req.query.view === 'receipt'
+      ? { savedAt: lecture.updatedAt }
+      : { lecture, savedAt: lecture.updatedAt }
+  )
 })
 
 export const deleteLecture = asyncHandler(async (req, res) => {

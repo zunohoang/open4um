@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import { useToast } from '@/components/ui/Toast'
 import type {
   ContentLayoutType,
@@ -135,7 +136,18 @@ export const LeftSidebarRail = ({
     removeUploadedImage,
     selectedCompId,
     setSelectedCompId
-  } = useEditorStore()
+  } = useEditorStore(
+    useShallow((state) => ({
+      leftRailTab: state.leftRailTab,
+      setLeftRailTab: state.setLeftRailTab,
+      isDrawerOpen: state.isDrawerOpen,
+      uploadedImages: state.uploadedImages,
+      addUploadedImage: state.addUploadedImage,
+      removeUploadedImage: state.removeUploadedImage,
+      selectedCompId: state.selectedCompId,
+      setSelectedCompId: state.setSelectedCompId
+    }))
+  )
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { upload, isUploading, failedFile, retry, dismissFailure } =

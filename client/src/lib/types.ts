@@ -145,6 +145,21 @@ export interface Lecture {
   updatedAt: string
 }
 
+export type LectureSummary = Pick<
+  Lecture,
+  | '_id'
+  | 'userId'
+  | 'folderId'
+  | 'title'
+  | 'theme'
+  | 'deletedAt'
+  | 'createdAt'
+  | 'updatedAt'
+> & {
+  previewSlide?: Slide
+  slideCount: number
+}
+
 export interface Folder {
   _id: string
   userId: string

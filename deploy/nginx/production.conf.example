@@ -23,6 +23,12 @@ server {
     listen [::]:80;
     server_name slides-api.sbltcup.dev;
 
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 5;
+    gzip_types application/json;
+
     client_max_body_size 100m;
 
     location / {

@@ -5,6 +5,7 @@ import React from 'react'
 
 interface SlideThumbnailProps {
   slide: Slide
+  lectureTheme?: string
   index: number
   isActive: boolean
   isDragging: boolean
@@ -19,6 +20,7 @@ interface SlideThumbnailProps {
 
 export const SlideThumbnail = ({
   slide,
+  lectureTheme,
   index,
   isActive,
   isDragging,
@@ -60,7 +62,11 @@ export const SlideThumbnail = ({
 
       {/* Slide Visual Vector Preview (Hình thu nhỏ trực quan 16:9) */}
       <div className='relative h-full w-full overflow-hidden bg-white pointer-events-none'>
-        <SlidePreview slide={slide} className='h-full w-full object-cover' />
+        <SlidePreview
+          slide={slide}
+          lectureTheme={lectureTheme}
+          className='h-full w-full object-cover'
+        />
       </div>
 
       {/* Badge số thứ tự slide nổi ở góc trên trái */}

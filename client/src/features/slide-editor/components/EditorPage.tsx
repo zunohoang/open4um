@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -16,10 +17,12 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { getThemeById } from '../constants/theme-options'
 import {
   AiChatMessage,
+  createWelcomeMessages,
   useEditorStore,
   type AiSlideProposalItem
 } from '../store/editor.store'
 import {
+  clearLocalChatHistory,
   clearOfflineDraft,
   getOfflineDraft,
   saveOfflineDraft
@@ -35,7 +38,7 @@ import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
 import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
-
+import { createSerialAutosaver } from '../utils/autosave'
 const resolveProposalTargetIndex = (
   slides: Slide[],
   proposedSlide: Slide,
@@ -99,7 +102,30 @@ export const EditorPage = ({
     isSourceMaterialModalOpen,
     setIsSourceMaterialModalOpen,
     clearHistory
-  } = useEditorStore()
+  } = useEditorStore(
+    useShallow((state) => ({
+      activeSlideIndex: state.activeSlideIndex,
+      setActiveSlideIndex: state.setActiveSlideIndex,
+      selectedCompId: state.selectedCompId,
+      setSelectedCompId: state.setSelectedCompId,
+      recordHistory: state.recordHistory,
+      undo: state.undo,
+      redo: state.redo,
+      addAiMessage: state.addAiMessage,
+      setAiMessages: state.setAiMessages,
+      updateAiMessageStatus: state.updateAiMessageStatus,
+      aiMessages: state.aiMessages,
+      previewSlide: state.previewSlide,
+      previewSlideAction: state.previewSlideAction,
+      previewTargetSlideId: state.previewTargetSlideId,
+      setPreviewSlide: state.setPreviewSlide,
+      sourceMaterial: state.sourceMaterial,
+      setSourceMaterial: state.setSourceMaterial,
+      isSourceMaterialModalOpen: state.isSourceMaterialModalOpen,
+      setIsSourceMaterialModalOpen: state.setIsSourceMaterialModalOpen,
+      clearHistory: state.clearHistory
+    }))
+  )
 
   const routeState = location.state as {
     lecture?: Lecture
@@ -142,14 +168,11 @@ export const EditorPage = ({
     null
   )
   const lectureRef = useRef(lecture)
+  const [autosaver] = useState(() => createSerialAutosaver(editorApi.autosave))
+  const pendingSavesRef = useRef(0)
   useEffect(() => {
     lectureRef.current = lecture
   }, [lecture])
-
-  const aiMessagesRef = useRef(aiMessages)
-  useEffect(() => {
-    aiMessagesRef.current = aiMessages
-  }, [aiMessages])
 
   const clearCountdownTimers = useCallback(() => {
     if (countdownTimerRef.current) {
@@ -185,15 +208,7 @@ export const EditorPage = ({
       setSaveStatus('saving')
       clearCountdownTimers()
 
-      const payload: Lecture = {
-        ...toSave,
-        aiChatHistory:
-          toSave.aiChatHistory && toSave.aiChatHistory.length > 0
-            ? toSave.aiChatHistory
-            : (aiMessagesRef.current as unknown as Array<
-                Record<string, unknown>
-              >)
-      }
+      const payload = toSave
 
       // 1. Nếu không có kết nối mạng: lưu tạm vào localStorage
       if (!navigator.onLine) {
@@ -209,17 +224,29 @@ export const EditorPage = ({
       }
 
       // 2. Nếu có mạng: gửi lên server
+      pendingSavesRef.current += 1
       try {
-        await editorApi.autosave(payload)
-        clearOfflineDraft(payload._id)
-        setSaveStatus('saved')
+        await autosaver.save(payload)
+        if (lectureRef.current?._id === payload._id) {
+          if (lectureRef.current === toSave) {
+            clearOfflineDraft(payload._id)
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'saved')
+          } else {
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'unsaved')
+          }
+        }
         if (!isAuto) {
           showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
         }
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
-        saveOfflineDraft(payload)
-        setSaveStatus('offline_saved')
+        const latestLecture =
+          lectureRef.current?._id === payload._id ? lectureRef.current : payload
+        saveOfflineDraft(latestLecture)
+        if (lectureRef.current?._id === payload._id)
+          setSaveStatus(
+            pendingSavesRef.current > 1 ? 'saving' : 'offline_saved'
+          )
         // Lưu tự động lỗi thì chỉ hiện trạng thái "Đang lưu offline", tránh toast lặp mỗi 2 giây
         if (!isAuto) {
           showToast(
@@ -227,9 +254,11 @@ export const EditorPage = ({
             'error'
           )
         }
+      } finally {
+        pendingSavesRef.current -= 1
       }
     },
-    [clearCountdownTimers, showToast]
+    [autosaver, clearCountdownTimers, showToast]
   )
 
   // Tải dữ liệu bài giảng từ server
@@ -240,7 +269,6 @@ export const EditorPage = ({
     }
     setLoadError(null)
     setIsUnauthorized(false)
-    // Undo/Redo stack là global: không để lịch sử của bài giảng trước lọt sang bài này
     clearHistory()
 
     try {
@@ -255,23 +283,14 @@ export const EditorPage = ({
           draft.lecture.title !== loaded.title)
 
       setLecture(loaded)
+      setAiMessages(
+        loaded.aiChatHistory?.length
+          ? (loaded.aiChatHistory as unknown as AiChatMessage[])
+          : createWelcomeMessages()
+      )
       setSaveStatus('saved')
       if (draft && hasUnsyncedChanges) setPendingDraft(draft.lecture)
       else if (draft) clearOfflineDraft(params.id)
-
-      // Khôi phục lịch sử chat AI từ dữ liệu bài giảng trên máy chủ
-      const chatHistory = draft?.lecture.aiChatHistory || loaded.aiChatHistory
-      if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
-        setAiMessages(chatHistory as unknown as AiChatMessage[])
-        try {
-          localStorage.setItem(
-            `abslider_chat_${loaded._id}`,
-            JSON.stringify(chatHistory)
-          )
-        } catch {
-          // ignore
-        }
-      }
 
       // SRS UC009 bước 7: chọn slide mở gần nhất, nếu không có thì slide đầu tiên
       const savedIndex = Number(
@@ -294,6 +313,7 @@ export const EditorPage = ({
       const draft = getOfflineDraft(params.id)
       if (draft) {
         setLecture(draft.lecture)
+        setAiMessages(createWelcomeMessages())
         setSaveStatus('offline_saved')
         showToast(
           'Đang offline (máy chủ không phản hồi). Đã mở bản nháp lưu tạm trong trình duyệt.',
@@ -317,47 +337,10 @@ export const EditorPage = ({
     }
   }, [params.id, loadLecture])
 
-  // Khôi phục nhanh lịch sử chat AI từ localStorage ngay khi mở bài giảng
   useEffect(() => {
-    if (!lectureId) return
-    try {
-      const cached = localStorage.getItem(`abslider_chat_${lectureId}`)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setAiMessages(parsed)
-          return
-        }
-      }
-      setAiMessages([
-        {
-          id: 'welcome-msg',
-          role: 'assistant',
-          text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
-          timestamp: new Date().toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit'
-          })
-        }
-      ])
-    } catch {
-      // ignore
-    }
+    clearLocalChatHistory()
+    setAiMessages(createWelcomeMessages())
   }, [lectureId, setAiMessages])
-
-  // Tự động lưu lịch sử chat vào localStorage mỗi khi có tin nhắn mới hoặc cập nhật trạng thái
-  useEffect(() => {
-    if (!lectureId || aiMessages.length === 0) return
-    if (aiMessages.length === 1 && aiMessages[0].id === 'welcome-msg') return
-    try {
-      localStorage.setItem(
-        `abslider_chat_${lectureId}`,
-        JSON.stringify(aiMessages)
-      )
-    } catch {
-      // ignore
-    }
-  }, [lectureId, aiMessages])
 
   // Đồng bộ vị trí slide đang xem vào sessionStorage
   useEffect(() => {
@@ -388,6 +371,7 @@ export const EditorPage = ({
         recordHistory(lectureRef.current.slides)
       }
 
+      lectureRef.current = next
       setLecture(next)
       setSaveStatus('unsaved')
       clearCountdownTimers()
@@ -531,7 +515,6 @@ export const EditorPage = ({
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
-  // Đồng bộ sourceMaterial từ bài giảng vào store nếu có
   useEffect(() => {
     if (lecture?.sourceMaterial && !sourceMaterial) {
       setSourceMaterial(lecture.sourceMaterial)
@@ -561,10 +544,19 @@ export const EditorPage = ({
       shouldRecordHistory = true
     ) => {
       const currentLecture = lectureRef.current
-      if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
+      if (!currentLecture || !currentLecture.slides[activeSlideIndex])
+        return false
 
       const sourceSlide = currentLecture.slides[activeSlideIndex]
       const comps = getSlideComponents(sourceSlide, currentLecture.theme)
+      const target = comps.find((component) => component.id === compId)
+      if (
+        !target ||
+        Object.entries(patch).every(
+          ([key, value]) => target[key as keyof SlideComponent] === value
+        )
+      )
+        return false
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
@@ -591,6 +583,7 @@ export const EditorPage = ({
         { ...currentLecture, slides: nextSlides },
         shouldRecordHistory
       )
+      return true
     },
     [activeSlideIndex, mutateLecture]
   )
@@ -1640,6 +1633,7 @@ export const EditorPage = ({
           {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
           <SlideFilmstrip
             slides={lecture.slides}
+            lectureTheme={lecture.theme}
             activeSlideIndex={activeSlideIndex}
             onSelectSlide={setActiveSlideIndex}
             onAddSlide={handleAddSlide}
@@ -1710,7 +1704,11 @@ export const EditorPage = ({
         confirmLabel='Khôi phục'
         cancelLabel='Bỏ qua'
         onConfirm={() => {
-          if (pendingDraft) setLecture(pendingDraft)
+          if (pendingDraft)
+            setLecture({
+              ...pendingDraft,
+              aiChatHistory: lecture.aiChatHistory
+            })
           setSaveStatus('offline_saved')
           setPendingDraft(null)
         }}

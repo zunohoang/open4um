@@ -47,10 +47,10 @@ export const EditorHeader = ({
   isAutoSave,
   onToggleAutoSave
 }: EditorHeaderProps) => {
-  const { undoStack, redoStack, isAiPanelOpen, toggleAiPanel } =
-    useEditorStore()
-  const canUndo = undoStack.length > 0
-  const canRedo = redoStack.length > 0
+  const canUndo = useEditorStore((state) => state.undoStack.length > 0)
+  const canRedo = useEditorStore((state) => state.redoStack.length > 0)
+  const isAiPanelOpen = useEditorStore((state) => state.isAiPanelOpen)
+  const toggleAiPanel = useEditorStore((state) => state.toggleAiPanel)
 
   return (
     <header className='relative flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
