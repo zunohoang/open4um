@@ -1,10 +1,29 @@
 import { apiClient } from '@/lib/api'
-import type { Folder, Lecture, Paginated } from '@/lib/types'
+import type { Folder, Lecture, LectureSummary, Paginated } from '@/lib/types'
 
 export const lectureApi = {
   list: async (params: Record<string, string | undefined>) =>
     (await apiClient.get<{ data: Paginated<Lecture> }>('/lectures', { params }))
       .data.data,
+
+  summaries: async (
+    params: Record<string, string | undefined>,
+    signal?: AbortSignal
+  ) =>
+    (
+      await apiClient.get<{ data: Paginated<LectureSummary> }>('/lectures', {
+        params: { ...params, view: 'summary' },
+        signal
+      })
+    ).data.data,
+
+  trashSummaries: async (signal?: AbortSignal) =>
+    (
+      await apiClient.get<{ data: LectureSummary[] }>('/lectures/trash', {
+        params: { view: 'summary' },
+        signal
+      })
+    ).data.data,
 
   trash: async () => {
     const res = (
@@ -15,8 +34,8 @@ export const lectureApi = {
     return Array.isArray(res) ? res : res.items || []
   },
 
-  folders: async () =>
-    (await apiClient.get<{ data: Folder[] }>('/folders')).data.data,
+  folders: async (signal?: AbortSignal) =>
+    (await apiClient.get<{ data: Folder[] }>('/folders', { signal })).data.data,
 
   createFolder: async (name: string) =>
     (await apiClient.post<{ data: Folder }>('/folders', { name })).data.data,

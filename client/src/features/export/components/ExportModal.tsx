@@ -1,14 +1,13 @@
 import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { toPng } from 'html-to-image'
-import { jsPDF } from 'jspdf'
+import { editorApi } from '@/features/slide-editor/api/editor.api'
 import { SlideView } from '@/features/presentation/components/SlideView'
-import type { Lecture, Slide } from '@/lib/types'
+import type { Lecture, LectureSummary, Slide } from '@/lib/types'
 
 interface ExportModalProps {
   open: boolean
   onClose: () => void
-  lecture: Lecture | null
+  lecture: Lecture | LectureSummary | null
   initialSlideIndex?: number
   onSuccess?: (msg: string) => void
   onError?: (msg: string) => void
@@ -32,31 +31,70 @@ export const ExportModal = ({
   const [isExporting, setIsExporting] = useState(false)
   const [progressMessage, setProgressMessage] = useState<string | null>(null)
   const [captureSlide, setCaptureSlide] = useState<Slide | null>(null)
+  const [captureTheme, setCaptureTheme] = useState<string | undefined>()
   const captureRef = useRef<HTMLDivElement>(null)
+  const fontEmbedCssRef = useRef(new Map<string, Promise<string>>())
 
   if (!open || !lecture) return null
 
-  const slideCount = lecture.slides.length
+  const slideCount =
+    'slides' in lecture ? lecture.slides.length : lecture.slideCount
   const currentIndex = Math.min(initialSlideIndex, Math.max(slideCount - 1, 0))
   const cleanTitle = (lecture.title || 'bai-giang')
     .replace(/[/\\?%*:|"<>]/g, '-')
     .trim()
 
   // Render ngầm slide bằng bộ dựng chỉ đọc (không có viền chọn, nút chỉnh sửa) rồi chụp thành ảnh
-  const captureToPng = async (slide: Slide, pixelRatio: number) => {
-    flushSync(() => setCaptureSlide(slide))
+  const captureToPng = async (
+    slide: Slide,
+    pixelRatio: number,
+    theme?: string
+  ) => {
+    const { toPng, getFontEmbedCSS } = await import('html-to-image')
+    flushSync(() => {
+      setCaptureSlide(slide)
+      setCaptureTheme(theme)
+    })
     await document.fonts?.ready
     await waitForPaint()
     const node = captureRef.current?.firstElementChild as HTMLElement | null
     if (!node) throw new Error('Không render được slide để xuất')
-    return toPng(node, { pixelRatio, cacheBust: true })
+    // Different slides can use different fonts. Reuse CSS only for matching font sets.
+    const fontKey = [
+      ...new Set(
+        [node, ...node.querySelectorAll('*')]
+          .filter((element) => element instanceof HTMLElement)
+          .map(
+            (element) =>
+              element.style.fontFamily || getComputedStyle(element).fontFamily
+          )
+      )
+    ]
+      .sort()
+      .join('\n')
+    let fontEmbedCSS = fontEmbedCssRef.current.get(fontKey)
+    if (!fontEmbedCSS) {
+      fontEmbedCSS = getFontEmbedCSS(node)
+      fontEmbedCssRef.current.set(fontKey, fontEmbedCSS)
+    }
+    return toPng(node, {
+      pixelRatio,
+      cacheBust: true,
+      fontEmbedCSS: await fontEmbedCSS
+    })
   }
 
-  const run = async (task: () => Promise<void>, errorMsg: string) => {
+  const run = async (
+    task: (fullLecture: Lecture) => Promise<void>,
+    errorMsg: string
+  ) => {
     try {
       setIsExporting(true)
       setProgressMessage('Đang chuẩn bị file...')
-      await task()
+      fontEmbedCssRef.current.clear()
+      const fullLecture =
+        'slides' in lecture ? lecture : await editorApi.get(lecture._id)
+      await task(fullLecture)
       onSuccess?.('Tải xuống thành công')
       onClose()
     } catch {
@@ -69,8 +107,16 @@ export const ExportModal = ({
   }
 
   const handleExportPng = () =>
-    run(async () => {
-      const dataUrl = await captureToPng(lecture.slides[currentIndex], 2)
+    run(async (fullLecture) => {
+      const index = Math.min(
+        currentIndex,
+        Math.max(fullLecture.slides.length - 1, 0)
+      )
+      const dataUrl = await captureToPng(
+        fullLecture.slides[index],
+        2,
+        fullLecture.theme
+      )
       const link = document.createElement('a')
       link.download = `${cleanTitle}-slide-${currentIndex + 1}.png`
       link.href = dataUrl
@@ -78,15 +124,22 @@ export const ExportModal = ({
     }, 'Không thể xuất ảnh PNG cho slide này')
 
   const handleExportPdf = () =>
-    run(async () => {
+    run(async (fullLecture) => {
+      const { jsPDF } = await import('jspdf')
       const pdf = new jsPDF({
         orientation: 'landscape',
         unit: 'px',
         format: [EXPORT_WIDTH, EXPORT_HEIGHT]
       })
-      for (let i = 0; i < slideCount; i++) {
-        setProgressMessage(`Đang chuẩn bị file... (${i + 1}/${slideCount})`)
-        const dataUrl = await captureToPng(lecture.slides[i], 1.5)
+      for (let i = 0; i < fullLecture.slides.length; i++) {
+        setProgressMessage(
+          `Đang chuẩn bị file... (${i + 1}/${fullLecture.slides.length})`
+        )
+        const dataUrl = await captureToPng(
+          fullLecture.slides[i],
+          1.5,
+          fullLecture.theme
+        )
         if (i > 0) pdf.addPage([EXPORT_WIDTH, EXPORT_HEIGHT], 'landscape')
         pdf.addImage(
           dataUrl,
@@ -215,7 +268,7 @@ export const ExportModal = ({
         {captureSlide && (
           <SlideView
             slide={captureSlide}
-            lectureTheme={lecture.theme}
+            lectureTheme={captureTheme}
             style={{ width: EXPORT_WIDTH, height: EXPORT_HEIGHT }}
           />
         )}

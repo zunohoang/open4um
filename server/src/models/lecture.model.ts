@@ -40,6 +40,26 @@ const lectureSchema = new Schema(
   { timestamps: true }
 )
 
+export const LECTURE_QUERY_INDEXES = [
+  {
+    fields: { userId: 1, deletedAt: 1, createdAt: -1, _id: -1 },
+    name: 'lecture_user_created'
+  },
+  {
+    fields: { userId: 1, deletedAt: 1, folderId: 1, createdAt: -1, _id: -1 },
+    name: 'lecture_folder_created'
+  },
+  {
+    fields: { userId: 1, deletedAt: 1, updatedAt: -1, _id: -1 },
+    name: 'lecture_user_updated'
+  },
+  { fields: { userId: 1, deletedAt: -1 }, name: 'lecture_user_trash' }
+] as const
+
+for (const { fields, name } of LECTURE_QUERY_INDEXES) {
+  lectureSchema.index(fields, { name })
+}
+
 export type Lecture = InferSchemaType<typeof lectureSchema>
 export type LectureDocument = HydratedDocument<Lecture>
 export const LectureModel = model<Lecture>('Lecture', lectureSchema)

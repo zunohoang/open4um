@@ -51,13 +51,17 @@ export const listLectures = asyncHandler(async (req, res) => {
     sortBy,
     sortOrder,
     page,
-    limit
+    limit,
+    summary: req.query.view === 'summary'
   })
   okPaginated(res, items, total, page, limit)
 })
 
 export const listTrash = asyncHandler(async (req, res) => {
-  const items = await lectureService.listTrash(req.user.id)
+  const items = await lectureService.listTrash(
+    req.user.id,
+    req.query.view === 'summary'
+  )
   ok(res, items)
 })
 

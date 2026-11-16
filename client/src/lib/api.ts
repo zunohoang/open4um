@@ -46,6 +46,7 @@ const processQueue = (error: unknown, token: string | null = null) => {
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<{ message?: string }>) => {
+    if (axios.isCancel(error)) return Promise.reject(error)
     const originalRequest = error.config as CustomRequestConfig | undefined
 
     // Nếu không phải lỗi 401 hoặc không có config của request gốc -> reject

@@ -7,7 +7,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui'
 import { ExportModal } from '@/features/export/components/ExportModal'
 import { SlidePreview } from './SlidePreview'
-import type { Folder, Lecture } from '@/lib/types'
+import type { Folder, LectureSummary } from '@/lib/types'
 
 interface LibraryPageProps {
   viewMode?: 'library' | 'trash'
@@ -62,7 +62,7 @@ const InlineRename = ({
 interface ContextMenuState {
   x: number
   y: number
-  lecture: Lecture
+  lecture: LectureSummary
 }
 
 // Hàm tính số ngày đếm ngược còn lại (30 ngày kể từ deletedAt)
@@ -97,11 +97,12 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
     { openCreateLecture?: () => void } | undefined
   >()?.openCreateLecture
 
-  const handleOpen = (lecture: Lecture) => navigate(`/editor/${lecture._id}`)
-  const handlePresent = (lecture: Lecture) =>
+  const handleOpen = (lecture: LectureSummary) =>
+    navigate(`/editor/${lecture._id}`)
+  const handlePresent = (lecture: LectureSummary) =>
     navigate(`/presentation/${lecture._id}`)
 
-  const [lectures, setLectures] = useState<Lecture[]>([])
+  const [lectures, setLectures] = useState<LectureSummary[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
   const [search, setSearch] = useState('')
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
@@ -121,52 +122,65 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
   const [isFolderSubmitting, setIsFolderSubmitting] = useState(false)
 
   // State chuyển thư mục bài giảng
-  const [movingLecture, setMovingLecture] = useState<Lecture | null>(null)
+  const [movingLecture, setMovingLecture] = useState<LectureSummary | null>(
+    null
+  )
   const [targetFolderId, setTargetFolderId] = useState<string>('')
 
   // State xuất bản bài giảng (Modal lựa chọn ảnh hoặc PDF)
-  const [lectureToExport, setLectureToExport] = useState<Lecture | null>(null)
+  const [lectureToExport, setLectureToExport] = useState<LectureSummary | null>(
+    null
+  )
 
   // State xóa bài giảng / thư mục
   const [lectureToDelete, setLectureToDelete] = useState<string | null>(null)
   const [lectureToPermanentlyDelete, setLectureToPermanentlyDelete] =
-    useState<Lecture | null>(null)
+    useState<LectureSummary | null>(null)
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null)
 
   // Tải dữ liệu
+  const loadControllerRef = useRef<AbortController | null>(null)
   const load = useCallback(async () => {
+    loadControllerRef.current?.abort()
+    const controller = new AbortController()
+    loadControllerRef.current = controller
+    const { signal } = controller
     try {
       if (activeViewMode === 'trash') {
         const [trashRes, nextFolders] = await Promise.all([
-          lectureApi.trash(),
-          lectureApi.folders()
+          lectureApi.trashSummaries(signal),
+          lectureApi.folders(signal)
         ])
-        const trashItems = Array.isArray(trashRes)
-          ? trashRes
-          : (trashRes as { items: Lecture[] }).items || []
-        setLectures(trashItems)
+        if (signal.aborted) return
+        setLectures(trashRes)
         setFolders(nextFolders)
       } else {
         const [result, nextFolders] = await Promise.all([
-          lectureApi.list({
-            search: search.trim() || undefined,
-            folderId: selectedFolderId || undefined,
-            sortBy: SORT_OPTIONS[sortOption].sortBy,
-            sortOrder: SORT_OPTIONS[sortOption].sortOrder,
-            limit: '100'
-          }),
-          lectureApi.folders()
+          lectureApi.summaries(
+            {
+              search: search.trim() || undefined,
+              folderId: selectedFolderId || undefined,
+              sortBy: SORT_OPTIONS[sortOption].sortBy,
+              sortOrder: SORT_OPTIONS[sortOption].sortOrder,
+              limit: '100'
+            },
+            signal
+          ),
+          lectureApi.folders(signal)
         ])
+        if (signal.aborted) return
         setLectures(result.items)
         setFolders(nextFolders)
       }
     } catch {
+      if (signal.aborted) return
       notifyError('Không tải được dữ liệu từ máy chủ')
     }
   }, [search, selectedFolderId, sortOption, activeViewMode, notifyError])
 
   useEffect(() => {
     void load()
+    return () => loadControllerRef.current?.abort()
   }, [load])
 
   // Đóng menu chuột phải khi click ra ngoài hoặc nhấn phím ESC
@@ -197,7 +211,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
   }, [contextMenu])
 
   // Bắt sự kiện chuột phải trên bài giảng
-  const handleContextMenu = (e: React.MouseEvent, lecture: Lecture) => {
+  const handleContextMenu = (e: React.MouseEvent, lecture: LectureSummary) => {
     e.preventDefault()
     setContextMenu({
       x: e.clientX,
@@ -207,7 +221,10 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
   }
 
   // Xử lý mở/đóng menu khi nhấp chuột trái vào nút Kebab ba chấm (...)
-  const handleKebabMenuClick = (e: React.MouseEvent, lecture: Lecture) => {
+  const handleKebabMenuClick = (
+    e: React.MouseEvent,
+    lecture: LectureSummary
+  ) => {
     e.stopPropagation()
     // Nếu menu của chính bài giảng này đang mở, click lại sẽ đóng menu (toggle)
     if (contextMenu?.lecture._id === lecture._id) {
@@ -441,7 +458,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
     }`
 
   // Hàm render card bài giảng
-  const renderLectureCard = (lecture: Lecture) => (
+  const renderLectureCard = (lecture: LectureSummary) => (
     <article
       key={lecture._id}
       draggable={activeViewMode !== 'trash' && renamingId !== lecture._id}
@@ -464,7 +481,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         {/* Kết xuất trực quan Slide đầu tiên của bài giảng */}
         <div className='h-full w-full transition-transform duration-300 group-hover:scale-[1.02]'>
           <SlidePreview
-            slide={lecture.slides?.[0]}
+            slide={lecture.previewSlide}
             lectureTitle={lecture.title}
           />
         </div>
@@ -478,7 +495,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
             </span>
           ) : (
             <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
-              {lecture.slides.length} SLIDES
+              {lecture.slideCount} SLIDES
             </span>
           )}
 

@@ -24,6 +24,20 @@ interface ListParams {
   sortOrder?: 'asc' | 'desc'
   page: number
   limit: number
+  summary?: boolean
+}
+
+const LECTURE_SUMMARY_PROJECTION = {
+  _id: 1,
+  userId: 1,
+  folderId: 1,
+  title: 1,
+  theme: 1,
+  deletedAt: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  previewSlide: { $arrayElemAt: [{ $ifNull: ['$slides', []] }, 0] },
+  slideCount: { $size: { $ifNull: ['$slides', []] } }
 }
 
 export const generateOutline = async (
@@ -225,7 +239,8 @@ export const listLectures = async ({
   sortBy = 'updatedAt',
   sortOrder = 'desc',
   page,
-  limit
+  limit,
+  summary = false
 }: ListParams) => {
   const filter: Record<string, unknown> = { userId, deletedAt: null }
   if (folderId) {
@@ -243,24 +258,29 @@ export const listLectures = async ({
   const sortDirection = sortOrder === 'asc' ? 1 : -1
   const sort: Record<string, 1 | -1> = { [sortBy]: sortDirection, _id: -1 }
 
+  const query = LectureModel.find(filter)
+    .sort(sort)
+    .skip((page - 1) * limit)
+    .limit(limit)
+  if (summary) query.select(LECTURE_SUMMARY_PROJECTION).lean()
+
   const [items, total] = await Promise.all([
-    LectureModel.find(filter)
-      .sort(sort)
-      .skip((page - 1) * limit)
-      .limit(limit),
+    query,
     LectureModel.countDocuments(filter)
   ])
   return { items, total }
 }
 
-export const listTrash = async (userId: string) => {
+export const listTrash = async (userId: string, summary = false) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-  return LectureModel.find({
+  const query = LectureModel.find({
     userId,
     deletedAt: { $ne: null, $gte: thirtyDaysAgo }
   }).sort({
     deletedAt: -1
   })
+  if (summary) query.select(LECTURE_SUMMARY_PROJECTION).lean()
+  return query
 }
 
 const findOwnedLecture = async (userId: string, id: string) => {
