@@ -24,6 +24,7 @@ jest.mock('@/models/lecture.model', () => ({
 import { getImage, getLecture, uploadImage } from '@/services/lecture.service'
 
 const USER_ID = 'a'.repeat(24)
+const LECTURE_ID = 'b'.repeat(24)
 const PNG_1PX =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGO4Y6MBAAM4AUGx7UnvAAAAAElFTkSuQmCC'
 
@@ -88,9 +89,9 @@ describe('SRS UC009 2a - quyền truy cập bài giảng', () => {
 
   it('trả 403 khi bài giảng tồn tại nhưng thuộc người khác', async () => {
     mockFindOne.mockResolvedValue(null)
-    mockExists.mockResolvedValue({ _id: 'lec-1' })
+    mockExists.mockResolvedValue({ _id: LECTURE_ID })
 
-    await expect(getLecture('user-a', 'lec-1')).rejects.toMatchObject({
+    await expect(getLecture(USER_ID, LECTURE_ID)).rejects.toMatchObject({
       statusCode: 403,
       message: 'Bạn không có quyền truy cập bài giảng này'
     })
@@ -100,7 +101,7 @@ describe('SRS UC009 2a - quyền truy cập bài giảng', () => {
     mockFindOne.mockResolvedValue(null)
     mockExists.mockResolvedValue(null)
 
-    await expect(getLecture('user-a', 'lec-x')).rejects.toMatchObject({
+    await expect(getLecture(USER_ID, LECTURE_ID)).rejects.toMatchObject({
       statusCode: 404
     })
   })

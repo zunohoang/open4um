@@ -4,6 +4,7 @@ const mockUserFindOne = jest.fn()
 const mockFolderFindOne = jest.fn()
 const mockLectureCreate = jest.fn()
 const mockLectureFindOne = jest.fn()
+const mockLectureExists = jest.fn()
 const mockLectureFind = jest.fn()
 const mockLectureDeleteOne = jest.fn()
 const mockLectureFindOneAndUpdate = jest.fn()
@@ -41,7 +42,7 @@ jest.mock('@/models/lecture.model', () => ({
   LectureModel: {
     create: (...args: any[]) => mockLectureCreate(...args),
     findOne: (...args: any[]) => mockLectureFindOne(...args),
-    exists: jest.fn().mockResolvedValue(null),
+    exists: (...args: unknown[]) => mockLectureExists(...args),
     find: (...args: any[]) => mockLectureFind(...args),
     deleteOne: (...args: any[]) => mockLectureDeleteOne(...args),
     findOneAndUpdate: (...args: any[]) => mockLectureFindOneAndUpdate(...args)
@@ -93,9 +94,16 @@ import {
   aiChatInEditor
 } from '@/services/lecture.service'
 
+const LECTURE_ID = 'a'.repeat(24)
+const MISSING_LECTURE_ID = 'f'.repeat(24)
+
 describe('lecture.service unit tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockLectureFindOne.mockReset().mockResolvedValue(null)
+    mockLectureExists.mockReset().mockResolvedValue(null)
+    mockLectureFindOneAndUpdate.mockReset()
+    mockAiUsageLogCreate.mockReset().mockResolvedValue({ _id: 'usage-1' })
   })
 
   describe('generateOutline', () => {
@@ -161,7 +169,7 @@ describe('lecture.service unit tests', () => {
       mockUserFindById.mockResolvedValue(mockUser)
       mockAiUsageLogCreate.mockResolvedValue({})
       const mockCreatedDraft = {
-        _id: 'draft-lec-1',
+        _id: LECTURE_ID,
         userId: 'user-rich',
         title: 'Học Go',
         outline: expect.any(Object),
@@ -220,28 +228,43 @@ describe('lecture.service unit tests', () => {
       mockUserFindById.mockResolvedValue(mockUser)
 
       const mockUpdatedLecture = {
-        _id: 'existing-lec-1',
+        _id: LECTURE_ID,
         title: 'Bản mới điều chỉnh',
         prompt: 'Prompt gốc',
         outline: refinedOutline
       }
       mockLectureFindOneAndUpdate.mockResolvedValue(mockUpdatedLecture)
+      mockLectureFindOne.mockResolvedValue({
+        ...mockUpdatedLecture,
+        userId: 'user-refine',
+        deletedAt: null,
+        revision: 3
+      })
 
       const result = await generateOutline('user-refine', 'Prompt gốc', {
         feedback: 'Thêm phần thực hành',
         currentOutline,
-        lectureId: 'existing-lec-1'
+        lectureId: LECTURE_ID
       })
 
       expect(mockAiRefineOutlineWithFeedback).toHaveBeenCalledWith(
         currentOutline,
         'Prompt gốc',
-        'Thêm phần thực hành'
+        'Thêm phần thực hành',
+        undefined
       )
       expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
-        { _id: 'existing-lec-1', userId: 'user-refine' },
+        {
+          _id: LECTURE_ID,
+          userId: 'user-refine',
+          deletedAt: null,
+          revision: 3
+        },
         // UC021: không ghi đè tên bài giảng người dùng đã đặt
-        { prompt: 'Prompt gốc', outline: refinedOutline },
+        {
+          $set: { prompt: 'Prompt gốc', outline: refinedOutline },
+          $inc: { revision: 1 }
+        },
         { new: true }
       )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
@@ -300,11 +323,11 @@ describe('lecture.service unit tests', () => {
       mockUserFindById.mockResolvedValue(mockUser)
 
       const mockCreatedLecture = {
-        _id: 'lec-1',
+        _id: LECTURE_ID,
         title: 'TypeScript cơ bản',
         slides: mockSlides,
         toObject: () => ({
-          _id: 'lec-1',
+          _id: LECTURE_ID,
           title: 'TypeScript cơ bản',
           slides: mockSlides
         })
@@ -347,35 +370,49 @@ describe('lecture.service unit tests', () => {
       mockUserFindById.mockResolvedValue(mockUser)
 
       const mockUpdated = {
-        _id: 'existing-lec-123',
+        _id: LECTURE_ID,
         title: 'TypeScript cơ bản',
         slides: mockSlides,
         toObject: () => ({
-          _id: 'existing-lec-123',
+          _id: LECTURE_ID,
           title: 'TypeScript cơ bản',
           slides: mockSlides
         })
       }
       mockLectureFindOneAndUpdate.mockResolvedValue(mockUpdated)
+      mockLectureFindOne.mockResolvedValue({
+        ...mockUpdated,
+        userId: 'user-rich',
+        deletedAt: null,
+        revision: 2
+      })
 
       const result = await createLecture('user-rich', {
-        lectureId: 'existing-lec-123',
+        lectureId: LECTURE_ID,
         title: 'TypeScript cơ bản',
         prompt: 'Dạy TS',
         outline: fakeOutline
       })
 
       expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
-        { _id: 'existing-lec-123', userId: 'user-rich' },
-        expect.objectContaining({
-          title: 'TypeScript cơ bản',
-          slides: expect.arrayContaining([
-            expect.objectContaining({ id: 's1', title: 'Slide 1' })
-          ])
-        }),
-        { new: true, upsert: true }
+        {
+          _id: LECTURE_ID,
+          userId: 'user-rich',
+          deletedAt: null,
+          revision: 2
+        },
+        {
+          $set: expect.objectContaining({
+            title: 'TypeScript cơ bản',
+            slides: expect.arrayContaining([
+              expect.objectContaining({ id: 's1', title: 'Slide 1' })
+            ])
+          }),
+          $inc: { revision: 1 }
+        },
+        { new: true }
       )
-      expect(result._id).toBe('existing-lec-123')
+      expect(result._id).toBe(LECTURE_ID)
     })
   })
 
@@ -398,7 +435,7 @@ describe('lecture.service unit tests', () => {
 
     it('tạo bài giảng trắng thành công với slide mặc định khi không truyền folderId', async () => {
       const fakeCreatedLecture = {
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         userId: 'user-1',
         title: 'Bài giảng mới',
         slides: [
@@ -426,10 +463,12 @@ describe('lecture.service unit tests', () => {
   })
 
   describe('getLecture', () => {
-    it('ném lỗi 404 khi bài giảng không tồn tại hoặc không thuộc sở hữu', async () => {
+    it('ném lỗi 404 khi bài giảng không tồn tại', async () => {
       mockLectureFindOne.mockResolvedValue(null)
 
-      await expect(getLecture('user-1', 'lecture-999')).rejects.toMatchObject({
+      await expect(
+        getLecture('user-1', MISSING_LECTURE_ID)
+      ).rejects.toMatchObject({
         statusCode: 404,
         message: 'Không tìm thấy bài giảng'
       })
@@ -437,12 +476,12 @@ describe('lecture.service unit tests', () => {
 
     it('ném lỗi 404 khi bài giảng đã bị đưa vào thùng rác (deletedAt)', async () => {
       mockLectureFindOne.mockResolvedValue({
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         userId: 'user-1',
         deletedAt: new Date()
       })
 
-      await expect(getLecture('user-1', 'lecture-123')).rejects.toMatchObject({
+      await expect(getLecture('user-1', LECTURE_ID)).rejects.toMatchObject({
         statusCode: 404,
         message: 'Bài giảng đã bị xóa'
       })
@@ -450,14 +489,14 @@ describe('lecture.service unit tests', () => {
 
     it('trả về bài giảng khi hợp lệ', async () => {
       const mockLecture = {
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         userId: 'user-1',
         title: 'Bài giảng của tôi',
         deletedAt: null
       }
       mockLectureFindOne.mockResolvedValue(mockLecture)
 
-      const result = await getLecture('user-1', 'lecture-123')
+      const result = await getLecture('user-1', LECTURE_ID)
       expect(result).toEqual(mockLecture)
     })
   })
@@ -467,7 +506,7 @@ describe('lecture.service unit tests', () => {
     it('tạo bản sao độc lập giữ nguyên theme, dàn ý và thêm hậu tố " - Copy"', async () => {
       const outline = { title: 'TS', sections: [{ heading: 'A', bullets: [] }] }
       mockLectureFindOne.mockResolvedValue({
-        _id: 'lec-1',
+        _id: LECTURE_ID,
         userId: 'user-1',
         folderId: 'folder-1',
         title: 'Bài gốc',
@@ -481,7 +520,7 @@ describe('lecture.service unit tests', () => {
       })
       mockLectureCreate.mockImplementation(async (doc: unknown) => doc)
 
-      const copy = (await duplicateLecture('user-1', 'lec-1')) as any
+      const copy = (await duplicateLecture('user-1', LECTURE_ID)) as any
 
       expect(copy.title).toBe('Bài gốc - Copy')
       expect(copy.theme).toBe('modern-obsidian')
@@ -497,7 +536,7 @@ describe('lecture.service unit tests', () => {
       mockLectureFindOne.mockResolvedValue(null)
 
       await expect(
-        hardDeleteLecture('user-1', 'lecture-999')
+        hardDeleteLecture('user-1', MISSING_LECTURE_ID)
       ).rejects.toMatchObject({
         statusCode: 404,
         message: 'Không tìm thấy bài giảng'
@@ -506,16 +545,16 @@ describe('lecture.service unit tests', () => {
 
     it('xóa vĩnh viễn bài giảng thành công', async () => {
       const mockLecture = {
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         userId: 'user-1'
       }
       mockLectureFindOne.mockResolvedValue(mockLecture)
       mockLectureDeleteOne.mockResolvedValue({ deletedCount: 1 })
 
-      const result = await hardDeleteLecture('user-1', 'lecture-123')
+      const result = await hardDeleteLecture('user-1', LECTURE_ID)
 
       expect(mockLectureDeleteOne).toHaveBeenCalledWith({
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         userId: 'user-1'
       })
       expect(result).toEqual({ message: 'Đã xóa vĩnh viễn bài giảng' })
@@ -561,7 +600,7 @@ describe('lecture.service unit tests', () => {
         ]
       }
       const mockLecture = {
-        _id: 'lecture-123',
+        _id: LECTURE_ID,
         title: 'Bài giảng kiểm thử',
         deletedAt: null,
         slides: [persistedSlide],
@@ -578,6 +617,7 @@ describe('lecture.service unit tests', () => {
       }
 
       mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockLecture)
       mockUserFindById.mockResolvedValue(mockUser)
       mockAiUsageLogCreate.mockResolvedValue({})
       mockAiChatAndProposeSlideEdit.mockResolvedValue({
@@ -587,7 +627,7 @@ describe('lecture.service unit tests', () => {
         proposals: []
       })
 
-      await aiChatInEditor('user-1', 'lecture-123', {
+      await aiChatInEditor('user-1', LECTURE_ID, {
         message: 'Chỉ trả lời, không sửa slide: Nêu tiêu đề và nội dung chính.',
         slideId: 'slide-1',
         currentSlide: currentSlideSnapshot
@@ -610,7 +650,8 @@ describe('lecture.service unit tests', () => {
               visibleText: ['Giá trị mới là 42']
             })
           ]
-        })
+        }),
+        undefined
       )
     })
 
@@ -627,6 +668,7 @@ describe('lecture.service unit tests', () => {
         ]
       }
       const mockLecture = {
+        _id: LECTURE_ID,
         title: 'Bài giảng kiểm thử',
         deletedAt: null,
         slides: [persistedSlide],
@@ -639,6 +681,7 @@ describe('lecture.service unit tests', () => {
       }
 
       mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockLecture)
       mockUserFindById.mockResolvedValue({
         creditBalance: 10,
         save: jest.fn().mockResolvedValue(true)
@@ -650,7 +693,7 @@ describe('lecture.service unit tests', () => {
         proposals: []
       })
 
-      await aiChatInEditor('user-1', 'lecture-123', {
+      await aiChatInEditor('user-1', LECTURE_ID, {
         message: 'Chỉ trả lời: tiêu đề hiện tại là gì?',
         slideId: 'slide-owned',
         currentSlide: {
@@ -661,13 +704,15 @@ describe('lecture.service unit tests', () => {
 
       expect(mockAiChatAndProposeSlideEdit).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ currentSlide: persistedSlide })
+        expect.objectContaining({ currentSlide: persistedSlide }),
+        undefined
       )
     })
 
     it('tính phí theo số slide mới được AI Chat tạo ra', async () => {
       const persistedSlide = { id: 'slide-1', title: 'Slide hiện tại' }
       const mockLecture = {
+        _id: LECTURE_ID,
         title: 'Bài giảng kiểm thử',
         deletedAt: null,
         slides: [persistedSlide],
@@ -692,6 +737,7 @@ describe('lecture.service unit tests', () => {
       }))
 
       mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockLecture)
       mockUserFindById.mockResolvedValue(mockUser)
       mockAiUsageLogCreate.mockResolvedValue({})
       mockAiChatAndProposeSlideEdit.mockResolvedValue({
@@ -700,7 +746,7 @@ describe('lecture.service unit tests', () => {
         proposals
       })
 
-      const result = await aiChatInEditor('user-1', 'lecture-123', {
+      const result = await aiChatInEditor('user-1', LECTURE_ID, {
         message: 'Tạo thêm 3 slide',
         slideId: 'slide-1'
       })
@@ -716,9 +762,10 @@ describe('lecture.service unit tests', () => {
       expect(result.creditBalance).toBe(14)
     })
 
-    it('không trừ credit hoặc lưu lịch sử nếu không đủ phí cho số slide AI Chat tạo ra', async () => {
+    it('giới hạn số slide AI đề xuất theo credit và chỉ tính phí các slide được giữ lại', async () => {
       const persistedSlide = { id: 'slide-1', title: 'Slide hiện tại' }
       const mockLecture = {
+        _id: LECTURE_ID,
         title: 'Bài giảng kiểm thử',
         deletedAt: null,
         slides: [persistedSlide],
@@ -732,6 +779,7 @@ describe('lecture.service unit tests', () => {
       }
 
       mockLectureFindOne.mockResolvedValue(mockLecture)
+      mockLectureFindOneAndUpdate.mockResolvedValue(mockLecture)
       mockUserFindById.mockResolvedValue(mockUser)
       mockAiChatAndProposeSlideEdit.mockResolvedValue({
         reply: 'Đã tạo 3 slide mới.',
@@ -746,7 +794,7 @@ describe('lecture.service unit tests', () => {
         }))
       })
 
-      const result = await aiChatInEditor('user-1', 'lecture-123', {
+      const result = await aiChatInEditor('user-1', LECTURE_ID, {
         message: 'Tạo thêm 3 slide',
         slideId: 'slide-1'
       })
@@ -757,7 +805,8 @@ describe('lecture.service unit tests', () => {
           creditBalance: 5,
           pricePerSlide: 2,
           maxCreatableSlides: 2
-        })
+        }),
+        undefined
       )
       expect(result.proposals).toHaveLength(2)
       expect(result.creditSpent).toBe(4)
@@ -768,7 +817,18 @@ describe('lecture.service unit tests', () => {
         4,
         expect.any(String)
       )
-      expect(mockLecture.save).toHaveBeenCalled()
+      expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: LECTURE_ID, userId: 'user-1', deletedAt: null },
+        expect.objectContaining({
+          $set: expect.objectContaining({
+            aiChatHistory: expect.arrayContaining([
+              expect.objectContaining({ role: 'user' }),
+              expect.objectContaining({ role: 'assistant' })
+            ])
+          })
+        }),
+        { new: true }
+      )
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({ slideCount: 2, creditSpent: 4 })
       )
