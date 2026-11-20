@@ -1,22 +1,28 @@
 import { asyncHandler } from '@/utils/asyncHandler'
 import { ok, okPaginated } from '@/utils/response'
 import * as lectureService from '@/services/lecture.service'
+import { withAiRequest } from '@/utils/aiRequest'
 
 export const generateOutline = asyncHandler(async (req, res) => {
-  const result = await lectureService.generateOutline(
-    req.user.id,
-    req.body.prompt,
-    {
-      feedback: req.body.feedback,
-      currentOutline: req.body.currentOutline,
-      lectureId: req.body.lectureId
-    }
+  const result = await withAiRequest(req, res, (signal) =>
+    lectureService.generateOutline(
+      req.user.id,
+      req.body.prompt,
+      {
+        feedback: req.body.feedback,
+        currentOutline: req.body.currentOutline,
+        lectureId: req.body.lectureId
+      },
+      signal
+    )
   )
   ok(res, result)
 })
 
 export const createLecture = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.createLecture(req.user.id, req.body)
+  const lecture = await withAiRequest(req, res, (signal) =>
+    lectureService.createLecture(req.user.id, req.body, signal)
+  )
   ok(res, lecture, 201)
 })
 
@@ -65,6 +71,10 @@ export const listTrash = asyncHandler(async (req, res) => {
   ok(res, items)
 })
 
+export const getLectureCounts = asyncHandler(async (req, res) => {
+  ok(res, await lectureService.getLectureCounts(req.user.id))
+})
+
 export const getLecture = asyncHandler(async (req, res) => {
   const lecture = await lectureService.getLecture(
     req.user.id,
@@ -99,7 +109,7 @@ export const autosaveLecture = asyncHandler(async (req, res) => {
   ok(
     res,
     req.query.view === 'receipt'
-      ? { savedAt: lecture.updatedAt }
+      ? { savedAt: lecture.updatedAt, revision: lecture.revision }
       : { lecture, savedAt: lecture.updatedAt }
   )
 })
@@ -129,17 +139,20 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
 })
 
 export const aiChat = asyncHandler(async (req, res) => {
-  const result = await lectureService.aiChatInEditor(
-    req.user.id,
-    String(req.params.id),
-    {
-      message: req.body.message,
-      slideId: req.body.slideId,
-      currentSlide: req.body.currentSlide,
-      selectedCompId: req.body.selectedCompId,
-      sourceMaterial: req.body.sourceMaterial,
-      history: req.body.history
-    }
+  const result = await withAiRequest(req, res, (signal) =>
+    lectureService.aiChatInEditor(
+      req.user.id,
+      String(req.params.id),
+      {
+        message: req.body.message,
+        slideId: req.body.slideId,
+        currentSlide: req.body.currentSlide,
+        selectedCompId: req.body.selectedCompId,
+        sourceMaterial: req.body.sourceMaterial,
+        history: req.body.history
+      },
+      signal
+    )
   )
   ok(res, result)
 })

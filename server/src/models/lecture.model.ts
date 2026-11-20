@@ -20,6 +20,7 @@ const lectureSchema = new Schema(
       index: true
     },
     title: { type: String, required: true, trim: true },
+    revision: { type: Number, default: 0 },
     prompt: { type: String, default: '' },
     outline: { type: Schema.Types.Mixed, default: null },
     slides: { type: [Schema.Types.Mixed], default: [] },

@@ -161,7 +161,8 @@ export interface GeneratedOutline {
  * Sinh dàn ý bài giảng từ prompt.
  */
 export const generateOutlineFromPrompt = async (
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<GeneratedOutline> => {
   const ai = getAiClient()
 
@@ -178,6 +179,7 @@ export const generateOutlineFromPrompt = async (
       model: DEFAULT_AI_MODEL,
       contents: userContent,
       config: {
+        abortSignal: signal,
         systemInstruction,
         temperature: 0.7,
         responseMimeType: 'application/json',
@@ -241,6 +243,7 @@ export const generateOutlineFromPrompt = async (
       }))
     }
   } catch (err) {
+    if (signal?.aborted) throw signal.reason
     if (err instanceof AppError) throw err
     logger.error({ err }, 'ai.generateOutline failed')
     throw new AppError(
@@ -256,7 +259,8 @@ export const generateOutlineFromPrompt = async (
 export const refineOutlineWithFeedback = async (
   currentOutline: GeneratedOutline,
   originalPrompt: string,
-  feedback: string
+  feedback: string,
+  signal?: AbortSignal
 ): Promise<GeneratedOutline> => {
   const ai = getAiClient()
 
@@ -286,6 +290,7 @@ export const refineOutlineWithFeedback = async (
       model: DEFAULT_AI_MODEL,
       contents: userContent,
       config: {
+        abortSignal: signal,
         systemInstruction,
         temperature: 0.7,
         responseMimeType: 'application/json'
@@ -312,6 +317,7 @@ export const refineOutlineWithFeedback = async (
       }))
     }
   } catch (err) {
+    if (signal?.aborted) throw signal.reason
     if (err instanceof AppError) throw err
     logger.error({ err }, 'ai.refineOutline failed')
     throw new AppError(
@@ -351,7 +357,8 @@ export interface GeneratedSlideData {
  */
 export const generateSlidesFromOutline = async (
   outline: GeneratedOutline,
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<Array<Record<string, unknown>>> => {
   const ai = getAiClient()
 
@@ -412,6 +419,7 @@ export const generateSlidesFromOutline = async (
       model: DEFAULT_AI_MODEL,
       contents: userContent,
       config: {
+        abortSignal: signal,
         systemInstruction,
         temperature: 0.7,
         maxOutputTokens: 8192,
@@ -531,6 +539,7 @@ export const generateSlidesFromOutline = async (
       speakerNotes: s.speakerNotes || ''
     }))
   } catch (err) {
+    if (signal?.aborted) throw signal.reason
     if (err instanceof AppError) throw err
     logger.error({ err }, 'ai.generateSlides failed')
     throw new AppError(
@@ -607,7 +616,8 @@ export interface AiChatResponse {
  */
 export const chatAndProposeSlideEdit = async (
   userMessage: string,
-  context: AiChatContext
+  context: AiChatContext,
+  signal?: AbortSignal
 ): Promise<AiChatResponse> => {
   const normalizedMessage = userMessage.trim()
   const ai = getAiClient()
@@ -1017,6 +1027,7 @@ export const chatAndProposeSlideEdit = async (
       model: DEFAULT_AI_MODEL,
       contents: userPromptContent,
       config: {
+        abortSignal: signal,
         systemInstruction,
         temperature: 0.5,
         maxOutputTokens: 8192,
@@ -1218,6 +1229,7 @@ export const chatAndProposeSlideEdit = async (
       updatedSummary: parsed.updatedSummary?.trim()
     }
   } catch (err) {
+    if (signal?.aborted) throw signal.reason
     if (err instanceof AppError) throw err
     logger.error({ err }, 'ai.chatAndProposeSlideEdit failed')
     throw new AppError('Lỗi kết nối tới dịch vụ AI của Google', 502)
