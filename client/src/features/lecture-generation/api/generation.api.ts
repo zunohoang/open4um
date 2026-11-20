@@ -20,21 +20,29 @@ export const generationApi = {
       feedback?: string
       currentOutline?: Outline
       lectureId?: string
-    }
+    },
+    signal?: AbortSignal
   ): Promise<OutlineResult> =>
     (
       await apiClient.post<{ data: OutlineResult }>(
         '/lectures/generate-outline',
-        { prompt, ...options }
+        { prompt, ...options },
+        { signal }
       )
     ).data.data,
-  create: async (data: {
-    lectureId?: string
-    title: string
-    prompt: string
-    theme?: string
-    outline: Outline
-  }): Promise<CreatedLectureResult> =>
-    (await apiClient.post<{ data: CreatedLectureResult }>('/lectures', data))
-      .data.data
+  create: async (
+    data: {
+      lectureId?: string
+      title: string
+      prompt: string
+      theme?: string
+      outline: Outline
+    },
+    signal?: AbortSignal
+  ): Promise<CreatedLectureResult> =>
+    (
+      await apiClient.post<{ data: CreatedLectureResult }>('/lectures', data, {
+        signal
+      })
+    ).data.data
 }

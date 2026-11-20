@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { editorApi } from '../api/editor.api'
+import { assertDecodableImage } from '@/lib/imageFile'
 
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 // SVG bị loại vì có thể chứa script khi phục vụ từ server
@@ -27,6 +28,8 @@ export const useImageUploader = (
   const { showToast } = useToast()
   const [isUploading, setIsUploading] = useState(false)
   const [failedFile, setFailedFile] = useState<File | null>(null)
+  const requestRef = useRef<AbortController | null>(null)
+  useEffect(() => () => requestRef.current?.abort(), [])
 
   const upload = async (file: File) => {
     if (!ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase())) {
@@ -45,14 +48,27 @@ export const useImageUploader = (
     }
     setIsUploading(true)
     setFailedFile(null)
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     try {
-      const url = await editorApi.uploadImage(await readAsDataUrl(file))
+      await assertDecodableImage(file)
+      const dataUrl = await readAsDataUrl(file)
+      controller.signal.throwIfAborted()
+      const url = await editorApi.uploadImage(dataUrl, controller.signal)
+      if (controller.signal.aborted) return
       onUploaded(url, file)
-    } catch {
+    } catch (error) {
+      if (controller.signal.aborted) return
       setFailedFile(file)
-      showToast('Tải ảnh lên thất bại. Bấm "Thử lại" để tải lại.', 'error')
+      showToast(
+        error instanceof Error
+          ? error.message
+          : 'Tải ảnh lên thất bại. Bấm "Thử lại" để tải lại.',
+        'error'
+      )
     } finally {
-      setIsUploading(false)
+      if (!controller.signal.aborted) setIsUploading(false)
     }
   }
 

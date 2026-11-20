@@ -14,7 +14,8 @@ import { BrandLogo } from '@/components/ui'
 import { UserAccountMenu } from '@/components/layout/UserAccountMenu'
 import { useEditorStore } from '../store/editor.store'
 
-export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
+export type SaveStatus =
+  'saved' | 'saving' | 'unsaved' | 'offline_saved' | 'error'
 
 interface EditorHeaderProps {
   title: string
@@ -170,7 +171,7 @@ export const EditorHeader = ({
                 Đang lưu offline
               </span>
             </button>
-          ) : saveStatus === 'unsaved' ? (
+          ) : saveStatus === 'unsaved' || saveStatus === 'error' ? (
             <button
               type='button'
               onClick={onManualSave}
