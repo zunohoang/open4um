@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import { ArrowUp, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
@@ -17,6 +17,7 @@ interface AiGenerationWizardProps {
   lecture: Lecture
   onDone: (lecture: Lecture) => void
   onSkip: () => void
+  onOutlineSaved?: (lecture: Lecture) => void
 }
 
 interface ChatEntry {
@@ -40,9 +41,12 @@ const errorMessage = (err: unknown, fallback: string) =>
 export const AiGenerationWizard = ({
   lecture,
   onDone,
-  onSkip
+  onSkip,
+  onOutlineSaved
 }: AiGenerationWizardProps) => {
   const { showToast } = useToast()
+  const requestRef = useRef<AbortController | null>(null)
+  useEffect(() => () => requestRef.current?.abort(), [])
   const updateUser = useAuthStore((state) => state.updateUser)
 
   const [step, setStep] = useState<'outline' | 'pattern'>('outline')
@@ -65,19 +69,30 @@ export const AiGenerationWizard = ({
       showToast('Mô tả bài giảng cần ít nhất 5 ký tự', 'error')
       return
     }
+    const controller = new AbortController()
+    requestRef.current = controller
     setBusyChat(true)
     setInput('')
     setChat((prev) => [...prev, { role: 'user', text }])
     try {
       const result = isFirst
-        ? await generationApi.outline(text, { lectureId: lecture._id })
-        : await generationApi.outline(prompt, {
-            feedback: text,
-            currentOutline: outline,
-            lectureId: lecture._id
-          })
+        ? await generationApi.outline(
+            text,
+            { lectureId: lecture._id },
+            controller.signal
+          )
+        : await generationApi.outline(
+            prompt,
+            {
+              feedback: text,
+              currentOutline: outline,
+              lectureId: lecture._id
+            },
+            controller.signal
+          )
       if (isFirst) setPrompt(text)
       setOutline(result.outline)
+      if (result.lecture) onOutlineSaved?.(result.lecture)
       if (typeof result.creditBalance === 'number') {
         updateUser({ creditBalance: result.creditBalance })
       }
@@ -91,6 +106,8 @@ export const AiGenerationWizard = ({
         }
       ])
     } catch (err) {
+      if (controller.signal.aborted) return
+      setInput((current) => (current.trim() ? current : text))
       const msg = errorMessage(err, 'Không thể sinh dàn ý, vui lòng thử lại')
       setChat((prev) => [...prev, { role: 'assistant', text: `⚠️ ${msg}` }])
       showToast(msg, 'error')
@@ -130,20 +147,26 @@ export const AiGenerationWizard = ({
 
   const handleGenerate = async () => {
     if (!outline) return
+    const controller = new AbortController()
+    requestRef.current = controller
     setBusyCreate(true)
     try {
-      const created = await generationApi.create({
-        lectureId: lecture._id,
-        title: lecture.title || outline.title || 'Bài giảng mới',
-        prompt,
-        theme: themeId,
-        outline
-      })
+      const created = await generationApi.create(
+        {
+          lectureId: lecture._id,
+          title: lecture.title || outline.title || 'Bài giảng mới',
+          prompt,
+          theme: themeId,
+          outline
+        },
+        controller.signal
+      )
       if (typeof created.creditBalance === 'number') {
         updateUser({ creditBalance: created.creditBalance })
       }
       onDone(created)
     } catch (err) {
+      if (controller.signal.aborted) return
       showToast(
         errorMessage(err, 'Không thể sinh bài giảng, vui lòng thử lại'),
         'error'
@@ -232,7 +255,10 @@ export const AiGenerationWizard = ({
                 <button
                   type='button'
                   onClick={() => void handleSend()}
-                  disabled={!input.trim() || busyChat}
+                  disabled={
+                    input.trim().length < (!outline || !prompt ? 5 : 1) ||
+                    busyChat
+                  }
                   className='flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 text-white transition hover:bg-stone-800 disabled:opacity-30'
                   title='Gửi'
                   aria-label='Gửi'

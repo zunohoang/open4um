@@ -109,6 +109,7 @@ export const lockUser = async (id: string) => {
 
   const now = new Date()
   user.status = 'locked'
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   user.lockedAt = now
   user.scheduledDeleteAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
   await user.save()

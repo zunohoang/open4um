@@ -79,6 +79,12 @@ const envSchema = z
     REDIS_URL: z.string().url(),
     JWT_SECRET: z.string().min(16),
     GEMINI_API_KEY: z.string(),
+    AI_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(150000)
+      .default(150000),
     GEMINI_BASE_URL: optionalUrl,
     GEMINI_MODEL: z.preprocess(
       emptyStringToUndefined,

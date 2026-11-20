@@ -22,7 +22,11 @@ describe('credit.service', () => {
       20
     )
     expect(mockFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: 'user-1', creditBalance: { $gte: 80 } },
+      {
+        _id: 'user-1',
+        status: { $ne: 'locked' },
+        creditBalance: { $gte: 80 }
+      },
       { $inc: { creditBalance: -80 } },
       { new: true }
     )

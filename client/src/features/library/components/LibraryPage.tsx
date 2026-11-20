@@ -4,6 +4,7 @@ import { MoreVertical } from 'lucide-react'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Pagination } from '@/components/ui/Pagination'
 import { useToast } from '@/components/ui'
 import { ExportModal } from '@/features/export/components/ExportModal'
 import { SlidePreview } from './SlidePreview'
@@ -27,10 +28,12 @@ const LECTURE_DRAG_TYPE = 'application/x-lecture-id'
 const InlineRename = ({
   value,
   onDone,
+  onInvalid,
   className
 }: {
   value: string
   onDone: (next: string | null) => void
+  onInvalid: () => void
   className?: string
 }) => {
   const [draft, setDraft] = useState(value)
@@ -39,6 +42,12 @@ const InlineRename = ({
     if (finishedRef.current) return
     finishedRef.current = true
     onDone(next)
+  }
+  const submit = () => {
+    if (finishedRef.current) return
+    const next = draft.trim()
+    finish(next || null)
+    if (!next) onInvalid()
   }
   return (
     <input
@@ -49,9 +58,10 @@ const InlineRename = ({
       onFocus={(e) => e.target.select()}
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => finish(draft.trim() || null)}
+      onBlur={submit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') finish(draft.trim() || null)
+        if (e.nativeEvent.isComposing) return
+        if (e.key === 'Enter') submit()
         if (e.key === 'Escape') finish(null)
       }}
       className={`w-full border border-orange-700 bg-white px-1 outline-none ${className ?? ''}`}
@@ -104,9 +114,30 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
 
   const [lectures, setLectures] = useState<LectureSummary[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
-  const [search, setSearch] = useState('')
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
-  const [sortOption, setSortOption] = useState<SortOption>('newest')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [counts, setCounts] = useState({
+    total: 0,
+    unorganized: 0,
+    folders: {} as Record<string, number>
+  })
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [search, setSearchInput] = useState('')
+  const [selectedFolderId, setFolderFilter] = useState<string | null>(null)
+  const [sortOption, setSort] = useState<SortOption>('newest')
+  const setSearch = (value: string) => {
+    setPage(1)
+    setSearchInput(value)
+  }
+  const setSelectedFolderId = (value: string | null) => {
+    setPage(1)
+    setFolderFilter(value)
+  }
+  const setSortOption = (value: SortOption) => {
+    setPage(1)
+    setSort(value)
+  }
   // id bài giảng hoặc `folder:<id>` đang được đổi tên tại chỗ
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [dropTargetId, setDropTargetId] = useState<string | null>(null)
@@ -145,6 +176,8 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
     const controller = new AbortController()
     loadControllerRef.current = controller
     const { signal } = controller
+    setIsLoading(true)
+    setLoadError(false)
     try {
       if (activeViewMode === 'trash') {
         const [trashRes, nextFolders] = await Promise.all([
@@ -155,28 +188,37 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         setLectures(trashRes)
         setFolders(nextFolders)
       } else {
-        const [result, nextFolders] = await Promise.all([
+        const [result, nextFolders, nextCounts] = await Promise.all([
           lectureApi.summaries(
             {
               search: search.trim() || undefined,
               folderId: selectedFolderId || undefined,
               sortBy: SORT_OPTIONS[sortOption].sortBy,
               sortOrder: SORT_OPTIONS[sortOption].sortOrder,
-              limit: '100'
+              limit: '24',
+              page: String(page)
             },
             signal
           ),
-          lectureApi.folders(signal)
+          lectureApi.folders(signal),
+          lectureApi.counts(signal)
         ])
         if (signal.aborted) return
         setLectures(result.items)
         setFolders(nextFolders)
+        setTotal(result.total)
+        setCounts(nextCounts)
+        if (page > Math.max(1, Math.ceil(result.total / 24)))
+          setPage(Math.max(1, Math.ceil(result.total / 24)))
       }
     } catch {
       if (signal.aborted) return
+      setLoadError(true)
       notifyError('Không tải được dữ liệu từ máy chủ')
+    } finally {
+      if (!signal.aborted) setIsLoading(false)
     }
-  }, [search, selectedFolderId, sortOption, activeViewMode, notifyError])
+  }, [search, selectedFolderId, sortOption, page, activeViewMode, notifyError])
 
   useEffect(() => {
     void load()
@@ -408,6 +450,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           {renamingId === `folder:${folder._id}` ? (
             <InlineRename
               value={folder.name}
+              onInvalid={() => notifyError('Tên thư mục không được để trống')}
               onDone={(next) =>
                 void handleRename(
                   { type: 'folder', id: folder._id, current: folder.name },
@@ -504,6 +547,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           <button
             type='button'
             aria-label='Tùy chọn thao tác bài giảng'
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={(e) => handleKebabMenuClick(e, lecture)}
             className='pointer-events-auto flex h-7 w-7 items-center justify-center rounded-xs border border-stone-300 bg-white/95 text-stone-700 shadow-2xs backdrop-blur-xs transition hover:border-emerald-950 hover:bg-emerald-950 hover:text-white active:scale-95'
             title='Tùy chọn thao tác (Đổi tên, Nhân bản, Di chuyển, Xóa...)'
@@ -519,6 +563,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           {renamingId === lecture._id ? (
             <InlineRename
               value={lecture.title}
+              onInvalid={() => notifyError('Tên bài giảng không được để trống')}
               className='text-xl font-display text-emerald-950'
               onDone={(next) =>
                 void handleRename(
@@ -530,11 +575,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           ) : (
             <h3
               className='truncate text-xl font-medium text-emerald-950 font-display transition group-hover:text-orange-800'
-              title={
-                activeViewMode === 'trash'
-                  ? lecture.title
-                  : 'Click để đổi tên bài giảng'
-              }
+              title={lecture.title}
               onClick={(e) => {
                 if (activeViewMode === 'trash') return
                 e.stopPropagation()
@@ -598,7 +639,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
             >
               <span>📂 Tất cả bài giảng</span>
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px]'>
-                {lectures.length}
+                {counts.total}
               </span>
             </button>
 
@@ -614,15 +655,13 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
             >
               <span>📄 Chưa phân loại</span>
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px]'>
-                {lectures.filter((l) => !l.folderId).length}
+                {counts.unorganized}
               </span>
             </button>
 
             {/* Các thẻ thư mục người dùng tạo */}
             {folders.map((folder) => {
-              const count = lectures.filter(
-                (l) => l.folderId === folder._id
-              ).length
+              const count = counts.folders[folder._id] || 0
               return (
                 <button
                   key={folder._id}
@@ -684,7 +723,28 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
       )}
 
       {/* NỘI DUNG DANH SÁCH BÀI GIẢNG / THÙNG RÁC */}
-      {activeViewMode === 'trash' ? (
+      {isLoading ? (
+        <p
+          role='status'
+          className='py-12 text-center font-sans text-sm text-stone-500'
+        >
+          Đang tải bài giảng...
+        </p>
+      ) : loadError ? (
+        <div
+          role='alert'
+          className='border border-red-200 bg-red-50 p-8 text-center font-sans text-sm text-red-800'
+        >
+          <p>Không tải được dữ liệu từ máy chủ.</p>
+          <button
+            type='button'
+            onClick={() => void load()}
+            className='mt-3 underline'
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : activeViewMode === 'trash' ? (
         <div>
           {lectures.length > 0 ? (
             <div className='grid gap-6 sm:grid-cols-2 lg:grid-cols-3'>
@@ -722,8 +782,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
               )
               return (
                 <section className='mb-12'>
-                  {currentFolder &&
-                    renderFolderHeading(currentFolder, folderLectures.length)}
+                  {currentFolder && renderFolderHeading(currentFolder, total)}
 
                   {/* Đường kẻ ngang */}
                   <div className='h-[1.5px] w-full bg-stone-300 mb-6'></div>
@@ -827,7 +886,12 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
 
                     return (
                       <section key={folder._id}>
-                        {renderFolderHeading(folder, folderLectures.length)}
+                        {renderFolderHeading(
+                          folder,
+                          search
+                            ? folderLectures.length
+                            : counts.folders[folder._id] || 0
+                        )}
 
                         {/* Đường kẻ ngang */}
                         <div className='h-[1.5px] w-full bg-stone-300 mb-6'></div>
@@ -896,6 +960,18 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
       )}
 
       {/* MENU CHUỘT PHẢI & KEBAB MENU (CUSTOM CONTEXT MENU) */}
+      {activeViewMode === 'library' &&
+        !isLoading &&
+        !loadError &&
+        total > 0 && (
+          <Pagination
+            page={page}
+            total={total}
+            limit={24}
+            onPageChange={setPage}
+            itemName='bài giảng'
+          />
+        )}
       {contextMenu && (
         <div
           ref={contextMenuRef}
@@ -1167,7 +1243,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
       <ConfirmDialog
         open={Boolean(lectureToDelete)}
         message='Bạn có chắc chắn muốn xóa?'
-        onConfirm={() => void handleConfirmDeleteLecture()}
+        onConfirm={handleConfirmDeleteLecture}
         onCancel={() => setLectureToDelete(null)}
       />
 
@@ -1178,7 +1254,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         message={`Bạn có chắc chắn muốn xóa vĩnh viễn bài giảng "${lectureToPermanentlyDelete?.title}" không? Toàn bộ slide và dữ liệu liên quan sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu và KHÔNG THỂ khôi phục lại.`}
         confirmLabel='Xóa vĩnh viễn'
         cancelLabel='Hủy'
-        onConfirm={() => void handleConfirmPermanentDeleteLecture()}
+        onConfirm={handleConfirmPermanentDeleteLecture}
         onCancel={() => setLectureToPermanentlyDelete(null)}
       />
 
@@ -1189,7 +1265,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         message={`Bạn có chắc chắn muốn xóa thư mục "${folderToDelete?.name}" không? Các bài giảng bên trong sẽ trở về trạng thái chưa phân loại.`}
         confirmLabel='Xóa thư mục'
         cancelLabel='Hủy'
-        onConfirm={() => void handleConfirmDeleteFolder()}
+        onConfirm={handleConfirmDeleteFolder}
         onCancel={() => setFolderToDelete(null)}
       />
 

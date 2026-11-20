@@ -34,6 +34,7 @@ describe('ai.service generateTextWithRetry', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockGenerateContent.mockReset()
     ;(env as any).GEMINI_FALLBACK_MODEL = undefined
   })
 
@@ -162,6 +163,50 @@ describe('ai.service generateTextWithRetry', () => {
     ).rejects.toBeInstanceOf(AppError)
     expect(mockGenerateContent).toHaveBeenCalledTimes(AI_ATTEMPTS_PER_MODEL)
   })
+
+  it('không gọi AI khi request đã bị hủy trước lượt đầu', async () => {
+    const controller = new AbortController()
+    const reason = new AppError('Yêu cầu đã bị hủy', 499)
+    controller.abort(reason)
+
+    await expect(
+      generateTextWithRetry(
+        ai,
+        { ...params, config: { abortSignal: controller.signal } },
+        'test',
+        0
+      )
+    ).rejects.toBe(reason)
+    expect(mockGenerateContent).not.toHaveBeenCalled()
+  })
+
+  it('không retry hoặc gọi model dự phòng khi request bị hủy trong lúc gọi AI', async () => {
+    const controller = new AbortController()
+    const reason = new AppError('Yêu cầu đã bị hủy', 499)
+    ;(env as any).GEMINI_FALLBACK_MODEL = 'gemini-fallback'
+    mockGenerateContent.mockImplementationOnce(async () => {
+      controller.abort(reason)
+      throw Object.assign(new Error('This operation was aborted'), {
+        name: 'AbortError'
+      })
+    })
+
+    await expect(
+      generateTextWithRetry(
+        ai,
+        { ...params, config: { abortSignal: controller.signal } },
+        'test',
+        0
+      )
+    ).rejects.toBe(reason)
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1)
+    expect(mockGenerateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gemini-main',
+        config: { abortSignal: controller.signal }
+      })
+    )
+  })
 })
 
 describe('ai.service generateOutlineFromPrompt', () => {
@@ -196,5 +241,30 @@ describe('ai.service generateOutlineFromPrompt', () => {
 
     expect(err).toBeInstanceOf(AppError)
     expect(err.message).toBe(AI_BUSY_MESSAGE)
+  })
+
+  it('dừng thời gian chờ retry và giữ nguyên lỗi timeout của toàn request', async () => {
+    const controller = new AbortController()
+    const reason = new AppError('AI phản hồi quá lâu', 504)
+    mockGenerateContent.mockReset().mockRejectedValue(httpError(503))
+    const pending = generateOutlineFromPrompt(
+      'Căn bản về NodeJS',
+      controller.signal
+    )
+    const rejected = expect(pending).rejects.toBe(reason)
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      controller.abort(reason)
+      await rejected
+      expect(mockGenerateContent).toHaveBeenCalledTimes(1)
+      expect(mockGenerateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ abortSignal: controller.signal })
+        })
+      )
+    } finally {
+      controller.abort(reason)
+    }
   })
 })

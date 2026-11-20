@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP, getThemeById } from '../constants/theme-options'
 import { cropClipPath, getSlideComponents } from '../utils/slide'
 import { createFrameScheduler } from '../utils/frameScheduler'
+import { SlideText } from './SlideText'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
@@ -20,7 +21,7 @@ interface SlideCanvasProps {
     recordHistory?: boolean
   ) => boolean | void
   onDuplicateComponent: (comp: SlideComponent) => void
-  onDeleteComponent: (id: string) => void
+  onDeleteComponent: (id: string, recordHistory?: boolean) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
   isAiLoading?: boolean
   isPreview?: boolean
@@ -135,6 +136,15 @@ export const SlideCanvas = ({
     onSelectComponent(comp.id)
     hasRecordedHistoryRef.current = false
 
+    const element = e.currentTarget as HTMLElement
+    const canvas = canvasRef.current
+    const measuredWidth = canvas?.clientWidth
+      ? (element.offsetWidth / canvas.clientWidth) * 100
+      : 50
+    const measuredHeight = canvas?.clientHeight
+      ? (element.offsetHeight / canvas.clientHeight) * 100
+      : 5
+
     setDragState({
       type: 'move',
       compId: comp.id,
@@ -142,8 +152,8 @@ export const SlideCanvas = ({
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
-      initialWidth: comp.width ?? 50,
-      initialHeight: comp.height ?? 20,
+      initialWidth: comp.width ?? measuredWidth,
+      initialHeight: comp.height ?? measuredHeight,
       initialFontSize: comp.fontSize ?? 20,
       initialRotation: comp.rotation ?? 0,
       centerX: 0,
@@ -521,89 +531,8 @@ export const SlideCanvas = ({
       ? getSlideComponents(originalSlide, theme.id)
       : (passedComponents ?? (slide ? getSlideComponents(slide, theme.id) : []))
 
-  // Helper tính toán màu chữ đảm bảo độ tương phản cao tuyệt đối theo theme
-  const getRenderTextColor = (comp: SlideComponent) => {
-    const rawColor = comp.color?.trim()
-    const isDarkBackground = Boolean(theme.isDark)
-    const darkPalette = [
-      '#173c39',
-      '#1c1917',
-      '#000000',
-      '#064e3b',
-      '#072b24',
-      '#0f172a',
-      '#1e293b',
-      '#334155',
-      '#57534e'
-    ]
-
-    // Nếu canvas là theme tối nhưng chữ mang màu tối của theme khác hoặc rỗng -> chuyển sang màu sáng tương ứng
-    if (
-      isDarkBackground &&
-      (!rawColor || darkPalette.includes(rawColor.toLowerCase()))
-    ) {
-      if (
-        comp.id.startsWith('header-') ||
-        comp.id.startsWith('step-num-') ||
-        comp.id.startsWith('callout-stat-') ||
-        comp.id.startsWith('list-tag-')
-      ) {
-        return theme.accentColor
-      }
-      if (
-        comp.type === 'subtitle' ||
-        comp.id.includes('-desc-') ||
-        comp.id.startsWith('footer-')
-      ) {
-        return theme.textSecondary
-      }
-      return theme.textPrimary
-    }
-
-    // Nếu là theme sáng nhưng chữ mang màu trắng/sáng của dark mode
-    const lightPalette = [
-      '#ffffff',
-      '#f8fafc',
-      '#f1f5f9',
-      '#a7f3d0',
-      '#94a3b8',
-      '#38bdf8',
-      '#34d399'
-    ]
-    if (
-      !isDarkBackground &&
-      rawColor &&
-      lightPalette.includes(rawColor.toLowerCase())
-    ) {
-      if (
-        comp.id.startsWith('header-') ||
-        comp.id.startsWith('step-num-') ||
-        comp.id.startsWith('callout-stat-') ||
-        comp.id.startsWith('list-tag-')
-      ) {
-        return theme.accentColor
-      }
-      if (
-        comp.type === 'subtitle' ||
-        comp.id.includes('-desc-') ||
-        comp.id.startsWith('footer-')
-      ) {
-        return theme.textSecondary
-      }
-      return theme.textPrimary
-    }
-
-    // Nếu là header nhưng mang màu đỏ gạch của theme classic trên theme khác
-    if (
-      comp.id.startsWith('header-') &&
-      rawColor === '#c45b3f' &&
-      theme.id !== 'classic-editorial'
-    ) {
-      return theme.accentColor
-    }
-
-    return rawColor || theme.textPrimary
-  }
+  const getRenderTextColor = (comp: SlideComponent) =>
+    comp.color?.trim() || theme.textPrimary
 
   // Helper render hình khối
   const renderShapeElement = (comp: SlideComponent) => {
@@ -811,7 +740,7 @@ export const SlideCanvas = ({
             isPreview ? 'top-10' : 'top-3'
           } ${theme.isDark ? 'text-slate-500' : 'text-stone-400'}`}
         >
-          {slideIndex + 1} / {totalSlides}
+          {totalSlides ? slideIndex + 1 : 0} / {totalSlides}
         </span>
 
         {/* Render các components trên Canvas */}
@@ -1102,18 +1031,20 @@ export const SlideCanvas = ({
                     }
                   }}
                   onBlur={(e) => {
+                    const hadTextChanges = isTextSessionRecordedRef.current
                     isTextSessionRecordedRef.current = false
                     isComposingRef.current = false
                     setEditingTextId(null)
                     // TC-18: Tự động xóa phần tử khỏi mảng components khi người dùng xóa hết nội dung và blur
                     if (!comp.content.trim() || !e.target.value.trim()) {
-                      onDeleteComponent(comp.id)
+                      onDeleteComponent(comp.id, !hadTextChanges)
                     }
                   }}
                   style={{
                     fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
+                    textDecoration: comp.textDecoration ?? 'none',
                     textAlign: comp.textAlign ?? 'left',
                     color: getRenderTextColor(comp),
                     fontFamily:
@@ -1150,26 +1081,7 @@ export const SlideCanvas = ({
                   }}
                   className='w-full select-none break-words'
                 >
-                  {comp.type === 'bullets' ? (
-                    <ul className='space-y-1.5 list-disc pl-5'>
-                      {comp.content
-                        .split('\n')
-                        .filter((s) => s.trim())
-                        .map((bullet, idx) => (
-                          <li key={idx} className='break-words'>
-                            {bullet}
-                          </li>
-                        ))}
-                    </ul>
-                  ) : comp.type === 'quote' ? (
-                    <div className='italic border-y border-stone-300 py-3 px-2 break-words'>
-                      “ {comp.content} ”
-                    </div>
-                  ) : (
-                    <div className='whitespace-pre-wrap break-words'>
-                      {comp.content}
-                    </div>
-                  )}
+                  <SlideText component={comp} />
                 </div>
               )}
             </div>

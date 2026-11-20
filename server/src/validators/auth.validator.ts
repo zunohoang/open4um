@@ -34,7 +34,12 @@ export const refreshSchema = z.object({
 })
 
 export const updateProfileSchema = z.object({
-  name: z.string().trim().min(1, 'Họ tên không được để trống').optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Họ tên không được để trống')
+    .min(2, 'Họ tên phải có ít nhất 2 ký tự')
+    .optional(),
   avatar: z.string().nullable().optional()
 })
 

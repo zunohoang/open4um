@@ -40,6 +40,7 @@ interface FloatingContextualToolbarProps {
 
 const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 120
+const DEFAULT_FONT_SIZE = 20
 
 const BORDER_WIDTHS = [0, 1, 2, 4, 8]
 const BORDER_RADII = [0, 4, 8, 16, 9999]
@@ -596,7 +597,7 @@ export const FloatingContextualToolbar = ({
   }
 
   // TRƯỜNG HỢP 3: ĐỐI TƯỢNG VĂN BẢN (Text, Title, Subtitle, Bullets, Quote)
-  const currentFontSize = selectedComponent.fontSize ?? 20
+  const currentFontSize = selectedComponent.fontSize ?? DEFAULT_FONT_SIZE
   const isBold = selectedComponent.fontWeight === 'bold'
   const isItalic = selectedComponent.fontStyle === 'italic'
   const isUnderline = selectedComponent.textDecoration === 'underline'
@@ -605,11 +606,12 @@ export const FloatingContextualToolbar = ({
 
   // SRS UC010 6a: cỡ chữ không hợp lệ -> dùng cỡ hợp lệ gần nhất và cảnh báo
   const commitFontSize = (input: HTMLInputElement) => {
-    const value = Number(input.value)
-    if (!input.value || Number.isNaN(value)) {
-      input.value = String(currentFontSize)
-      return
-    }
+    const enteredValue = input.value.trim()
+      ? Number(input.value)
+      : DEFAULT_FONT_SIZE
+    const value = Number.isFinite(enteredValue)
+      ? enteredValue
+      : DEFAULT_FONT_SIZE
     const clamped = Math.round(
       Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, value))
     )
@@ -618,8 +620,8 @@ export const FloatingContextualToolbar = ({
         `Cỡ chữ phải từ ${MIN_FONT_SIZE} đến ${MAX_FONT_SIZE}. Đã dùng cỡ chữ hợp lệ gần nhất: ${clamped}.`,
         'info'
       )
-      input.value = String(clamped)
     }
+    input.value = String(clamped)
     if (clamped !== currentFontSize) onUpdateComponent({ fontSize: clamped })
   }
 
@@ -670,7 +672,7 @@ export const FloatingContextualToolbar = ({
           type='button'
           onClick={() =>
             onUpdateComponent({
-              fontSize: Math.max(10, currentFontSize - 2)
+              fontSize: Math.max(MIN_FONT_SIZE, currentFontSize - 2)
             })
           }
           className='flex h-7 w-5 items-center justify-center rounded-l border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'
@@ -693,7 +695,7 @@ export const FloatingContextualToolbar = ({
           type='button'
           onClick={() =>
             onUpdateComponent({
-              fontSize: Math.min(120, currentFontSize + 2)
+              fontSize: Math.min(MAX_FONT_SIZE, currentFontSize + 2)
             })
           }
           className='flex h-7 w-5 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-600 hover:bg-stone-100'

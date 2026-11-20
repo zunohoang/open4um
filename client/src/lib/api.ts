@@ -56,6 +56,13 @@ apiClient.interceptors.response.use(
         error.message ||
         'Không thể kết nối đến máy chủ'
       console.error('❌ Lỗi gọi API:', message)
+      if (
+        error.response?.status === 403 &&
+        message.includes('Tài khoản') &&
+        message.includes('khóa')
+      ) {
+        useAuthStore.getState().clearSession(message)
+      }
       return Promise.reject(error)
     }
 
@@ -69,7 +76,9 @@ apiClient.interceptors.response.use(
     if (isAuthRoute || originalRequest._retry) {
       if (requestUrl.includes('/auth/refresh')) {
         // Refresh token cũng hết hạn / bị thu hồi -> xóa toàn bộ session
-        useAuthStore.getState().clearSession()
+        useAuthStore
+          .getState()
+          .clearSession('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.')
       }
       const message =
         error.response?.data?.message ||
@@ -85,12 +94,15 @@ apiClient.interceptors.response.use(
 
     // Không có refresh token -> không thể refresh, hủy session
     if (!refreshToken) {
-      useAuthStore.getState().clearSession()
+      useAuthStore
+        .getState()
+        .clearSession('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.')
       return Promise.reject(error)
     }
 
     // Nếu đang có 1 tiến trình refresh chạy dở, đẩy request này vào hàng đợi chờ kết quả
     if (isRefreshing) {
+      originalRequest._retry = true
       return new Promise((resolve, reject) => {
         failedQueue.push({ resolve, reject, config: originalRequest })
       })
@@ -125,7 +137,17 @@ apiClient.interceptors.response.use(
     } catch (refreshError) {
       // Nếu refresh thất bại (hết hạn, bị blacklist Redis,...)
       processQueue(refreshError, null)
-      useAuthStore.getState().clearSession()
+      if (
+        !axios.isAxiosError(refreshError) ||
+        refreshError.response?.status === 401 ||
+        refreshError.response?.status === 403
+      ) {
+        useAuthStore
+          .getState()
+          .clearSession(
+            'Phiên làm việc đã hết hạn hoặc bị thu hồi. Vui lòng đăng nhập lại.'
+          )
+      }
       console.error(
         '❌ Phiên làm việc đã hết hạn hoặc bị thu hồi, vui lòng đăng nhập lại'
       )

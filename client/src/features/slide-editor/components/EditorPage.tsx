@@ -13,8 +13,13 @@ import type {
 } from '@/lib/types'
 import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { getThemeById } from '../constants/theme-options'
+import {
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useParams
+} from 'react-router-dom'
+import { getThemeById, withSlideColors } from '../constants/theme-options'
 import {
   AiChatMessage,
   createWelcomeMessages,
@@ -38,7 +43,7 @@ import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
 import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
-import { createSerialAutosaver } from '../utils/autosave'
+import { createSerialAutosaver, hasSameSavedContent } from '../utils/autosave'
 const resolveProposalTargetIndex = (
   slides: Slide[],
   proposedSlide: Slide,
@@ -76,6 +81,7 @@ export const EditorPage = ({
   onPresent
 }: EditorPageProps) => {
   const { showToast } = useToast()
+  const aiRequestRef = useRef<AbortController | null>(null)
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
@@ -135,6 +141,7 @@ export const EditorPage = ({
   // SRS UC021 bước 5: bài giảng vừa tạo mở kèm màn hình nhập Prompt AI
   const [showAiWizard, setShowAiWizard] = useState(Boolean(routeState?.startAi))
   const lectureId = params.id || initialLecture?._id || lectureFromState?._id
+  useEffect(() => () => aiRequestRef.current?.abort(), [lectureId])
 
   // Bản nháp offline (nếu có) được hỏi Khôi phục/Bỏ qua sau khi tải xong (SRS UC009 5a/5b)
   const [lecture, setLecture] = useState<Lecture | null>(
@@ -162,6 +169,19 @@ export const EditorPage = ({
   // Trạng thái lưu: nếu mở từ bản nháp offline chưa đồng bộ, khởi tạo là 'offline_saved'
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [countdown, setCountdown] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isLeaving, setIsLeaving] = useState(false)
+  const leaveApprovedRef = useRef(false)
+  const lastValidTitleRef = useRef(lecture?.title || 'Bài giảng chưa đặt tên')
+  const loadRequestRef = useRef<AbortController | null>(null)
+  const saveBlockedRef = useRef(false)
+  const networkFailureNotifiedRef = useRef(false)
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      !leaveApprovedRef.current &&
+      saveStatus !== 'saved' &&
+      currentLocation.pathname !== nextLocation.pathname
+  )
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -205,14 +225,23 @@ export const EditorPage = ({
   // Thực hiện lưu bài giảng: kiểm tra online/offline
   const executeSave = useCallback(
     async (toSave: Lecture, isAuto = false) => {
+      if (saveBlockedRef.current) return false
       setSaveStatus('saving')
       clearCountdownTimers()
 
-      const payload = toSave
+      const payload = toSave.title.trim()
+        ? toSave
+        : { ...toSave, title: lastValidTitleRef.current }
 
       // 1. Nếu không có kết nối mạng: lưu tạm vào localStorage
       if (!navigator.onLine) {
-        saveOfflineDraft(payload)
+        if (!saveOfflineDraft(payload)) {
+          setSaveStatus('error')
+          setSaveError(
+            'Trình duyệt không còn đủ dung lượng lưu bản nháp. Vui lòng giữ trang này và kết nối lại để lưu lên máy chủ.'
+          )
+          return false
+        }
         setSaveStatus('offline_saved')
         if (!isAuto) {
           showToast(
@@ -220,15 +249,33 @@ export const EditorPage = ({
             'info'
           )
         }
-        return
+        return false
       }
 
       // 2. Nếu có mạng: gửi lên server
       pendingSavesRef.current += 1
       try {
-        await autosaver.save(payload)
+        const receipt = await autosaver.save(payload)
+        networkFailureNotifiedRef.current = false
+        lastValidTitleRef.current = payload.title
+        setSaveError(null)
         if (lectureRef.current?._id === payload._id) {
-          if (lectureRef.current === toSave) {
+          const current = lectureRef.current
+          const unchanged = hasSameSavedContent(current, toSave)
+          const next = {
+            ...(unchanged ? payload : current),
+            revision: receipt.revision,
+            updatedAt: receipt.savedAt
+          }
+          lectureRef.current = next
+          setLecture(next)
+          if (unchanged) {
+            if (payload !== toSave) {
+              showToast(
+                'Tên bài giảng không được để trống. Đã giữ lại tên hợp lệ trước đó.',
+                'info'
+              )
+            }
             clearOfflineDraft(payload._id)
             setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'saved')
           } else {
@@ -238,22 +285,44 @@ export const EditorPage = ({
         if (!isAuto) {
           showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
         }
+        return true
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
         const latestLecture =
           lectureRef.current?._id === payload._id ? lectureRef.current : payload
-        saveOfflineDraft(latestLecture)
-        if (lectureRef.current?._id === payload._id)
-          setSaveStatus(
-            pendingSavesRef.current > 1 ? 'saving' : 'offline_saved'
-          )
-        // Lưu tự động lỗi thì chỉ hiện trạng thái "Đang lưu offline", tránh toast lặp mỗi 2 giây
-        if (!isAuto) {
-          showToast(
-            'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
-            'error'
-          )
+        const draftSaved = saveOfflineDraft(latestLecture)
+        const status = isAxiosError(err) ? err.response?.status : undefined
+        if (status) {
+          if ([403, 404, 409].includes(status)) saveBlockedRef.current = true
+          const serverMessage =
+            (err as { response?: { data?: { message?: string } } }).response
+              ?.data?.message || 'Không thể lưu bài giảng.'
+          const message = draftSaved
+            ? serverMessage
+            : `${serverMessage} Trình duyệt cũng không lưu được bản nháp. Vui lòng giữ trang này để tránh mất chỉnh sửa.`
+          setSaveError(message)
+          setSaveStatus('error')
+          showToast(message, 'error')
+        } else {
+          const message = draftSaved
+            ? 'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.'
+            : 'Không thể kết nối máy chủ và không lưu được bản nháp trong trình duyệt. Vui lòng giữ trang này để tránh mất chỉnh sửa.'
+          if (lectureRef.current?._id === payload._id) {
+            setSaveError(message)
+            setSaveStatus(
+              draftSaved
+                ? pendingSavesRef.current > 1
+                  ? 'saving'
+                  : 'offline_saved'
+                : 'error'
+            )
+          }
+          // Chỉ báo một lần mỗi đợt lỗi mạng; lưu thủ công vẫn luôn có phản hồi.
+          if (!isAuto || !networkFailureNotifiedRef.current)
+            showToast(message, 'error')
+          networkFailureNotifiedRef.current = true
         }
+        return false
       } finally {
         pendingSavesRef.current -= 1
       }
@@ -261,10 +330,48 @@ export const EditorPage = ({
     [autosaver, clearCountdownTimers, showToast]
   )
 
+  const flushChanges = useCallback(
+    async (keepDraftOnly = false) => {
+      if (keepDraftOnly && lectureRef.current) {
+        const kept = saveOfflineDraft(lectureRef.current)
+        if (kept) leaveApprovedRef.current = true
+        if (!kept)
+          showToast(
+            'Không thể giữ bản nháp trong trình duyệt. Vui lòng lưu lên máy chủ trước khi rời trang.',
+            'error'
+          )
+        return kept
+      }
+      let pending = lectureRef.current
+      while (pending) {
+        if (!(await executeSave(pending, false))) return false
+        const latest = lectureRef.current
+        if (latest && hasSameSavedContent(latest, pending)) {
+          leaveApprovedRef.current = true
+          return true
+        }
+        pending = latest
+      }
+      leaveApprovedRef.current = true
+      return true
+    },
+    [executeSave, showToast]
+  )
+
+  useEffect(() => {
+    useEditorStore
+      .getState()
+      .setBeforeLeave(saveStatus === 'saved' ? null : flushChanges)
+    return () => useEditorStore.getState().setBeforeLeave(null)
+  }, [flushChanges, saveStatus])
+
   // Tải dữ liệu bài giảng từ server
   const loadLecture = useCallback(async () => {
     if (!params.id) return
-    if (!lectureRef.current) {
+    loadRequestRef.current?.abort()
+    const controller = new AbortController()
+    loadRequestRef.current = controller
+    if (!lectureRef.current || lectureRef.current._id !== params.id) {
       setIsLoading(true)
     }
     setLoadError(null)
@@ -272,15 +379,32 @@ export const EditorPage = ({
     clearHistory()
 
     try {
-      const loaded = await editorApi.get(params.id)
+      const loaded = await editorApi.get(params.id, controller.signal)
+      if (controller.signal.aborted) return
+      autosaver.reset(loaded)
+      saveBlockedRef.current = false
+      lectureRef.current = loaded
+      lastValidTitleRef.current = loaded.title
+      setSourceMaterial(loaded.sourceMaterial || '')
+      setSaveError(null)
 
       // Kiểm tra xem có bản nháp offline chưa đồng bộ không
-      const draft = getOfflineDraft(params.id)
+      const draft = getOfflineDraft(params.id, useAuthStore.getState().user?.id)
       const hasUnsyncedChanges =
         draft &&
-        (JSON.stringify(draft.lecture.slides) !==
-          JSON.stringify(loaded.slides) ||
-          draft.lecture.title !== loaded.title)
+        (
+          [
+            'title',
+            'slides',
+            'theme',
+            'sourceMaterial',
+            'contextSummary'
+          ] as const
+        ).some(
+          (field) =>
+            JSON.stringify(draft.lecture[field]) !==
+            JSON.stringify(loaded[field])
+        )
 
       setLecture(loaded)
       setAiMessages(
@@ -304,22 +428,25 @@ export const EditorPage = ({
           : 0
       )
     } catch (err) {
+      if (controller.signal.aborted) return
       // SRS UC009 2a: không có quyền truy cập
       if (isAxiosError(err) && err.response?.status === 403) {
         setIsUnauthorized(true)
         return
       }
       // Khi server tắt hoặc offline: thử mở bản nháp offline từ localStorage
-      const draft = getOfflineDraft(params.id)
-      if (draft) {
+      const draft = getOfflineDraft(params.id, useAuthStore.getState().user?.id)
+      if (draft && (!isAxiosError(err) || !err.response)) {
         setLecture(draft.lecture)
+        lectureRef.current = draft.lecture
+        setSourceMaterial(draft.lecture.sourceMaterial || '')
         setAiMessages(createWelcomeMessages())
         setSaveStatus('offline_saved')
         showToast(
           'Đang offline (máy chủ không phản hồi). Đã mở bản nháp lưu tạm trong trình duyệt.',
           'info'
         )
-      } else if (!lectureRef.current) {
+      } else {
         const msg = isAxiosError(err)
           ? (err.response?.data as { message?: string })?.message ||
             'Không thể tải bài giảng'
@@ -327,20 +454,46 @@ export const EditorPage = ({
         setLoadError(msg)
       }
     } finally {
-      setIsLoading(false)
+      if (!controller.signal.aborted) setIsLoading(false)
     }
-  }, [params.id, clearHistory, setActiveSlideIndex, setAiMessages, showToast])
+  }, [
+    params.id,
+    autosaver,
+    clearHistory,
+    setActiveSlideIndex,
+    setAiMessages,
+    setSourceMaterial,
+    showToast
+  ])
 
   useEffect(() => {
     if (params.id) {
       void loadLecture()
     }
+    return () => loadRequestRef.current?.abort()
   }, [params.id, loadLecture])
 
   useEffect(() => {
     clearLocalChatHistory()
     setAiMessages(createWelcomeMessages())
-  }, [lectureId, setAiMessages])
+    setSourceMaterial('')
+    setIsSourceMaterialModalOpen(false)
+    setSelectedCompId(null)
+    setPreviewSlide(null)
+    leaveApprovedRef.current = false
+    networkFailureNotifiedRef.current = false
+    return () => {
+      setSourceMaterial('')
+      setIsSourceMaterialModalOpen(false)
+    }
+  }, [
+    lectureId,
+    setAiMessages,
+    setSourceMaterial,
+    setIsSourceMaterialModalOpen,
+    setSelectedCompId,
+    setPreviewSlide
+  ])
 
   // Đồng bộ vị trí slide đang xem vào sessionStorage
   useEffect(() => {
@@ -355,7 +508,8 @@ export const EditorPage = ({
   // Cảnh báo người dùng khi có thay đổi chưa được lưu trước khi đóng tab
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (saveStatus === 'unsaved') {
+      if (saveStatus !== 'saved') {
+        if (lectureRef.current) saveOfflineDraft(lectureRef.current)
         e.preventDefault()
         e.returnValue = ''
       }
@@ -367,17 +521,18 @@ export const EditorPage = ({
   // Cập nhật trạng thái bài giảng và kích hoạt đếm ngược Autosave nếu đang bật
   const mutateLecture = useCallback(
     (next: Lecture, shouldRecordHistory = true) => {
+      leaveApprovedRef.current = false
       if (shouldRecordHistory && lectureRef.current) {
         recordHistory(lectureRef.current.slides)
       }
 
       lectureRef.current = next
       setLecture(next)
-      setSaveStatus('unsaved')
+      setSaveStatus(saveBlockedRef.current ? 'error' : 'unsaved')
       clearCountdownTimers()
 
       // Nếu Autosave đang bật: đếm ngược debounce 2 giây rồi tự động lưu
-      if (isAutoSave) {
+      if (isAutoSave && !saveBlockedRef.current) {
         setCountdown(2)
 
         countdownIntervalRef.current = setInterval(() => {
@@ -476,6 +631,7 @@ export const EditorPage = ({
       // Nếu đang focus vào input/textarea bên ngoài Canvas (như ô chat AI hoặc ô tiêu đề),
       // hãy để trình duyệt tự xử lý undo/redo của input đó
       const target = e.target as HTMLElement | null
+      if (document.querySelector('[role="dialog"]')) return
       const isExternalInput =
         target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
@@ -515,12 +671,6 @@ export const EditorPage = ({
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
-  useEffect(() => {
-    if (lecture?.sourceMaterial && !sourceMaterial) {
-      setSourceMaterial(lecture.sourceMaterial)
-    }
-  }, [lecture?.sourceMaterial, sourceMaterial, setSourceMaterial])
-
   // THAO TÁC TRÊN SLIDE VÀ COMPONENT
   const currentSlide = lecture?.slides[activeSlideIndex]
   const isPreviewVisible = Boolean(
@@ -534,9 +684,9 @@ export const EditorPage = ({
     ? getSlideComponents(activeSlideToDisplay, lecture?.theme)
     : []
   const selectedComponent =
-    currentComponents.find((c) => c.id === selectedCompId) || null
+    currentComponents.find((component) => component.id === selectedCompId) ||
+    null
 
-  // Cập nhật thuộc tính của một component
   const handleUpdateComponent = useCallback(
     (
       compId: string,
@@ -588,13 +738,75 @@ export const EditorPage = ({
     [activeSlideIndex, mutateLecture]
   )
 
-  // Thêm khối văn bản mới
+  useEffect(() => {
+    const handleFormatShortcut = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"]')) return
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.isComposing ||
+        !selectedComponent
+      )
+        return
+      const target = event.target as HTMLElement | null
+      if (
+        target?.closest(
+          'input,select,textarea:not([data-slide-canvas-text]),[role="dialog"]'
+        )
+      )
+        return
+      if (
+        selectedComponent.type === 'image' ||
+        selectedComponent.type === 'shape'
+      )
+        return
+      const key = event.key.toLowerCase()
+      const patch: Partial<SlideComponent> | undefined =
+        key === 'b'
+          ? {
+              fontWeight:
+                selectedComponent.fontWeight === 'bold' ? 'normal' : 'bold'
+            }
+          : key === 'i'
+            ? {
+                fontStyle:
+                  selectedComponent.fontStyle === 'italic' ? 'normal' : 'italic'
+              }
+            : key === 'u'
+              ? {
+                  textDecoration:
+                    selectedComponent.textDecoration === 'underline'
+                      ? 'none'
+                      : 'underline'
+                }
+              : undefined
+      if (!patch) return
+      event.preventDefault()
+      handleUpdateComponent(selectedComponent.id, patch)
+    }
+    window.addEventListener('keydown', handleFormatShortcut)
+    return () => window.removeEventListener('keydown', handleFormatShortcut)
+  }, [selectedComponent, handleUpdateComponent])
+
   const handleAddTextComponent = (
     type: 'title' | 'subtitle' | 'text' | 'bullets'
   ) => {
-    if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide, lecture.theme)
-    const newId = `comp-${Date.now()}`
+    const currentLecture = lectureRef.current
+    if (!currentLecture) return
+    const targetIndex = useEditorStore.getState().activeSlideIndex
+    const targetSlide = currentLecture.slides[targetIndex]
+    if (!targetSlide) {
+      showToast(
+        'Bài giảng chưa có slide. Hãy thêm slide trước khi chèn văn bản.',
+        'info'
+      )
+      return
+    }
+    const comps = getSlideComponents(targetSlide, currentLecture.theme)
+    const theme = withSlideColors(
+      getThemeById(targetSlide.theme || currentLecture.theme),
+      targetSlide
+    )
+    const newId = `comp-${crypto.randomUUID()}`
 
     const newComp: SlideComponent = {
       id: newId,
@@ -606,7 +818,8 @@ export const EditorPage = ({
             ? 'Dòng phụ đề mới'
             : 'Nội dung văn bản mới...',
       x: 12,
-      y: 20 + comps.length * 6,
+      // Giữ khối mới trong vùng nhìn thấy, kể cả slide có nhiều đối tượng.
+      y: 20 + (comps.length % 6) * 6,
       width: 76,
       fontSize: type === 'title' ? 36 : type === 'subtitle' ? 18 : 20,
       fontWeight: type === 'title' ? 'bold' : 'normal',
@@ -615,16 +828,17 @@ export const EditorPage = ({
       textCase: 'normal',
       textAlign: 'left',
       fontFamily: type === 'title' ? 'display' : 'sans',
-      color: '#173c39'
+      color: theme.textPrimary
     }
 
     const updatedComps = [...comps, newComp]
-    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
-    const nextSlides = lecture.slides.map((s, idx) =>
-      idx === activeSlideIndex ? updatedSlide : s
+    const updatedSlide: Slide = { ...targetSlide, components: updatedComps }
+    const nextSlides = currentLecture.slides.map((s, idx) =>
+      idx === targetIndex ? updatedSlide : s
     )
 
-    mutateLecture({ ...lecture, slides: nextSlides })
+    mutateLecture({ ...currentLecture, slides: nextSlides })
+    setPreviewSlide(null)
     setSelectedCompId(newId)
   }
 
@@ -682,7 +896,7 @@ export const EditorPage = ({
       x: 35,
       y: 30,
       width: isLine ? 40 : isSquareOrCircle ? 25 : 35,
-      height: isLine ? 2 : isSquareOrCircle ? 25 : 20
+      height: isLine ? 2 : isSquareOrCircle ? (25 * 16) / 9 : 20
     }
 
     const updatedComps = [...comps, newComp]
@@ -717,9 +931,14 @@ export const EditorPage = ({
   }
 
   // Xóa component
-  const handleDeleteComponent = (compId: string) => {
-    if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide, lecture.theme)
+  const handleDeleteComponent = (
+    compId: string,
+    shouldRecordHistory = true
+  ) => {
+    const currentLecture = lectureRef.current
+    const active = currentLecture?.slides[activeSlideIndex]
+    if (!currentLecture || !active) return
+    const comps = getSlideComponents(active, currentLecture.theme)
     const updatedComps = comps.filter((c) => c.id !== compId)
 
     // Đồng bộ lại title, subtitle, bullets tương ứng với các components còn lại
@@ -728,7 +947,7 @@ export const EditorPage = ({
     const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
 
     const updatedSlide: Slide = {
-      ...currentSlide,
+      ...active,
       title: titleComp ? titleComp.content : '',
       subtitle: subComp ? subComp.content : '',
       bullets: bulletsComp
@@ -736,11 +955,14 @@ export const EditorPage = ({
         : [],
       components: updatedComps
     }
-    const nextSlides = lecture.slides.map((s, idx) =>
+    const nextSlides = currentLecture.slides.map((s, idx) =>
       idx === activeSlideIndex ? updatedSlide : s
     )
 
-    mutateLecture({ ...lecture, slides: nextSlides })
+    mutateLecture(
+      { ...currentLecture, slides: nextSlides },
+      shouldRecordHistory
+    )
     if (selectedCompId === compId) setSelectedCompId(null)
   }
 
@@ -770,7 +992,8 @@ export const EditorPage = ({
         target?.tagName === 'INPUT' ||
         target?.tagName === 'TEXTAREA' ||
         target?.tagName === 'SELECT'
-      if (isTyping || showAiWizard) return
+      if (isTyping || showAiWizard || document.querySelector('[role="dialog"]'))
+        return
       e.preventDefault()
       if (selectedCompId) handleDeleteComponent(selectedCompId)
       else if (currentSlide) handleDeleteSlide(currentSlide.id)
@@ -958,7 +1181,11 @@ export const EditorPage = ({
 
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ
   const handleApplyAiPrompt = async (instruction: string) => {
-    if (!lecture || !currentSlide || !instruction.trim()) return
+    if (!lecture || !currentSlide || !instruction.trim() || isAiLoading)
+      return false
+    if (lectureRef.current?._id !== lecture._id) return false
+    const controller = new AbortController()
+    aiRequestRef.current = controller
     const requestTargetSlideId = currentSlide.id
     const requestTargetSlideIndex = activeSlideIndex
     try {
@@ -978,14 +1205,20 @@ export const EditorPage = ({
         components: getSlideComponents(currentSlide, lecture.theme)
       }
 
-      const response = await editorApi.aiChat(lecture._id, {
-        message: instruction,
-        slideId: currentSlide.id,
-        currentSlide: currentSlideSnapshot,
-        selectedCompId: selectedCompId || undefined,
-        sourceMaterial: sourceMaterial || lecture.sourceMaterial || undefined,
-        history: historyPayload
-      })
+      const response = await editorApi.aiChat(
+        lecture._id,
+        {
+          message: instruction,
+          slideId: currentSlide.id,
+          currentSlide: currentSlideSnapshot,
+          selectedCompId: selectedCompId || undefined,
+          sourceMaterial: sourceMaterial,
+          history: historyPayload
+        },
+        controller.signal
+      )
+      if (controller.signal.aborted || lectureRef.current?._id !== lecture._id)
+        return false
 
       updateUser({ creditBalance: response.creditBalance })
 
@@ -1177,13 +1410,16 @@ export const EditorPage = ({
           prev ? { ...prev, contextSummary: response.updatedSummary } : prev
         )
       }
+      return true
     } catch (err) {
+      if (controller.signal.aborted) return false
       const msg = isAxiosError(err)
         ? (err.response?.data as { message?: string })?.message ||
           'Không thể thực hiện yêu cầu AI'
         : 'Không thể thực hiện yêu cầu AI'
       addAiMessage('assistant', `⚠️ Không thể xử lý yêu cầu: ${msg}`)
       showToast(msg, 'error')
+      return false
     } finally {
       setIsAiLoading(false)
     }
@@ -1439,41 +1675,91 @@ export const EditorPage = ({
     )
   }
 
-  const handleBack = () => {
-    if (saveStatus === 'unsaved' && lectureRef.current) {
-      clearCountdownTimers()
-      void executeSave(lectureRef.current, false)
+  const handleBack = async () => {
+    if (isLeaving) return
+    setIsLeaving(true)
+    const saved = saveStatus === 'saved' || (await flushChanges())
+    setIsLeaving(false)
+    if (!saved) {
+      if (!onBack) navigate('/library')
+      return
     }
+    leaveApprovedRef.current = true
     if (onBack) onBack()
     else navigate('/library')
   }
 
-  const handlePresent = () => {
-    if (!lecture) return
-    if (onPresent) onPresent(lecture)
+  const handlePresent = async () => {
+    if (!lecture || isLeaving) return
+    if (!lecture.slides.length) {
+      showToast('Bài giảng chưa có slide để trình chiếu', 'info')
+      return
+    }
+    setIsLeaving(true)
+    const saved = saveStatus === 'saved' || (await flushChanges())
+    setIsLeaving(false)
+    if (!saved) return
+    const current = lectureRef.current!
+    leaveApprovedRef.current = true
+    if (onPresent) onPresent(current)
     else
-      navigate(`/presentation/${lecture._id}`, {
-        state: { lecture, startIndex: activeSlideIndex }
+      navigate(`/presentation/${current._id}`, {
+        state: {
+          lecture: current,
+          startIndex: activeSlideIndex,
+          fromEditor: true
+        }
       })
   }
 
   // Tự động tạo lại Dàn ý bài giảng bằng AI khi người dùng yêu cầu
   const handleRegenerateOutline = async () => {
     if (!lecture) return
+    if (saveStatus !== 'saved' && !(await flushChanges())) return
+    const snapshot = lectureRef.current
+    if (!snapshot) return
+    const controller = new AbortController()
+    aiRequestRef.current = controller
     setIsOutlineLoading(true)
     try {
-      const prompt = lecture.title || 'Bài giảng trình chiếu'
-      const result = await generationApi.outline(prompt, {
-        currentOutline: lecture.outline || undefined,
-        lectureId: lecture._id
-      })
+      const prompt = snapshot.title || 'Bài giảng trình chiếu'
+      const result = await generationApi.outline(
+        prompt,
+        {
+          currentOutline: snapshot.outline || undefined,
+          lectureId: snapshot._id
+        },
+        controller.signal
+      )
+      if (controller.signal.aborted || lectureRef.current?._id !== snapshot._id)
+        return
       updateUser({ creditBalance: result.creditBalance })
       if (result.outline) {
-        mutateLecture({ ...lecture, outline: result.outline })
+        const current = lectureRef.current
+        if (result.lecture && hasSameSavedContent(current, snapshot)) {
+          lectureRef.current = result.lecture
+          setLecture(result.lecture)
+          autosaver.reset(result.lecture)
+          setSourceMaterial(result.lecture.sourceMaterial || '')
+          setSaveStatus('saved')
+        } else {
+          saveOfflineDraft(current)
+          saveBlockedRef.current = true
+          clearCountdownTimers()
+          setSaveStatus('error')
+          setSaveError(
+            'Nội dung đã thay đổi trong lúc AI xử lý. Bản chỉnh sửa của bạn được giữ lại; hãy tải lại để chọn dữ liệu cần dùng.'
+          )
+          return
+        }
         showToast('Đã tạo dàn ý bài giảng mới thành công', 'success')
       }
-    } catch {
-      showToast('Không thể tạo lại dàn ý lúc này', 'error')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      const message = isAxiosError(error)
+        ? error.response?.data?.message
+        : undefined
+      showToast(message || 'Không thể tạo lại dàn ý lúc này', 'error')
     } finally {
       setIsOutlineLoading(false)
     }
@@ -1547,6 +1833,36 @@ export const EditorPage = ({
 
   return (
     <div className='flex h-screen flex-col overflow-hidden bg-brand-paper'>
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title='Bài giảng có thay đổi chưa lưu'
+        message='Bài giảng chưa lưu lên máy chủ. Bạn có thể lưu trước khi rời trang, hoặc giữ bản nháp trong trình duyệt để khôi phục sau.'
+        confirmLabel='Lưu và rời trang'
+        secondaryLabel='Rời và giữ bản nháp'
+        onSecondary={async () => {
+          if ((await flushChanges(true)) && blocker.state === 'blocked') {
+            leaveApprovedRef.current = true
+            blocker.proceed()
+          }
+        }}
+        cancelLabel='Ở lại'
+        pending={isLeaving}
+        onConfirm={() => {
+          if (isLeaving) return
+          setIsLeaving(true)
+          void flushChanges()
+            .then((saved) => {
+              if (saved && blocker.state === 'blocked') {
+                leaveApprovedRef.current = true
+                blocker.proceed()
+              }
+            })
+            .finally(() => setIsLeaving(false))
+        }}
+        onCancel={() => {
+          if (blocker.state === 'blocked') blocker.reset()
+        }}
+      />
       {/* 1. HEADER CANVA */}
       <EditorHeader
         title={lecture.title}
@@ -1554,23 +1870,40 @@ export const EditorPage = ({
           const next = { ...lecture, title: newTitle }
           mutateLecture(next, false)
         }}
-        onBack={handleBack}
+        onBack={() => void handleBack()}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onManualSave={handleManualSave}
         onOpenExport={() => setIsExportModalOpen(true)}
         onOpenOutline={() => setIsOutlineModalOpen(true)}
-        onPresent={handlePresent}
+        onPresent={() => void handlePresent()}
         saveStatus={saveStatus}
         countdown={countdown}
         isAutoSave={isAutoSave}
         onToggleAutoSave={handleToggleAutoSave}
       />
 
+      {saveError && (
+        <div
+          role='alert'
+          className='flex items-center justify-between gap-3 bg-red-50 px-4 py-2 font-sans text-xs text-red-800'
+        >
+          <span>{saveError}</span>
+          <button
+            type='button'
+            className='shrink-0 underline'
+            onClick={() => void loadLecture()}
+          >
+            Tải lại bài giảng
+          </button>
+        </div>
+      )}
+
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
       <div className='flex flex-1 overflow-hidden'>
         {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Hình khối / Upload ảnh / Mẫu slide / Giao diện */}
         <LeftSidebarRail
+          key={lectureId}
           onAddTextComponent={handleAddTextComponent}
           onAddImageComponent={handleAddImageComponent}
           onAddShapeComponent={handleAddShapeComponent}
@@ -1645,6 +1978,11 @@ export const EditorPage = ({
 
         {/* CỘT PHẢI: Trợ lý AI Copilot */}
         <AiCopilotPanel
+          key={lecture._id}
+          onSourceMaterialChange={(sourceMaterial) => {
+            if (lectureRef.current)
+              mutateLecture({ ...lectureRef.current, sourceMaterial }, false)
+          }}
           onApplyAiPrompt={handleApplyAiPrompt}
           onAcceptProposal={handleAcceptProposal}
           onAcceptAllProposals={handleAcceptAllProposals}
@@ -1677,12 +2015,13 @@ export const EditorPage = ({
       <SourceMaterialModal
         open={isSourceMaterialModalOpen}
         onClose={() => setIsSourceMaterialModalOpen(false)}
-        sourceMaterial={sourceMaterial || lecture?.sourceMaterial || ''}
+        sourceMaterial={sourceMaterial}
         onSave={(content) => {
           setSourceMaterial(content)
-          if (lecture) {
-            mutateLecture({ ...lecture, sourceMaterial: content })
-            showToast('Đã lưu tài liệu nguồn tham khảo', 'success')
+          if (lectureRef.current) {
+            const next = { ...lectureRef.current, sourceMaterial: content }
+            mutateLecture(next, false)
+            void executeSave(next, false)
           }
         }}
       />
@@ -1700,16 +2039,22 @@ export const EditorPage = ({
       <ConfirmDialog
         open={pendingDraft !== null}
         title='Phát hiện dữ liệu chưa đồng bộ'
-        message='Trình duyệt còn lưu bản chỉnh sửa offline chưa được đồng bộ lên máy chủ. Bạn muốn khôi phục bản này hay bỏ qua để dùng dữ liệu trên máy chủ?'
+        message='Trình duyệt còn lưu bản chỉnh sửa chưa đồng bộ. Khôi phục sẽ dùng bản nháp để thay thế nội dung hiện tại trên máy chủ sau khi lưu; Bỏ qua sẽ giữ dữ liệu máy chủ. Bạn muốn dùng bản nào?'
         confirmLabel='Khôi phục'
         cancelLabel='Bỏ qua'
         onConfirm={() => {
-          if (pendingDraft)
-            setLecture({
+          if (pendingDraft) {
+            const restored = {
               ...pendingDraft,
+              revision: lecture.revision ?? 0,
+              updatedAt: lecture.updatedAt,
               aiChatHistory: lecture.aiChatHistory
-            })
-          setSaveStatus('offline_saved')
+            }
+            autosaver.reset(lecture)
+            setSourceMaterial(restored.sourceMaterial || '')
+            mutateLecture(restored, false)
+            if (isAutoSave) void executeSave(restored, true)
+          }
           setPendingDraft(null)
         }}
         onCancel={() => {
@@ -1721,6 +2066,13 @@ export const EditorPage = ({
       {showAiWizard && (
         <AiGenerationWizard
           lecture={lecture}
+          onOutlineSaved={(saved) => {
+            setLecture(saved)
+            lectureRef.current = saved
+            autosaver.reset(saved)
+            setSourceMaterial(saved.sourceMaterial || '')
+            setSaveStatus('saved')
+          }}
           onDone={(created) => {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { creditSpent, creditBalance, ...generated } =
@@ -1729,6 +2081,8 @@ export const EditorPage = ({
                 creditBalance?: number
               }
             setLecture(generated)
+            lectureRef.current = generated
+            autosaver.reset(generated)
             setSaveStatus('saved')
             setActiveSlideIndex(0)
             setShowAiWizard(false)

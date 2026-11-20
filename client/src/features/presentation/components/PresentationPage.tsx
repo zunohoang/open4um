@@ -2,7 +2,7 @@ import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type { Lecture } from '@/lib/types'
 import { SlideView } from './SlideView'
 import { BrandLogo } from '@/components/ui'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 interface PresentationPageProps {
@@ -21,12 +21,14 @@ export const PresentationPage = ({
   const routeState = location.state as {
     lecture?: Lecture
     startIndex?: number
+    fromEditor?: boolean
   } | null
   const lectureFromState = routeState?.lecture
   const [lecture, setLecture] = useState<Lecture | null>(
     initialLecture || lectureFromState || null
   )
   const [isLoading, setIsLoading] = useState(!lecture)
+  const exitingRef = useRef(false)
   // SRS UC018 bước 4: bắt đầu từ slide đang chọn trong editor (mặc định slide đầu tiên)
   const [index, setIndex] = useState(routeState?.startIndex ?? 0)
 
@@ -43,15 +45,21 @@ export const PresentationPage = ({
 
   // Thoát toàn màn hình và quay về trang trước
   const handleExit = useCallback(() => {
+    if (exitingRef.current) return
+    exitingRef.current = true
     if (document.fullscreenElement) {
       document.exitFullscreen?.().catch(() => {})
     }
     if (onExit) {
       onExit()
     } else {
-      navigate(-1)
+      if (routeState?.fromEditor && params.id) {
+        navigate(-1)
+      } else {
+        navigate('/library', { replace: true })
+      }
     }
-  }, [navigate, onExit])
+  }, [navigate, onExit, params.id, routeState?.fromEditor])
 
   // Tự động kích hoạt fullscreen khi vừa vào trang trình chiếu
   useEffect(() => {
@@ -189,28 +197,22 @@ export const PresentationPage = ({
     )
   }
 
-  const navButtons = (
-    <div className='fixed bottom-4 right-4 z-10 flex gap-2'>
-      {[
-        { label: 'Slide trước', icon: '‹', onClick: goPrev },
-        { label: 'Slide tiếp theo', icon: '›', onClick: goNext }
-      ].map((b) => (
-        <button
-          key={b.label}
-          type='button'
-          aria-label={b.label}
-          title={b.label}
-          onClick={(e) => {
-            e.stopPropagation()
-            b.onClick()
-          }}
-          className='h-10 w-10 rounded-full bg-white/10 text-2xl leading-none text-white/70 transition hover:bg-white/25 hover:text-white'
-        >
-          {b.icon}
-        </button>
-      ))}
-    </div>
-  )
+  if (!lecture.slides.length) {
+    return (
+      <main className='grid min-h-screen place-items-center bg-black p-6 font-sans text-stone-100'>
+        <div className='text-center'>
+          <p>Bài giảng chưa có slide để trình chiếu</p>
+          <button
+            type='button'
+            onClick={handleExit}
+            className='mt-4 border border-stone-500 px-4 py-2'
+          >
+            Quay lại
+          </button>
+        </div>
+      </main>
+    )
+  }
 
   if (index >= lecture.slides.length) {
     return (
@@ -219,7 +221,6 @@ export const PresentationPage = ({
         className='grid min-h-screen w-screen place-items-center bg-black font-sans text-stone-300 select-none'
       >
         <p className='text-lg'>Kết thúc bài trình chiếu - Bấm Esc để thoát</p>
-        {navButtons}
       </main>
     )
   }
@@ -229,19 +230,16 @@ export const PresentationPage = ({
       onClick={() => void handleScreenClick()}
       onContextMenu={handleContextMenu}
       className='flex min-h-screen w-screen cursor-default items-center justify-center overflow-hidden bg-black select-none'
-      title='Click chuột trái để tới slide tiếp theo • Click chuột phải để lùi lại • Nhấn ESC để thoát'
     >
       {/* Khung Slide chuẩn tỷ lệ 16:9 tối đa kích thước màn hình */}
       <SlideView
         slide={lecture.slides[index]}
         lectureTheme={lecture.theme}
-        slideNumber={`${index + 1} / ${lecture.slides.length}`}
         style={{
           width: 'min(96vw, calc(96vh * 16 / 9))',
           height: 'min(96vh, calc(96vw * 9 / 16))'
         }}
       />
-      {navButtons}
     </main>
   )
 }

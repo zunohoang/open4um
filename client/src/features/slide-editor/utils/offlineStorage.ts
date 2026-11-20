@@ -10,8 +10,8 @@ export interface OfflineDraft {
 /**
  * Lưu bản nháp bài giảng vào localStorage khi mất kết nối mạng
  */
-export const saveOfflineDraft = (lecture: Lecture): void => {
-  if (!lecture?._id) return
+export const saveOfflineDraft = (lecture: Lecture): boolean => {
+  if (!lecture?._id) return false
   try {
     const offlineLecture = { ...lecture }
     delete offlineLecture.aiChatHistory
@@ -23,21 +23,27 @@ export const saveOfflineDraft = (lecture: Lecture): void => {
       `${OFFLINE_DRAFT_PREFIX}${lecture._id}`,
       JSON.stringify(draft)
     )
+    return true
   } catch (error) {
     console.warn('Không thể lưu bản nháp offline vào localStorage:', error)
+    return false
   }
 }
 
 /**
  * Lấy bản nháp bài giảng offline từ localStorage
  */
-export const getOfflineDraft = (lectureId: string): OfflineDraft | null => {
+export const getOfflineDraft = (
+  lectureId: string,
+  userId?: string
+): OfflineDraft | null => {
   if (!lectureId) return null
   try {
     const raw = localStorage.getItem(`${OFFLINE_DRAFT_PREFIX}${lectureId}`)
     if (!raw) return null
     const draft = JSON.parse(raw) as OfflineDraft
     if (draft?.lecture?._id !== lectureId) return null
+    if (userId && draft.lecture.userId !== userId) return null
     // Keep old slide drafts, but never restore their cached chat.
     if ('aiChatHistory' in draft.lecture) {
       delete draft.lecture.aiChatHistory

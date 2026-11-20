@@ -230,7 +230,7 @@ export const SlideFilmstrip = ({
           )}
 
           <div className='font-mono font-medium'>
-            Trang {activeSlideIndex + 1} / {slides.length}
+            Trang {slides.length ? activeSlideIndex + 1 : 0} / {slides.length}
           </div>
         </div>
       </div>

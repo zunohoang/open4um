@@ -4,6 +4,7 @@ import {
   getThemeById
 } from '@/features/slide-editor/constants/theme-options'
 import { cropClipPath } from '@/features/slide-editor/utils/slide'
+import { SlideText } from '@/features/slide-editor/components/SlideText'
 import React, { memo } from 'react'
 
 interface SlidePreviewProps {
@@ -272,7 +273,7 @@ const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
                 y={y}
                 width={w}
                 height={imgH}
-                preserveAspectRatio='xMidYMid slice'
+                preserveAspectRatio='xMidYMid meet'
                 transform={
                   comp.rotation
                     ? `rotate(${comp.rotation} ${cx} ${cy})`
@@ -333,38 +334,7 @@ const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
                   width: '100%'
                 }}
               >
-                {comp.type === 'bullets' ? (
-                  <ul
-                    style={{
-                      listStyleType: 'disc',
-                      paddingLeft: '24px',
-                      margin: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px'
-                    }}
-                  >
-                    {comp.content
-                      .split('\n')
-                      .filter((s) => s.trim())
-                      .map((bullet, idx) => (
-                        <li key={idx}>{bullet}</li>
-                      ))}
-                  </ul>
-                ) : comp.type === 'quote' ? (
-                  <div
-                    style={{
-                      fontStyle: 'italic',
-                      borderTop: '2px solid rgba(0,0,0,0.15)',
-                      borderBottom: '2px solid rgba(0,0,0,0.15)',
-                      padding: '12px 8px'
-                    }}
-                  >
-                    “ {comp.content} ”
-                  </div>
-                ) : (
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{comp.content}</div>
-                )}
+                <SlideText component={comp} fontUnit='px' />
               </div>
             </foreignObject>
           )

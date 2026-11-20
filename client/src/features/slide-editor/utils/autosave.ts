@@ -13,6 +13,9 @@ export type AutosavePayload = Partial<
   Pick<Lecture, (typeof SAVED_FIELDS)[number]>
 >
 
+export const hasSameSavedContent = (left: Lecture, right: Lecture) =>
+  SAVED_FIELDS.every((field) => Object.is(left[field], right[field]))
+
 export const buildAutosavePayload = (lecture: Lecture, previous?: Lecture) => {
   const payload: AutosavePayload = {}
   for (const field of SAVED_FIELDS) {
@@ -23,20 +26,23 @@ export const buildAutosavePayload = (lecture: Lecture, previous?: Lecture) => {
   return payload
 }
 
-export const createSerialAutosaver = <T>(
+export const createSerialAutosaver = <T extends { revision: number }>(
   persist: (lecture: Lecture, previous?: Lecture) => Promise<T>
 ) => {
   let previous: Lecture | undefined
   let tail: Promise<unknown> = Promise.resolve()
 
   return {
+    reset(lecture?: Lecture) {
+      previous = lecture
+    },
     save(lecture: Lecture): Promise<T> {
       const task = tail.then(async () => {
         const receipt = await persist(
           lecture,
           previous?._id === lecture._id ? previous : undefined
         )
-        previous = lecture
+        previous = { ...lecture, revision: receipt.revision }
         return receipt
       })
       tail = task.catch(() => undefined)

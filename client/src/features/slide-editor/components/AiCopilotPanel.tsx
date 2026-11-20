@@ -23,9 +23,11 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
 import { AiDataNotice } from '@/components/ui/AiDataNotice'
+import { useToast } from '@/components/ui/Toast'
 
 interface AiCopilotPanelProps {
-  onApplyAiPrompt: (instruction: string) => Promise<void>
+  onSourceMaterialChange?: (content: string) => void
+  onApplyAiPrompt: (instruction: string) => Promise<boolean | void>
   onAcceptProposal: (
     messageId: string,
     proposedSlide: Slide,
@@ -66,6 +68,7 @@ const AI_COPILOT_LOADING_STEPS = [
 type PromptToolbarTab = 'suggestions' | 'context' | null
 
 export const AiCopilotPanel = ({
+  onSourceMaterialChange,
   onApplyAiPrompt,
   onAcceptProposal,
   onAcceptAllProposals,
@@ -79,6 +82,10 @@ export const AiCopilotPanel = ({
   onSelectSlide,
   isAiLoading
 }: AiCopilotPanelProps) => {
+  const { showToast } = useToast()
+  const [isReading, setIsReading] = useState(false)
+  const fileReadRef = useRef<AbortController | null>(null)
+  useEffect(() => () => fileReadRef.current?.abort(), [])
   const {
     isAiPanelOpen,
     toggleAiPanel,
@@ -105,7 +112,12 @@ export const AiCopilotPanel = ({
 
   const [instruction, setInstruction] = useState('')
   const [activePromptTab, setActivePromptTab] = useState<PromptToolbarTab>(null)
-  const [attachedFileName, setAttachedFileName] = useState<string | null>(null)
+  const [attachedFile, setAttachedFile] = useState<{
+    name: string
+    content: string
+  } | null>(null)
+  const attachedFileName =
+    attachedFile?.content === sourceMaterial ? attachedFile.name : null
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const [expandedProposals, setExpandedProposals] = useState<
     Record<string, boolean>
@@ -169,12 +181,21 @@ export const AiCopilotPanel = ({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    if (!instruction.trim() || isAiLoading) return
+    if (!instruction.trim() || isAiLoading || isReading) return
+    if (sourceMaterial.length > 10000) {
+      showToast(
+        'Tài liệu nguồn vượt quá 10.000 ký tự. Vui lòng rút gọn tài liệu trước khi gửi.',
+        'error'
+      )
+      return
+    }
 
     const promptText = instruction.trim()
-    setInstruction('')
     setActivePromptTab(null)
-    await onApplyAiPrompt(promptText)
+    if ((await onApplyAiPrompt(promptText)) !== false)
+      setInstruction((current) =>
+        current.trim() === promptText ? '' : current
+      )
   }
 
   const handleTogglePreview = (
@@ -205,30 +226,53 @@ export const AiCopilotPanel = ({
     setActivePromptTab(null)
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
 
     setIsAttachmentMenuOpen(false)
-    // shortcut: chỉ đọc tệp văn bản thuần; .docx/.pdf cần parser phía server nếu sau này SRS yêu cầu
     if (!/\.(txt|md)$/i.test(file.name)) {
-      e.target.value = ''
-      setAttachedFileName(null)
+      showToast('Chỉ hỗ trợ tệp văn bản TXT và MD', 'error')
       return
     }
-    setAttachedFileName(file.name)
-
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const text = event.target?.result as string
-      if (text) setSourceMaterial(text.slice(0, 50000))
+    if (file.size > 10 * 1024 * 1024) {
+      showToast(
+        'Tệp quá lớn. Tài liệu nguồn chỉ được tối đa 10.000 ký tự.',
+        'error'
+      )
+      return
     }
-    reader.readAsText(file)
+    fileReadRef.current?.abort()
+    const controller = new AbortController()
+    fileReadRef.current = controller
+    setIsReading(true)
+    try {
+      const text = await file.text()
+      if (controller.signal.aborted) return
+      if (text.length > 10000) {
+        showToast('Tài liệu nguồn không được vượt quá 10.000 ký tự', 'error')
+        return
+      }
+      if (!text.trim()) {
+        showToast('Tệp văn bản không có nội dung', 'error')
+        return
+      }
+      setAttachedFile({ name: file.name, content: text })
+      setSourceMaterial(text)
+      onSourceMaterialChange?.(text)
+    } catch {
+      if (!controller.signal.aborted)
+        showToast('Không thể đọc tệp văn bản. Vui lòng thử lại.', 'error')
+    } finally {
+      if (!controller.signal.aborted) setIsReading(false)
+    }
   }
 
   const handleRemoveAttachment = () => {
-    setAttachedFileName(null)
+    setAttachedFile(null)
     setSourceMaterial('')
+    onSourceMaterialChange?.('')
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -850,9 +894,15 @@ export const AiCopilotPanel = ({
           ref={fileInputRef}
           type='file'
           accept='.txt,.md'
+          disabled={isReading}
           onChange={handleFileUpload}
           className='hidden'
         />
+        {isReading && (
+          <p role='status' className='text-xs text-stone-500'>
+            Đang đọc tài liệu...
+          </p>
+        )}
 
         {/* Quick Suggestion Chips (carousel/horizontal scroll) */}
         <div className='flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 text-[11px]'>
@@ -892,6 +942,7 @@ export const AiCopilotPanel = ({
           {/* Textarea */}
           <textarea
             id='ai-prompt-input'
+            maxLength={3000}
             rows={2}
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
@@ -930,7 +981,11 @@ export const AiCopilotPanel = ({
                     className='flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-stone-700 hover:bg-stone-100 transition cursor-pointer'
                   >
                     <FileUp size={14} className='text-brand-rust' />
-                    <span>Tải tệp văn bản (.txt, .md)</span>
+                    <span>
+                      {isReading
+                        ? 'Đang đọc tài liệu...'
+                        : 'Tải tệp văn bản (.txt, .md)'}
+                    </span>
                   </button>
                   <button
                     type='button'

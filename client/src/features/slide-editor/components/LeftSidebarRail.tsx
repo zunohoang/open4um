@@ -276,7 +276,7 @@ export const LeftSidebarRail = ({
                 <button
                   type='button'
                   onClick={() => onAddTextComponent('title')}
-                  className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3.5 text-left font-serif text-lg font-bold text-stone-900 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
+                  className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3.5 text-left font-sans text-base font-bold text-stone-900 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
                   <div className='flex items-center gap-2.5'>
                     <Heading1 size={20} className='text-brand-rust' />

@@ -2,8 +2,11 @@ import { FormEvent, useEffect, useState } from 'react'
 import { authApi } from '@/features/auth/api/auth.api'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { BrandLogo, PasswordInput, useToast } from '@/components/ui'
+import { isAxiosError } from 'axios'
 
 const getErrorMessage = (error: unknown) => {
+  if (isAxiosError(error) && !error.response)
+    return 'Không thể kết nối mạng. Vui lòng kiểm tra kết nối và thử lại.'
   if (typeof error === 'object' && error && 'response' in error) {
     return (
       (error as { response?: { data?: { message?: string } } }).response?.data
@@ -20,11 +23,15 @@ const isEmailVerificationEnabled =
 
 export const AuthPage = () => {
   const setSession = useAuthStore((state) => state.setSession)
+  const sessionNotice = useAuthStore((state) => state.sessionNotice)
   const { showToast } = useToast()
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(sessionNotice || '')
+  useEffect(() => {
+    if (sessionNotice) setError(sessionNotice)
+  }, [sessionNotice])
 
   // Form states
   const [form, setForm] = useState({

@@ -8,21 +8,16 @@ import {
   getSlideComponents
 } from '@/features/slide-editor/utils/slide'
 import type { Slide, SlideComponent } from '@/lib/types'
+import { SlideText } from '@/features/slide-editor/components/SlideText'
 
 interface SlideViewProps {
   slide?: Slide
   lectureTheme?: string
-  slideNumber?: string
   style?: CSSProperties
 }
 
 // Bộ dựng slide chỉ đọc (không có UI chỉnh sửa), dùng chung cho trình chiếu và xuất file
-export const SlideView = ({
-  slide,
-  lectureTheme,
-  slideNumber,
-  style
-}: SlideViewProps) => {
+export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
   const theme = getThemeById(slide?.theme || lectureTheme)
   const components =
     Array.isArray(slide?.components) && slide.components.length > 0
@@ -122,7 +117,7 @@ export const SlideView = ({
 
   return (
     <div
-      className='relative flex flex-col justify-between p-[6%] sm:p-[7%] shadow-2xl transition-all duration-150'
+      className='relative overflow-hidden shadow-2xl'
       style={{
         aspectRatio: '16 / 9',
         ...style,
@@ -130,14 +125,9 @@ export const SlideView = ({
         color: theme.textPrimary
       }}
     >
-      {/* Số thứ tự slide kín đáo, thanh lịch (không có khi xuất file) */}
-      <span className='self-end font-mono text-xs opacity-40 select-none'>
-        {slideNumber}
-      </span>
-
       {components.length > 0 ? (
         <div
-          className='relative w-full flex-1'
+          className='absolute inset-0'
           style={{ containerType: 'inline-size' }}
         >
           {components.map((comp) => (
@@ -161,21 +151,18 @@ export const SlideView = ({
                     ? `${comp.height}%`
                     : undefined,
                 maxWidth: '100%',
-                fontSize: `clamp(10px, ${((comp.fontSize ?? 20) / 9.6).toFixed(3)}cqw, 80px)`,
+                transform: comp.rotation
+                  ? `rotate(${comp.rotation}deg)`
+                  : undefined,
+                fontSize: `clamp(8px, ${((comp.fontSize ?? 20) / 9.6).toFixed(3)}cqw, ${(comp.fontSize ?? 20) * 1.6}px)`,
                 fontWeight: comp.fontWeight ?? 'normal',
                 fontStyle: comp.fontStyle ?? 'normal',
                 textDecoration: comp.textDecoration ?? 'none',
                 textAlign: comp.textAlign ?? 'left',
-                color:
-                  comp.color &&
-                  !['#173c39', '#1c1917', '#000000', '#064e3b'].includes(
-                    comp.color.toLowerCase()
-                  )
-                    ? comp.color
-                    : theme.isDark
-                      ? theme.textPrimary
-                      : comp.color || theme.textPrimary,
+                color: comp.color || theme.textPrimary,
                 lineHeight: 1.3,
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
                 fontFamily:
                   FONT_MAP[comp.fontFamily || 'sans'] ||
                   comp.fontFamily ||
@@ -197,25 +184,8 @@ export const SlideView = ({
                       : 'h-auto w-full object-contain'
                   }
                 />
-              ) : comp.type === 'bullets' ? (
-                <ul className='space-y-2.5 list-disc pl-6'>
-                  {comp.content
-                    .split('\n')
-                    .filter((s) => s.trim())
-                    .map((bullet, idx) => (
-                      <li key={idx} className='break-words'>
-                        {bullet}
-                      </li>
-                    ))}
-                </ul>
-              ) : comp.type === 'quote' ? (
-                <div className='italic border-y border-stone-300/40 py-4 px-3 text-xl break-words'>
-                  “ {comp.content} ”
-                </div>
               ) : (
-                <div className='break-words whitespace-pre-wrap'>
-                  {comp.content}
-                </div>
+                <SlideText component={comp} />
               )}
             </div>
           ))}

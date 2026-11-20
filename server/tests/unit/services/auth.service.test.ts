@@ -62,6 +62,7 @@ jest.mock('@/services/email.service', () => ({
 describe('auth.service unit tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockRedisGet.mockReset().mockResolvedValue(null)
   })
 
   describe('sendRegisterOtp', () => {
@@ -348,7 +349,13 @@ describe('auth.service unit tests', () => {
     })
 
     it('đổi thành công -> băm mật khẩu mới, lưu và trả "Đổi mật khẩu thành công"', async () => {
-      const user = { passwordHash: 'old_hash', save: jest.fn() }
+      const user = {
+        _id: 'user-1',
+        role: 'user',
+        tokenVersion: 3,
+        passwordHash: 'old_hash',
+        save: jest.fn()
+      }
       mockUserFindById.mockResolvedValue(user)
       ;(bcrypt.compare as jest.Mock).mockResolvedValue(true)
       ;(bcrypt.hash as jest.Mock).mockResolvedValue('new_hash')
@@ -358,6 +365,25 @@ describe('auth.service unit tests', () => {
       expect(user.passwordHash).toBe('new_hash')
       expect(user.save).toHaveBeenCalled()
       expect(result.message).toBe('Đổi mật khẩu thành công')
+      expect(user.tokenVersion).toBe(4)
+      const accessPayload = jwt.verify(
+        result.accessToken,
+        process.env.JWT_SECRET!
+      ) as jwt.JwtPayload
+      expect(accessPayload).toMatchObject({
+        id: 'user-1',
+        role: 'user',
+        type: 'access',
+        tokenVersion: 4,
+        sessionId: expect.any(String)
+      })
+      expect(
+        jwt.verify(result.refreshToken, process.env.JWT_SECRET!)
+      ).toMatchObject({
+        type: 'refresh',
+        tokenVersion: 4,
+        jti: accessPayload.sessionId
+      })
     })
   })
 
@@ -491,7 +517,7 @@ describe('auth.service unit tests', () => {
 
       await expect(refresh(token)).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Tài khoản không tồn tại'
+        message: 'Phiên làm việc đã bị thu hồi. Vui lòng đăng nhập lại.'
       })
     })
 
@@ -696,11 +722,11 @@ describe('auth.service unit tests', () => {
 
       await expect(updateProfile('u1', { name: '   ' })).rejects.toMatchObject({
         statusCode: 400,
-        message: 'Họ tên không được để trống'
+        message: 'Họ tên phải có ít nhất 2 ký tự'
       })
     })
 
-    it('ném lỗi 400 khi ảnh đại diện sai định dạng hoặc vượt quá dung lượng (Luồng 5a)', async () => {
+    it('ném lỗi 422 khi ảnh đại diện có định dạng không được hỗ trợ (Luồng 5a)', async () => {
       mockUserFindById.mockResolvedValue({
         _id: 'u1',
         name: 'Old Name',
@@ -715,8 +741,8 @@ describe('auth.service unit tests', () => {
           avatar: 'data:application/pdf;base64,JVBERi0xLjQK...'
         })
       ).rejects.toMatchObject({
-        statusCode: 400,
-        message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+        statusCode: 422,
+        message: 'Định dạng ảnh không hợp lệ (chỉ PNG, JPG, WEBP, GIF)'
       })
     })
 

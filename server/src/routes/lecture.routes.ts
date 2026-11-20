@@ -7,6 +7,7 @@ import {
   createLectureSchema,
   createBlankLectureSchema,
   updateLectureSchema,
+  autosaveLectureSchema,
   aiChatSchema,
   uploadImageSchema
 } from '@/validators/lecture.validator'
@@ -25,6 +26,7 @@ lectureRouter.post(
   lectureController.uploadImage
 )
 lectureRouter.get('/trash', lectureController.listTrash)
+lectureRouter.get('/counts', lectureController.getLectureCounts)
 lectureRouter.get('/', lectureController.listLectures)
 lectureRouter.post(
   '/',
@@ -44,7 +46,7 @@ lectureRouter.patch(
 )
 lectureRouter.patch(
   '/:id/autosave',
-  validate(updateLectureSchema),
+  validate(autosaveLectureSchema),
   lectureController.autosaveLecture
 )
 lectureRouter.post(

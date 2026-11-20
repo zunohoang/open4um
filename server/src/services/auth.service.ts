@@ -12,6 +12,7 @@ import type {
 } from '@/types/auth.types'
 import { getCreditConfig } from '@/services/admin.service'
 import * as emailService from '@/services/email.service'
+import { decodeImageDataUrl } from '@/utils/imageData'
 
 const ACCESS_TOKEN_EXPIRES_IN = '15m'
 const REFRESH_TOKEN_EXPIRES_IN = '7d'
@@ -40,29 +41,49 @@ const generateOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString()
 }
 
-const signAccessToken = (id: string, role: Role) => {
-  const payload: AccessTokenPayload = { id, role, type: 'access' }
+const signAccessToken = (
+  id: string,
+  role: Role,
+  sessionId: string,
+  tokenVersion: number
+) => {
+  const payload: AccessTokenPayload = {
+    id,
+    role,
+    type: 'access',
+    sessionId,
+    tokenVersion
+  }
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRES_IN
   })
 }
 
-const signRefreshToken = (id: string, role: Role) => {
+const signRefreshToken = (
+  id: string,
+  role: Role,
+  sessionId: string,
+  tokenVersion: number
+) => {
   const payload: RefreshTokenPayload = {
     id,
     role,
     type: 'refresh',
-    jti: crypto.randomUUID()
+    jti: sessionId,
+    tokenVersion
   }
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: REFRESH_TOKEN_EXPIRES_IN
   })
 }
 
-const issueTokens = (id: string, role: Role) => ({
-  accessToken: signAccessToken(id, role),
-  refreshToken: signRefreshToken(id, role)
-})
+const issueTokens = (id: string, role: Role, tokenVersion = 0) => {
+  const sessionId = crypto.randomUUID()
+  return {
+    accessToken: signAccessToken(id, role, sessionId, tokenVersion),
+    refreshToken: signRefreshToken(id, role, sessionId, tokenVersion)
+  }
+}
 
 const toPublicUser = (user: UserDocument) => ({
   id: user._id.toString(),
@@ -128,7 +149,11 @@ export const register = async (
 
   return {
     user: toPublicUser(user),
-    ...issueTokens(user._id.toString(), user.role as Role)
+    ...issueTokens(
+      user._id.toString(),
+      user.role as Role,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
@@ -153,7 +178,11 @@ export const login = async (email: string, password: string) => {
 
   return {
     user: toPublicUser(user),
-    ...issueTokens(user._id.toString(), user.role as Role)
+    ...issueTokens(
+      user._id.toString(),
+      user.role as Role,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
@@ -177,7 +206,11 @@ export const refresh = async (refreshToken: string) => {
   if (blacklisted) throw new AppError('Refresh token đã bị thu hồi', 401)
 
   const user = await UserModel.findById(payload.id)
-  if (!user) throw new AppError('Tài khoản không tồn tại', 401)
+  if (!user || (payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0))
+    throw new AppError(
+      'Phiên làm việc đã bị thu hồi. Vui lòng đăng nhập lại.',
+      401
+    )
   if (user.status === 'locked') {
     throw new AppError(
       'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên nếu có khiếu nại.',
@@ -186,21 +219,28 @@ export const refresh = async (refreshToken: string) => {
   }
 
   return {
-    accessToken: signAccessToken(user._id.toString(), user.role as Role)
+    accessToken: signAccessToken(
+      user._id.toString(),
+      user.role as Role,
+      payload.jti,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
-export const logout = async (refreshToken: string) => {
+export const logout = async (refreshToken: string, accessToken?: string) => {
+  if (accessToken) {
+    const hash = crypto.createHash('sha256').update(accessToken).digest('hex')
+    await redis.set(`blacklist:access:${hash}`, '1', 'EX', 15 * 60)
+  }
+  let payload: RefreshTokenPayload
   try {
-    const payload = jwt.verify(
-      refreshToken,
-      env.JWT_SECRET
-    ) as RefreshTokenPayload
-    if (payload.type === 'refresh') {
-      await redis.set(blacklistKey(payload.jti), '1', 'EX', 7 * 24 * 60 * 60)
-    }
+    payload = jwt.verify(refreshToken, env.JWT_SECRET) as RefreshTokenPayload
   } catch {
-    // token không hợp lệ thì coi như đã đăng xuất
+    return { message: 'Đăng xuất thành công' }
+  }
+  if (payload.type === 'refresh') {
+    await redis.set(blacklistKey(payload.jti), '1', 'EX', 7 * 24 * 60 * 60)
   }
   return { message: 'Đăng xuất thành công' }
 }
@@ -229,32 +269,15 @@ export const updateProfile = async (
   // Luồng 5b: Trường Họ tên bị bỏ trống -> Thông báo "Họ tên không được để trống"
   if (name !== undefined) {
     const trimmed = name.trim()
-    if (!trimmed) {
-      throw new AppError('Họ tên không được để trống', 400)
+    if (trimmed.length < 2) {
+      throw new AppError('Họ tên phải có ít nhất 2 ký tự', 400)
     }
   }
 
   // Luồng 5a: Ảnh vượt quá dung lượng cho phép hoặc sai định dạng -> Thông báo lỗi tệp tin
   if (avatar) {
     if (avatar.startsWith('data:')) {
-      const match = avatar.match(
-        /^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i
-      )
-      if (!match) {
-        throw new AppError(
-          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
-          400
-        )
-      }
-      const base64Data = match[2]
-      const approxSizeBytes = (base64Data.length * 3) / 4
-      // Kích thước tối đa 2MB = 2 * 1024 * 1024 bytes
-      if (approxSizeBytes > 2 * 1024 * 1024) {
-        throw new AppError(
-          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
-          400
-        )
-      }
+      decodeImageDataUrl(avatar, 2 * 1024 * 1024)
     } else if (
       !avatar.startsWith('http://') &&
       !avatar.startsWith('https://') &&
@@ -337,8 +360,12 @@ export const changePassword = async (
   if (!valid) throw new AppError('Mật khẩu hiện tại không đúng', 400)
 
   user.passwordHash = await bcrypt.hash(newPassword, 10)
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   await user.save()
-  return { message: 'Đổi mật khẩu thành công' }
+  return {
+    message: 'Đổi mật khẩu thành công',
+    ...issueTokens(user._id.toString(), user.role as Role, user.tokenVersion)
+  }
 }
 
 export const forgotPassword = async (email: string) => {
@@ -411,6 +438,7 @@ export const resetPassword = async (
   }
 
   user.passwordHash = await bcrypt.hash(password, 10)
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   await user.save()
 
   await redis.del(forgotPasswordOtpKey(normalizedEmail))
