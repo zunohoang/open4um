@@ -77,8 +77,10 @@ jest.mock('@/services/admin.service', () => ({
 }))
 
 jest.mock('@/services/credit.service', () => ({
-  debitCredits: (...args: any[]) => mockDebitCredits(...args),
-  refundCredits: (...args: any[]) => mockRefundCredits(...args)
+  debitCredits: (...args: Parameters<typeof mockDebitCredits>) =>
+    mockDebitCredits(...args),
+  refundCredits: (...args: Parameters<typeof mockRefundCredits>) =>
+    mockRefundCredits(...args)
 }))
 
 import {

@@ -30,7 +30,10 @@ const mockedBucketExists = jest.mocked(minioClient.bucketExists)
 describe('health.service', () => {
   beforeEach(() => {
     setShuttingDown(false)
-    mongoose.connection.readyState = 1
+    Object.defineProperty(mongoose.connection, 'readyState', {
+      value: 1,
+      configurable: true
+    })
     mockedRedisPing.mockResolvedValue('PONG')
     mockedBucketExists.mockResolvedValue(true)
   })
