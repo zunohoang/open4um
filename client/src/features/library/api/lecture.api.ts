@@ -2,6 +2,16 @@ import { apiClient } from '@/lib/api'
 import type { Folder, Lecture, LectureSummary, Paginated } from '@/lib/types'
 
 export const lectureApi = {
+  counts: async (signal?: AbortSignal) =>
+    (
+      await apiClient.get<{
+        data: {
+          total: number
+          unorganized: number
+          folders: Record<string, number>
+        }
+      }>('/lectures/counts', { signal })
+    ).data.data,
   list: async (params: Record<string, string | undefined>) =>
     (await apiClient.get<{ data: Paginated<Lecture> }>('/lectures', { params }))
       .data.data,
