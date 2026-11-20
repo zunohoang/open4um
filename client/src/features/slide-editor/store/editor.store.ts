@@ -41,6 +41,10 @@ export interface AiChatMessage {
 }
 
 interface EditorStoreState {
+  beforeLeave: ((keepDraftOnly?: boolean) => Promise<boolean>) | null
+  setBeforeLeave: (
+    handler: ((keepDraftOnly?: boolean) => Promise<boolean>) | null
+  ) => void
   // Navigation & Selection
   activeSlideIndex: number
   selectedCompId: string | null
@@ -135,6 +139,8 @@ export const createWelcomeMessages = (): AiChatMessage[] => [
 ]
 
 export const useEditorStore = create<EditorStoreState>((set, get) => ({
+  beforeLeave: null,
+  setBeforeLeave: (beforeLeave) => set({ beforeLeave }),
   activeSlideIndex: 0,
   selectedCompId: null,
   leftRailTab: 'text',
@@ -215,7 +221,11 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
     // Kiểm tra xem selectedCompId có còn tồn tại trong slide sau khi hoàn tác không
-    const targetSlide = previous[activeSlideIndex]
+    const nextIndex = Math.max(
+      0,
+      Math.min(activeSlideIndex, previous.length - 1)
+    )
+    const targetSlide = previous[nextIndex]
     const compStillExists =
       targetSlide &&
       selectedCompId &&
@@ -223,6 +233,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
 
     set({
       undoStack: nextUndoStack,
+      activeSlideIndex: nextIndex,
       redoStack: [...redoStack, currentSnapshot],
       selectedCompId: compStillExists ? selectedCompId : null
     })
@@ -238,7 +249,8 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const nextRedoStack = redoStack.slice(0, redoStack.length - 1)
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
-    const targetSlide = next[activeSlideIndex]
+    const nextIndex = Math.max(0, Math.min(activeSlideIndex, next.length - 1))
+    const targetSlide = next[nextIndex]
     const compStillExists =
       targetSlide &&
       selectedCompId &&
@@ -247,6 +259,7 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     set({
       undoStack: [...undoStack, currentSnapshot],
       redoStack: nextRedoStack,
+      activeSlideIndex: nextIndex,
       selectedCompId: compStillExists ? selectedCompId : null
     })
 

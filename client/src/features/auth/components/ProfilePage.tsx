@@ -8,6 +8,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { authApi } from '@/features/auth/api/auth.api'
+import { isAxiosError } from 'axios'
+import { assertDecodableImage } from '@/lib/imageFile'
 
 // Định dạng ảnh hợp lệ và kích thước tối đa 2MB theo luồng 5a
 const ALLOWED_IMAGE_TYPES = [
@@ -81,7 +83,7 @@ export const ProfilePage = () => {
   }, [cooldown])
 
   // STT 3 & 5a: Xử lý chọn tệp ảnh đại diện mới và kiểm tra dung lượng / định dạng
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     setSelectedFileError(null)
     setErrorMessage(null)
     const file = e.target.files?.[0]
@@ -108,6 +110,15 @@ export const ProfilePage = () => {
     }
 
     // Đọc file thành data URL để hiển thị preview ngay lập tức
+    try {
+      await assertDecodableImage(file)
+    } catch {
+      setSelectedFileError(
+        'Nội dung tệp không phải ảnh hợp lệ hoặc ảnh đã bị hỏng'
+      )
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
     const reader = new FileReader()
     reader.onload = () => {
       setAvatarPreview(reader.result as string)
@@ -145,6 +156,10 @@ export const ProfilePage = () => {
       setErrorMessage('Họ tên không được để trống')
       return
     }
+    if (trimmedName.length < 2) {
+      setErrorMessage('Họ tên phải có ít nhất 2 ký tự')
+      return
+    }
 
     // STT 5a: Nếu đang có lỗi tệp tin chưa giải quyết
     if (selectedFileError) {
@@ -180,9 +195,11 @@ export const ProfilePage = () => {
       setTimeout(() => setSuccessMessage(null), 4000)
     } catch (error: unknown) {
       const message =
-        (error as { response?: { data?: { message?: string } } })?.response
-          ?.data?.message ||
-        'Không thể cập nhật hồ sơ, vui lòng kiểm tra lại thông tin.'
+        isAxiosError(error) && !error.response
+          ? 'Không thể kết nối mạng. Vui lòng kiểm tra kết nối và thử lại.'
+          : (error as { response?: { data?: { message?: string } } })?.response
+              ?.data?.message ||
+            'Không thể cập nhật hồ sơ, vui lòng kiểm tra lại thông tin.'
       setErrorMessage(message)
 
       // Bắt bộ đếm nếu lỗi 429

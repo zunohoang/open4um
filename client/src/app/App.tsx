@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthPage } from '@/features/auth/components/AuthPage'
 import { authApi } from '@/features/auth/api/auth.api'
 import { LibraryPage } from '@/features/library/components/LibraryPage'
@@ -40,22 +40,37 @@ export const App = () => (
 )
 
 const AppRoutes = () => {
-  const { user, accessToken, refreshToken, setSession, clearSession } =
-    useAuthStore()
+  const { user, accessToken } = useAuthStore()
+  const { pathname } = useLocation()
 
   useEffect(() => {
-    if (!accessToken || user) return
+    if (!accessToken) return
+    let active = true
     void authApi
       .profile()
-      .then((nextUser) =>
-        setSession({
-          user: nextUser,
-          accessToken: useAuthStore.getState().accessToken ?? accessToken,
-          refreshToken: refreshToken ?? ''
-        })
-      )
-      .catch(clearSession)
-  }, [accessToken, clearSession, refreshToken, setSession, user])
+      .then((nextUser) => {
+        if (!active || !useAuthStore.getState().accessToken) return
+        const {
+          user: currentUser,
+          setSession,
+          updateUser,
+          refreshToken
+        } = useAuthStore.getState()
+        if (currentUser) updateUser(nextUser)
+        else
+          setSession({
+            user: nextUser,
+            accessToken: useAuthStore.getState().accessToken ?? accessToken,
+            refreshToken: refreshToken ?? ''
+          })
+      })
+      .catch(() => {
+        /* Interceptor xử lý phiên hết hạn; lỗi mạng giữ phiên hiện tại. */
+      })
+    return () => {
+      active = false
+    }
+  }, [accessToken, pathname])
 
   if (!accessToken || !user) return <AuthPage />
 

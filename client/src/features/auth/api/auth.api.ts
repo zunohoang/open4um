@@ -1,5 +1,6 @@
 import { apiClient } from '@/lib/api'
 import type { User } from '@/lib/types'
+import { useAuthStore } from '../store/auth.store'
 
 export interface AuthSession {
   user: User
@@ -40,9 +41,21 @@ export const authApi = {
     oldPassword: string
     newPassword: string
     confirmPassword: string
-  }) =>
-    (await apiClient.patch<{ message: string }>('/auth/change-password', data))
-      .data,
+  }) => {
+    const result = (
+      await apiClient.patch<{
+        data: { message: string; accessToken: string; refreshToken: string }
+      }>('/auth/change-password', data)
+    ).data.data
+    const { user, setSession } = useAuthStore.getState()
+    if (user)
+      setSession({
+        user,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken
+      })
+    return result
+  },
   refresh: async (refreshToken: string) =>
     (
       await apiClient.post<{ data: { accessToken: string } }>('/auth/refresh', {

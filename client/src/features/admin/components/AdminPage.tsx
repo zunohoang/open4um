@@ -1246,7 +1246,7 @@ export const AdminPage = () => {
         title='Xác nhận thêm người dùng'
         message={`Bạn có chắc chắn muốn thêm người dùng "${pendingCreate?.name}" (${pendingCreate?.email}) với ${pendingCreate?.creditBalance} credit ban đầu?`}
         confirmLabel='Thêm người dùng'
-        onConfirm={() => void confirmCreateUser()}
+        onConfirm={confirmCreateUser}
         onCancel={() => {
           setPendingCreate(null)
           setIsCreateUserOpen(false)
@@ -1257,7 +1257,7 @@ export const AdminPage = () => {
         title='Xác nhận cập nhật người dùng'
         message={`Bạn có chắc chắn muốn lưu thay đổi thông tin của người dùng "${editingUser?.name}"? ${updateSummary}`}
         confirmLabel='Lưu thay đổi'
-        onConfirm={() => void confirmSaveUser()}
+        onConfirm={confirmSaveUser}
         onCancel={() => {
           setPendingUpdate(null)
           setEditingUser(null)

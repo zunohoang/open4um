@@ -143,6 +143,7 @@ export interface Lecture {
   deletedAt: string | null
   createdAt: string
   updatedAt: string
+  revision?: number
 }
 
 export type LectureSummary = Pick<
