@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import { SlideView } from '@/features/presentation/components/SlideView'
@@ -34,6 +34,19 @@ export const ExportModal = ({
   const [captureTheme, setCaptureTheme] = useState<string | undefined>()
   const captureRef = useRef<HTMLDivElement>(null)
   const fontEmbedCssRef = useRef(new Map<string, Promise<string>>())
+  const exportInFlightRef = useRef(false)
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      if (!exportInFlightRef.current) onClose()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [open, onClose])
 
   if (!open || !lecture) return null
 
@@ -59,6 +72,20 @@ export const ExportModal = ({
     await waitForPaint()
     const node = captureRef.current?.firstElementChild as HTMLElement | null
     if (!node) throw new Error('Không render được slide để xuất')
+    const textElements = [node, ...node.querySelectorAll<HTMLElement>('*')]
+    await Promise.all(
+      textElements
+        .filter((element) => element.textContent?.trim())
+        .map(async (element) => {
+          const style = getComputedStyle(element)
+          const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+          await document.fonts.load(font, element.textContent!.normalize('NFC'))
+        })
+    )
+    await Promise.all(
+      [...node.querySelectorAll('img')].map((img) => img.decode())
+    )
+    await document.fonts.ready
     // Different slides can use different fonts. Reuse CSS only for matching font sets.
     const fontKey = [
       ...new Set(
@@ -88,6 +115,8 @@ export const ExportModal = ({
     task: (fullLecture: Lecture) => Promise<void>,
     errorMsg: string
   ) => {
+    if (exportInFlightRef.current) return
+    exportInFlightRef.current = true
     try {
       setIsExporting(true)
       setProgressMessage('Đang chuẩn bị file...')
@@ -100,6 +129,7 @@ export const ExportModal = ({
     } catch {
       onError?.(errorMsg)
     } finally {
+      exportInFlightRef.current = false
       setCaptureSlide(null)
       setIsExporting(false)
       setProgressMessage(null)
@@ -161,7 +191,7 @@ export const ExportModal = ({
     <div
       className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs font-sans'
       onClick={() => {
-        if (!isExporting) onClose()
+        if (!exportInFlightRef.current) onClose()
       }}
     >
       <div
