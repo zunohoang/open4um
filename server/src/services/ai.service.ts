@@ -14,6 +14,8 @@ import {
 } from '@/utils/aiChatContext'
 
 const DEFAULT_AI_MODEL = env.GEMINI_MODEL || 'gemini-2.0-flash'
+/** Giới hạn mỗi lần gọi AI (ms). 2 lượt model chính + 1 lượt dự phòng vẫn dưới 300 s của nginx. */
+const AI_CALL_TIMEOUT_MS = 60_000
 
 const getAiClient = (): GoogleGenAI => {
   const apiKey = env.GEMINI_API_KEY
@@ -27,20 +29,135 @@ const getAiClient = (): GoogleGenAI => {
 
   const options: {
     apiKey: string
-    httpOptions?: {
-      baseUrl: string
+    httpOptions: {
+      baseUrl?: string
+      timeout: number
     }
   } = {
-    apiKey
+    apiKey,
+    // Một lần gọi treo quá lâu thì bỏ để còn thử lại hoặc chuyển model dự phòng.
+    httpOptions: { timeout: AI_CALL_TIMEOUT_MS }
   }
 
   if (env.GEMINI_BASE_URL) {
-    options.httpOptions = {
-      baseUrl: env.GEMINI_BASE_URL
-    }
+    options.httpOptions.baseUrl = env.GEMINI_BASE_URL
   }
 
   return new GoogleGenAI(options)
+}
+
+type GenerateContentParams = Parameters<
+  GoogleGenAI['models']['generateContent']
+>[0]
+
+/** Mã HTTP tạm thời từ nhà cung cấp AI, đáng thử lại. */
+const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504])
+/** Số lần gọi tối đa cho mỗi model (lần đầu + thử lại). */
+export const AI_ATTEMPTS_PER_MODEL = 2
+const AI_RETRY_DELAY_MS = 1500
+
+export const AI_BUSY_MESSAGE =
+  'Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút.'
+
+class EmptyAiResponseError extends Error {
+  constructor() {
+    super('Không nhận được nội dung từ AI')
+    this.name = 'EmptyAiResponseError'
+  }
+}
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+const describeAiResponse = (response: any) => {
+  const candidate = response?.candidates?.[0]
+  return {
+    finishReason: candidate?.finishReason,
+    blockReason: response?.promptFeedback?.blockReason,
+    candidates: Array.isArray(response?.candidates)
+      ? response.candidates.length
+      : 0,
+    usage: response?.usageMetadata
+  }
+}
+
+const isRetryableAiError = (err: unknown): boolean => {
+  if (err instanceof EmptyAiResponseError) return true
+  const status = (err as { status?: unknown })?.status
+  if (typeof status === 'number') return RETRYABLE_AI_STATUS.has(status)
+  const code = (err as { code?: unknown })?.code
+  if (
+    typeof code === 'string' &&
+    [
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'UND_ERR_SOCKET',
+      'UND_ERR_CONNECT_TIMEOUT'
+    ].includes(code)
+  ) {
+    return true
+  }
+  // Hết thời gian chờ (AbortError) hoặc mất kết nối giữa chừng ("fetch failed").
+  const name = (err as { name?: unknown })?.name
+  const message = String((err as { message?: unknown })?.message ?? '')
+  return (
+    name === 'AbortError' ||
+    name === 'TimeoutError' ||
+    /fetch failed|aborted|timed? ?out/i.test(message)
+  )
+}
+
+/**
+ * Gọi AI và trả về text khác rỗng.
+ * - Thử lại khi AI trả rỗng hoặc lỗi tạm thời (408/429/5xx, mất kết nối).
+ * - Hết lượt ở model chính thì chuyển sang GEMINI_FALLBACK_MODEL (nếu có).
+ * - Lỗi không tạm thời (vd 400, 401) được ném ra ngay.
+ * - Hết mọi lượt: ném AppError 503 với thông báo quá tải.
+ */
+export const generateTextWithRetry = async (
+  ai: GoogleGenAI,
+  params: GenerateContentParams,
+  label: string,
+  delayMs: number = AI_RETRY_DELAY_MS
+): Promise<string> => {
+  const models = [params.model, env.GEMINI_FALLBACK_MODEL].filter(
+    (m, i, all): m is string => Boolean(m) && all.indexOf(m) === i
+  )
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= AI_ATTEMPTS_PER_MODEL; attempt++) {
+      try {
+        const response = await ai.models.generateContent({ ...params, model })
+        const text = response.text
+        if (text && text.trim()) return text
+        logger.warn(
+          { model, attempt, ...describeAiResponse(response) },
+          `${label}: AI trả về rỗng`
+        )
+        throw new EmptyAiResponseError()
+      } catch (err) {
+        if (!isRetryableAiError(err)) throw err
+        if (!(err instanceof EmptyAiResponseError)) {
+          logger.warn(
+            {
+              model,
+              attempt,
+              status: (err as { status?: unknown })?.status,
+              message: String((err as Error)?.message ?? err).slice(0, 300)
+            },
+            `${label}: lỗi tạm thời từ AI`
+          )
+        }
+        const lastAttempt =
+          attempt === AI_ATTEMPTS_PER_MODEL &&
+          model === models[models.length - 1]
+        if (!lastAttempt && delayMs > 0) await sleep(delayMs * attempt)
+      }
+    }
+  }
+
+  logger.error({ models }, `${label} failed: hết lượt thử AI`)
+  throw new AppError(AI_BUSY_MESSAGE, 503)
 }
 
 /**
@@ -174,48 +291,40 @@ export const generateOutlineFromPrompt = async (
 
     const userContent = `Hãy tạo dàn ý bài giảng chi tiết, logic và hấp dẫn cho chủ đề sau:\n"${prompt}"`
 
-    const response = await ai.models.generateContent({
-      model: DEFAULT_AI_MODEL,
-      contents: userContent,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            title: { type: 'STRING' },
-            sections: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  heading: { type: 'STRING' },
-                  bullets: {
-                    type: 'ARRAY',
-                    items: { type: 'STRING' }
-                  }
-                },
-                required: ['heading', 'bullets']
+    const rawText = await generateTextWithRetry(
+      ai,
+      {
+        model: DEFAULT_AI_MODEL,
+        contents: userContent,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              title: { type: 'STRING' },
+              sections: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    heading: { type: 'STRING' },
+                    bullets: {
+                      type: 'ARRAY',
+                      items: { type: 'STRING' }
+                    }
+                  },
+                  required: ['heading', 'bullets']
+                }
               }
-            }
-          },
-          required: ['title', 'sections']
+            },
+            required: ['title', 'sections']
+          }
         }
-      }
-    })
-
-    const rawText = response.text
-    if (!rawText) {
-      logger.error(
-        { err: 'Không nhận được nội dung từ AI' },
-        'ai.generateOutline failed'
-      )
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
+      },
+      'ai.generateOutline'
+    )
 
     const parsed = safeParseAiJson<GeneratedOutline>(rawText)
 
