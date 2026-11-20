@@ -8,6 +8,19 @@ export const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
     return
   }
 
+  if ((err as { type?: string }).type === 'entity.parse.failed') {
+    res
+      .status(400)
+      .json({ success: false, message: 'Nội dung JSON không hợp lệ' })
+    return
+  }
+  if ((err as { name?: string }).name === 'CastError') {
+    res
+      .status(400)
+      .json({ success: false, message: 'Mã định danh không hợp lệ' })
+    return
+  }
+
   if (
     (err as { status?: number; statusCode?: number }).status === 413 ||
     (err as { status?: number; statusCode?: number }).statusCode === 413 ||

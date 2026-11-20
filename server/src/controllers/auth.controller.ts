@@ -25,7 +25,10 @@ export const refresh = asyncHandler(async (req, res) => {
 })
 
 export const logout = asyncHandler(async (req, res) => {
-  const result = await authService.logout(req.body.refreshToken)
+  const result = await authService.logout(
+    req.body.refreshToken,
+    req.headers.authorization?.split('Bearer ')[1]
+  )
   ok(res, result)
 })
 
