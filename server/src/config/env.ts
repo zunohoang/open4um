@@ -90,6 +90,11 @@ const envSchema = z
       emptyStringToUndefined,
       z.string().trim().default('gemini-3.8-flash')
     ),
+    /** Model dự phòng khi model chính trả rỗng hoặc lỗi tạm thời. Bỏ trống để tắt. */
+    GEMINI_FALLBACK_MODEL: z.preprocess(
+      emptyStringToUndefined,
+      z.string().trim().optional()
+    ),
     MINIO_ENDPOINT: z.string(),
     MINIO_USE_SSL: booleanString,
     MINIO_PUBLIC_ENDPOINT: optionalUrl,
