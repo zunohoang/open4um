@@ -12,7 +12,7 @@ import type {
 } from '@/types/auth.types'
 import { getCreditConfig } from '@/services/admin.service'
 import * as emailService from '@/services/email.service'
-import { decodeImageDataUrl } from '@/utils/imageData'
+import { uploadImage } from '@/lib/storage'
 
 const ACCESS_TOKEN_EXPIRES_IN = '15m'
 const REFRESH_TOKEN_EXPIRES_IN = '7d'
@@ -36,6 +36,30 @@ export const profileCooldownKey = (userId: string) =>
   `ratelimit:profile:cooldown:${userId}`
 export const profileCountKey = (userId: string) =>
   `ratelimit:profile:count:${userId}`
+
+// Reserve attempts atomically so parallel submissions share one fixed window.
+async function reserveAttempt(
+  kind: string,
+  email: string,
+  limit: number,
+  seconds: number
+) {
+  const key = `ratelimit:${kind}:${email.trim().toLowerCase()}`
+  const count = await redis.eval(
+    "local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return n",
+    1,
+    key,
+    seconds
+  )
+  if (Number(count) > limit)
+    throw new AppError(
+      'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau ' +
+        Math.ceil(seconds / 60) +
+        ' phút.',
+      429
+    )
+  return key
+}
 
 const generateOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString()
@@ -130,12 +154,17 @@ export const register = async (
   if (existing) throw new AppError('Email đã được sử dụng', 409)
 
   if (env.ENABLE_EMAIL_VERIFICATION) {
+    const attempts = await reserveAttempt(
+      'register-otp',
+      normalizedEmail,
+      5,
+      OTP_TTL_SECONDS
+    )
     const storedOtp = await redis.get(registerOtpKey(normalizedEmail))
     if (!storedOtp || storedOtp !== otp) {
       throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
     }
-    await redis.del(registerOtpKey(normalizedEmail))
-    await redis.del(registerCooldownKey(normalizedEmail))
+    await redis.del(attempts)
   }
 
   const passwordHash = await bcrypt.hash(password, 10)
@@ -146,6 +175,10 @@ export const register = async (
     passwordHash,
     creditBalance: creditConfig.signupBonus
   })
+  if (env.ENABLE_EMAIL_VERIFICATION) {
+    await redis.del(registerOtpKey(normalizedEmail))
+    await redis.del(registerCooldownKey(normalizedEmail))
+  }
 
   return {
     user: toPublicUser(user),
@@ -158,12 +191,14 @@ export const register = async (
 }
 
 export const login = async (email: string, password: string) => {
-  const user = await UserModel.findOne({ email })
+  const attempts = await reserveAttempt('login', email, 7, 15 * 60)
+  const user = await UserModel.findOne({ email: email.trim().toLowerCase() })
   if (!user) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
   const valid = await bcrypt.compare(password, user.passwordHash)
   if (!valid) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
+  await redis.del(attempts)
   if (user.status === 'locked') {
     const lockedAt = user.lockedAt || user.updatedAt || new Date()
     const daysPassed = Math.floor(
@@ -248,7 +283,19 @@ export const logout = async (refreshToken: string, accessToken?: string) => {
 export const getProfile = async (userId: string) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  return toPublicUser(user)
+  const [shortTtl, count, windowTtl] = await Promise.all([
+    redis.ttl(profileCooldownKey(userId)),
+    redis.get(profileCountKey(userId)),
+    redis.ttl(profileCountKey(userId))
+  ])
+  return {
+    ...toPublicUser(user),
+    profileCooldownSeconds: Math.max(
+      0,
+      shortTtl,
+      Number(count) >= PROFILE_UPDATE_MAX_PER_WINDOW ? windowTtl : 0
+    )
+  }
 }
 
 export interface UpdateProfileInput {
@@ -276,9 +323,8 @@ export const updateProfile = async (
 
   // Luồng 5a: Ảnh vượt quá dung lượng cho phép hoặc sai định dạng -> Thông báo lỗi tệp tin
   if (avatar) {
-    if (avatar.startsWith('data:')) {
-      decodeImageDataUrl(avatar, 2 * 1024 * 1024)
-    } else if (
+    if (
+      !avatar.startsWith('data:') &&
       !avatar.startsWith('http://') &&
       !avatar.startsWith('https://') &&
       !avatar.startsWith('/')
@@ -329,7 +375,10 @@ export const updateProfile = async (
     user.name = trimmedName
   }
   if (avatarChanged) {
-    user.avatar = avatar || null
+    user.avatar = avatar?.startsWith('data:')
+      ? '/api/v1/media/' +
+        (await uploadImage(userId, avatar, 2 * 1024 * 1024)).key
+      : avatar || null
   }
   await user.save()
 
@@ -345,7 +394,16 @@ export const updateProfile = async (
     await redis.expire(profileCountKey(userId), PROFILE_UPDATE_WINDOW_SECONDS)
   }
 
-  return toPublicUser(user)
+  return {
+    ...toPublicUser(user),
+    profileCooldownSeconds:
+      newCount >= PROFILE_UPDATE_MAX_PER_WINDOW
+        ? Math.max(
+            PROFILE_UPDATE_COOLDOWN_SECONDS,
+            await redis.ttl(profileCountKey(userId))
+          )
+        : PROFILE_UPDATE_COOLDOWN_SECONDS
+  }
 }
 
 export const changePassword = async (
@@ -432,6 +490,12 @@ export const resetPassword = async (
     )
   }
 
+  const attempts = await reserveAttempt(
+    'reset-otp',
+    normalizedEmail,
+    5,
+    OTP_TTL_SECONDS
+  )
   const storedOtp = await redis.get(forgotPasswordOtpKey(normalizedEmail))
   if (!storedOtp || storedOtp !== otp) {
     throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
@@ -442,6 +506,7 @@ export const resetPassword = async (
   await user.save()
 
   await redis.del(forgotPasswordOtpKey(normalizedEmail))
+  await redis.del(attempts)
 
   return { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' }
 }

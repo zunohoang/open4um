@@ -1,3 +1,4 @@
+import { mediaUrl } from '@/lib/mediaUrl'
 import {
   useState,
   useEffect,
@@ -60,6 +61,7 @@ export const ProfilePage = () => {
         const latest = await authApi.profile()
         if (isMounted) {
           updateUser(latest)
+          setCooldown(latest.profileCooldownSeconds ?? 0)
           setName(latest.name)
           setAvatarPreview(latest.avatar || null)
         }
@@ -113,9 +115,9 @@ export const ProfilePage = () => {
     try {
       await assertDecodableImage(file)
     } catch {
-      setSelectedFileError(
-        'Nội dung tệp không phải ảnh hợp lệ hoặc ảnh đã bị hỏng'
-      )
+      const message = 'Nội dung tệp không phải ảnh hợp lệ hoặc ảnh đã bị hỏng'
+      setSelectedFileError(message)
+      setErrorMessage(message)
       if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
@@ -191,7 +193,7 @@ export const ProfilePage = () => {
       setAvatarPreview(updatedUser.avatar || null)
       setHasNewAvatar(false)
       setSuccessMessage('Cập nhật hồ sơ thành công')
-      setCooldown(60) // Cooldown 60s
+      setCooldown(updatedUser.profileCooldownSeconds ?? 60)
       setTimeout(() => setSuccessMessage(null), 4000)
     } catch (error: unknown) {
       const message =
@@ -203,10 +205,8 @@ export const ProfilePage = () => {
       setErrorMessage(message)
 
       // Bắt bộ đếm nếu lỗi 429
-      const secMatch = message.match(/(\d+)\s*giây/)
-      if (secMatch) {
-        setCooldown(parseInt(secMatch[1], 10))
-      }
+      const wait = message.match(/(\d+)\s*(giây|phút)/)
+      if (wait) setCooldown(Number(wait[1]) * (wait[2] === 'phút' ? 60 : 1))
     } finally {
       setIsSaving(false)
     }
@@ -249,7 +249,7 @@ export const ProfilePage = () => {
               <div className='relative h-16 w-16 shrink-0 overflow-hidden border border-stone-300 bg-orange-700 text-2xl font-bold text-white shadow-xs flex items-center justify-center'>
                 {user?.avatar ? (
                   <img
-                    src={user.avatar}
+                    src={mediaUrl(user.avatar)}
                     alt={user.name}
                     className='h-full w-full object-cover'
                   />
@@ -354,7 +354,7 @@ export const ProfilePage = () => {
                       <div className='relative h-20 w-20 shrink-0 overflow-hidden border-2 border-dashed border-stone-300 bg-stone-100 flex items-center justify-center text-2xl font-bold text-stone-600 shadow-xs'>
                         {avatarPreview ? (
                           <img
-                            src={avatarPreview}
+                            src={mediaUrl(avatarPreview)}
                             alt='Xem trước ảnh đại diện'
                             className='h-full w-full object-cover'
                           />
