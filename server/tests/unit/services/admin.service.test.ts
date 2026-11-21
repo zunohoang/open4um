@@ -425,6 +425,12 @@ describe('admin.service unit tests', () => {
       ;(AiUsageLogModel.countDocuments as jest.Mock).mockResolvedValue(1)
 
       const result = await listAiUsage(1, 10, '2026-01-01', '2026-01-02')
+      expect(AiUsageLogModel.find).toHaveBeenCalledWith({
+        createdAt: {
+          $gte: new Date('2025-12-31T17:00:00.000Z'),
+          $lt: new Date('2026-01-02T17:00:00.000Z')
+        }
+      })
       expect(result.items).toEqual(mockLogs)
       expect(result.total).toBe(1)
     })

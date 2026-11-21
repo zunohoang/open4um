@@ -5,6 +5,7 @@ import type { AiUsageLog } from '@/lib/types'
 
 const numberFormatter = new Intl.NumberFormat('vi-VN')
 const dateTimeFormatter = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: 'Asia/Ho_Chi_Minh',
   dateStyle: 'short',
   timeStyle: 'medium'
 })
