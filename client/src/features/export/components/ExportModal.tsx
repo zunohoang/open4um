@@ -86,6 +86,7 @@ export const ExportModal = ({
       [...node.querySelectorAll('img')].map((img) => img.decode())
     )
     await document.fonts.ready
+    await waitForPaint()
     // Different slides can use different fonts. Reuse CSS only for matching font sets.
     const fontKey = [
       ...new Set(
@@ -104,10 +105,13 @@ export const ExportModal = ({
       fontEmbedCSS = getFontEmbedCSS(node)
       fontEmbedCssRef.current.set(fontKey, fontEmbedCSS)
     }
+    const embedded = await fontEmbedCSS
+    if (node.textContent?.trim() && !embedded.includes('data:'))
+      throw new Error('Không thể nhúng phông chữ của slide')
     return toPng(node, {
       pixelRatio,
       cacheBust: true,
-      fontEmbedCSS: await fontEmbedCSS
+      fontEmbedCSS: embedded
     })
   }
 
@@ -254,7 +258,9 @@ export const ExportModal = ({
                 Xuất slide hiện tại
               </span>
               <span className='mt-1 block text-xs text-stone-500'>
-                Slide {currentIndex + 1} thành 1 file ảnh PNG.
+                {slideCount
+                  ? `Slide ${currentIndex + 1} thành 1 file ảnh PNG.`
+                  : 'Bài giảng chưa có slide.'}
               </span>
             </span>
           </button>

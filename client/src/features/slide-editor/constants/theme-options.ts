@@ -15,85 +15,94 @@ export const FONT_OPTIONS: FontOption[] = [
   {
     key: 'inter',
     name: 'Inter (Hiện đại)',
-    fontFamily: '"Inter", sans-serif',
+    fontFamily: '"Inter Variable", "Be Vietnam Pro", sans-serif',
     category: 'sans'
   },
   {
     key: 'roboto',
     name: 'Roboto (Tiêu chuẩn)',
-    fontFamily: '"Roboto", sans-serif',
+    fontFamily: '"Roboto Variable", "Be Vietnam Pro", sans-serif',
     category: 'sans'
   },
   {
     key: 'jakarta',
     name: 'Plus Jakarta Sans',
-    fontFamily: '"Plus Jakarta Sans", sans-serif',
+    fontFamily: '"Plus Jakarta Sans Variable", "Be Vietnam Pro", sans-serif',
     category: 'sans'
   },
   {
     key: 'montserrat',
     name: 'Montserrat (Mạnh mẽ)',
-    fontFamily: '"Montserrat", sans-serif',
+    fontFamily: '"Montserrat Variable", "Be Vietnam Pro", sans-serif',
     category: 'sans'
   },
   {
     key: 'display',
     name: 'Lora Serif (Báo chí)',
-    fontFamily: '"Lora", Georgia, serif',
+    fontFamily: '"Lora Variable", "Be Vietnam Pro", Georgia, serif',
     category: 'serif'
   },
   {
     key: 'playfair',
     name: 'Playfair Display',
-    fontFamily: '"Playfair Display", Georgia, serif',
+    fontFamily: '"Playfair Display Variable", "Be Vietnam Pro", Georgia, serif',
     category: 'display'
   },
   {
     key: 'merriweather',
     name: 'Merriweather',
-    fontFamily: '"Merriweather", serif',
+    fontFamily: '"Merriweather Variable", "Be Vietnam Pro", serif',
     category: 'serif'
   },
   {
     key: 'cinzel',
     name: 'Cinzel (Cổ điển quyền lực)',
-    fontFamily: '"Cinzel", serif',
+    fontFamily: '"Cinzel Variable", "Be Vietnam Pro", serif',
     category: 'serif'
   },
   {
     key: 'oswald',
     name: 'Oswald (Tiêu đề in hoa)',
-    fontFamily: '"Oswald", sans-serif',
+    fontFamily: '"Oswald Variable", "Be Vietnam Pro", sans-serif',
     category: 'display'
   },
   {
     key: 'comfortaa',
     name: 'Comfortaa (Tròn sáng tạo)',
-    fontFamily: '"Comfortaa", cursive',
+    fontFamily: '"Comfortaa Variable", "Be Vietnam Pro", cursive',
     category: 'display'
   },
   {
     key: 'handwriting',
     name: 'Caveat (Bút lông)',
-    fontFamily: '"Caveat", cursive',
+    fontFamily: '"Caveat Variable", "Be Vietnam Pro", cursive',
     category: 'handwriting'
   },
   {
     key: 'dancingscript',
     name: 'Dancing Script (Nghệ thuật)',
-    fontFamily: '"Dancing Script", cursive',
+    fontFamily: '"Dancing Script Variable", "Be Vietnam Pro", cursive',
     category: 'handwriting'
   },
   {
     key: 'mono',
     name: 'JetBrains Mono',
-    fontFamily: '"JetBrains Mono", monospace',
+    fontFamily: '"JetBrains Mono Variable", "Be Vietnam Pro", monospace',
     category: 'mono'
   }
 ]
 
 export const FONT_MAP: Record<string, string> = Object.fromEntries(
-  FONT_OPTIONS.map((f) => [f.key, f.fontFamily])
+  FONT_OPTIONS.flatMap((f) => {
+    const family = f.fontFamily
+      .split(',')[0]
+      .replaceAll('"', '')
+      .replace(/ Variable$/, '')
+    return [
+      [f.key, f.fontFamily],
+      [family, f.fontFamily]
+    ]
+  })
 )
 
 export interface SlideTheme {

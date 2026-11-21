@@ -15,7 +15,7 @@ interface SlideThumbnailProps {
   onDragStart: (e: React.DragEvent<HTMLDivElement>) => void
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
-  onDragEnd: () => void
+  onDragEnd: (event: React.DragEvent<HTMLDivElement>) => void
 }
 
 export const SlideThumbnail = ({
@@ -34,6 +34,7 @@ export const SlideThumbnail = ({
 }: SlideThumbnailProps) => {
   return (
     <div
+      data-slide-drop-slot
       draggable
       onDragStart={onDragStart}
       onDragOver={onDragOver}
