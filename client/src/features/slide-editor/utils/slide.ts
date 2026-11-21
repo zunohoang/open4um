@@ -1354,3 +1354,6 @@ export const cropClipPath = (crop?: SlideComponent['crop']) =>
   crop
     ? `inset(${crop.top}% ${crop.right}% ${crop.bottom}% ${crop.left}%)`
     : undefined
+
+// Slide coordinates are based on a 960 × 540 design surface.
+export const slideLength = (pixels: number) => `${pixels / 9.6}cqw`

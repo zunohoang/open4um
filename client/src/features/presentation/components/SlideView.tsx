@@ -1,12 +1,11 @@
+import { SlideImage } from '@/features/slide-editor/components/SlideImage'
+import { slideLength } from '@/features/slide-editor/utils/slide'
 import type { CSSProperties } from 'react'
 import {
   FONT_MAP,
   getThemeById
 } from '@/features/slide-editor/constants/theme-options'
-import {
-  cropClipPath,
-  getSlideComponents
-} from '@/features/slide-editor/utils/slide'
+import { getSlideComponents } from '@/features/slide-editor/utils/slide'
 import type { Slide, SlideComponent } from '@/lib/types'
 import { SlideText } from '@/features/slide-editor/components/SlideText'
 
@@ -19,12 +18,11 @@ interface SlideViewProps {
 // Bộ dựng slide chỉ đọc (không có UI chỉnh sửa), dùng chung cho trình chiếu và xuất file
 export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
   const theme = getThemeById(slide?.theme || lectureTheme)
-  const components =
-    Array.isArray(slide?.components) && slide.components.length > 0
-      ? slide.components
-      : slide
-        ? getSlideComponents(slide, theme.id)
-        : []
+  const components = Array.isArray(slide?.components)
+    ? slide.components
+    : slide
+      ? getSlideComponents(slide, theme.id)
+      : []
 
   const renderShape = (comp: SlideComponent) => {
     const shapeType = comp.shapeType || 'rectangle'
@@ -43,7 +41,10 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
               borderRadius: '9999px'
             }}
           />
@@ -83,7 +84,7 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
           <div
             className='w-full'
             style={{
-              height: `${Math.max(2, strokeW || 2)}px`,
+              height: slideLength(Math.max(2, strokeW || 2)),
               backgroundColor: stroke || fill
             }}
           />
@@ -94,8 +95,11 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius || 16}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius || 16)
             }}
           />
         )
@@ -107,8 +111,11 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius)
             }}
           />
         )
@@ -125,7 +132,7 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
         color: theme.textPrimary
       }}
     >
-      {components.length > 0 ? (
+      {Array.isArray(slide?.components) || components.length > 0 ? (
         <div
           className='absolute inset-0'
           style={{ containerType: 'inline-size' }}
@@ -154,10 +161,12 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
                 transform: comp.rotation
                   ? `rotate(${comp.rotation}deg)`
                   : undefined,
-                fontSize: `clamp(8px, ${((comp.fontSize ?? 20) / 9.6).toFixed(3)}cqw, ${(comp.fontSize ?? 20) * 1.6}px)`,
+                fontSize: slideLength(comp.fontSize ?? 20),
                 fontWeight: comp.fontWeight ?? 'normal',
                 fontStyle: comp.fontStyle ?? 'normal',
-                textDecoration: comp.textDecoration ?? 'none',
+                textDecoration: comp.textFormats?.length
+                  ? 'none'
+                  : (comp.textDecoration ?? 'none'),
                 textAlign: comp.textAlign ?? 'left',
                 color: comp.color || theme.textPrimary,
                 lineHeight: 1.3,
@@ -174,16 +183,7 @@ export const SlideView = ({ slide, lectureTheme, style }: SlideViewProps) => {
               {comp.type === 'shape' ? (
                 renderShape(comp)
               ) : comp.type === 'image' ? (
-                <img
-                  src={comp.imageUrl || comp.content}
-                  alt='Slide visual'
-                  style={{ clipPath: cropClipPath(comp.crop) }}
-                  className={
-                    comp.height
-                      ? 'h-full w-full object-contain'
-                      : 'h-auto w-full object-contain'
-                  }
-                />
+                <SlideImage component={comp} />
               ) : (
                 <SlideText component={comp} />
               )}

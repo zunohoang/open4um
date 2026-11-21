@@ -46,7 +46,7 @@ export const Modal = ({
       <div
         aria-label={title}
         aria-modal='true'
-        className='w-full max-w-md border border-stone-300 bg-white p-6 shadow-xl'
+        className='min-w-0 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto border border-stone-300 bg-white p-4 sm:p-6 shadow-xl'
         onClick={(e) => e.stopPropagation()}
         role='dialog'
       >

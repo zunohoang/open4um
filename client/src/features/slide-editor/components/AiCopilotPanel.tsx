@@ -279,7 +279,7 @@ export const AiCopilotPanel = ({
   }
 
   return (
-    <aside className='flex w-88 shrink-0 flex-col border-l border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
+    <aside className='absolute inset-y-0 right-0 z-40 flex w-[min(22rem,calc(100%-3.5rem))] lg:static lg:w-88 shrink-0 flex-col border-l border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
       {/* Header Panel */}
       <div className='flex h-12 items-center justify-between border-b border-stone-200 px-4'>
         <div className='flex items-center gap-2'>

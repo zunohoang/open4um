@@ -18,7 +18,7 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
     it('trả 422 khi email không hợp lệ', async () => {
       const res = await request(app)
         .post('/api/v1/auth/send-register-otp')
-        .send({ email: 'not-an-email' })
+        .send({ name: 'Giáo viên', email: 'not-an-email' })
 
       expect(res.status).toBe(422)
       expect(res.body.success).toBe(false)
@@ -27,7 +27,7 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
     it('trả 200 và sinh mã OTP lưu thực tế vào Redis khi email hợp lệ', async () => {
       const res = await request(app)
         .post('/api/v1/auth/send-register-otp')
-        .send({ email: 'test@example.com' })
+        .send({ name: 'Giáo viên', email: 'test@example.com' })
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(true)
@@ -51,7 +51,7 @@ describe('Integration Tests — Auth Routes (/api/v1/auth)', () => {
 
       const res = await request(app)
         .post('/api/v1/auth/send-register-otp')
-        .send({ email: 'test@example.com' })
+        .send({ name: 'Giáo viên', email: 'test@example.com' })
 
       expect(res.status).toBe(409)
       expect(res.body.success).toBe(false)

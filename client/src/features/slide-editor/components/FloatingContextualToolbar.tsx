@@ -225,7 +225,7 @@ export const FloatingContextualToolbar = ({
             type='button'
             onClick={() =>
               onUpdateComponent({
-                width: Math.min(95, currentWidth + 5)
+                width: Math.min(100 - selectedComponent.x, currentWidth + 5)
               })
             }
             className='flex h-6 w-5 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
@@ -494,7 +494,7 @@ export const FloatingContextualToolbar = ({
             type='button'
             onClick={() =>
               onUpdateComponent({
-                width: Math.min(95, currentWidth + 5)
+                width: Math.min(100 - selectedComponent.x, currentWidth + 5)
               })
             }
             className='flex h-6 w-4 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'
@@ -527,7 +527,7 @@ export const FloatingContextualToolbar = ({
               type='button'
               onClick={() =>
                 onUpdateComponent({
-                  height: Math.min(95, currentHeight + 5)
+                  height: Math.min(100 - selectedComponent.y, currentHeight + 5)
                 })
               }
               className='flex h-6 w-4 items-center justify-center rounded-r border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100'

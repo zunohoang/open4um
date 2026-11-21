@@ -12,6 +12,7 @@ describe('auth.validator', () => {
   describe('sendRegisterOtpSchema', () => {
     it('hợp lệ khi email đúng định dạng', () => {
       const result = sendRegisterOtpSchema.safeParse({
+        name: 'Giáo viên',
         email: 'user@example.com'
       })
       expect(result.success).toBe(true)
@@ -19,6 +20,7 @@ describe('auth.validator', () => {
 
     it('báo lỗi khi email sai định dạng', () => {
       const result = sendRegisterOtpSchema.safeParse({
+        name: 'Giáo viên',
         email: 'not-an-email'
       })
       expect(result.success).toBe(false)
@@ -27,6 +29,15 @@ describe('auth.validator', () => {
       }
     })
   })
+
+  it.each(['   ', ' a '])(
+    'từ chối tên %p ở cả bước gửi OTP và đăng ký',
+    (name) => {
+      const form = { name, email: 'test@example.com', password: 'password' }
+      expect(sendRegisterOtpSchema.safeParse(form).success).toBe(false)
+      expect(registerSchema.safeParse(form).success).toBe(false)
+    }
+  )
 
   describe('registerSchema', () => {
     it('hợp lệ khi truyền đủ name, email, password và otp đúng chuẩn 6 số', () => {

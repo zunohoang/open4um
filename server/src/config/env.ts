@@ -79,6 +79,11 @@ const envSchema = z
     REDIS_URL: z.string().url(),
     JWT_SECRET: z.string().min(16),
     GEMINI_API_KEY: z.string(),
+    QA_FAULTS_ENABLED: booleanString,
+    GATEWAY_READ_TIMEOUT_SEC: z.preprocess(
+      emptyStringToUndefined,
+      z.coerce.number().int().positive().optional()
+    ),
     AI_REQUEST_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -118,6 +123,24 @@ const envSchema = z
       .transform((val) => val !== 'false')
   })
   .superRefine((values, context) => {
+    if (values.QA_FAULTS_ENABLED && values.RELEASE_ENVIRONMENT !== 'develop') {
+      context.addIssue({
+        code: 'custom',
+        path: ['QA_FAULTS_ENABLED'],
+        message: 'QA faults require the develop release environment'
+      })
+    }
+    if (
+      values.GATEWAY_READ_TIMEOUT_SEC !== undefined &&
+      values.AI_REQUEST_TIMEOUT_MS >
+        values.GATEWAY_READ_TIMEOUT_SEC * 1000 - 15000
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AI_REQUEST_TIMEOUT_MS'],
+        message: 'Allow at least 15 seconds before the gateway timeout'
+      })
+    }
     for (const origin of values.CORS_ALLOWED_ORIGINS) {
       if (!isExactOrigin(origin)) {
         context.addIssue({

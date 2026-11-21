@@ -4,26 +4,30 @@ import * as lectureService from '@/services/lecture.service'
 import { withAiRequest } from '@/utils/aiRequest'
 
 export const generateOutline = asyncHandler(async (req, res) => {
-  const result = await withAiRequest(req, res, (signal) =>
-    lectureService.generateOutline(
-      req.user.id,
-      req.body.prompt,
-      {
-        feedback: req.body.feedback,
-        currentOutline: req.body.currentOutline,
-        lectureId: req.body.lectureId
-      },
-      signal
-    )
+  await withAiRequest(
+    req,
+    res,
+    req.body.feedback && req.body.currentOutline
+      ? 'outline-feedback'
+      : 'outline',
+    (signal) =>
+      lectureService.generateOutline(
+        req.user.id,
+        req.body.prompt,
+        {
+          feedback: req.body.feedback,
+          currentOutline: req.body.currentOutline,
+          lectureId: req.body.lectureId
+        },
+        signal
+      )
   )
-  ok(res, result)
 })
 
 export const createLecture = asyncHandler(async (req, res) => {
-  const lecture = await withAiRequest(req, res, (signal) =>
+  await withAiRequest(req, res, 'lecture', (signal) =>
     lectureService.createLecture(req.user.id, req.body, signal)
   )
-  ok(res, lecture, 201)
 })
 
 export const createBlankLecture = asyncHandler(async (req, res) => {
@@ -139,7 +143,7 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
 })
 
 export const aiChat = asyncHandler(async (req, res) => {
-  const result = await withAiRequest(req, res, (signal) =>
+  await withAiRequest(req, res, 'chat', (signal) =>
     lectureService.aiChatInEditor(
       req.user.id,
       String(req.params.id),
@@ -148,13 +152,13 @@ export const aiChat = asyncHandler(async (req, res) => {
         slideId: req.body.slideId,
         currentSlide: req.body.currentSlide,
         selectedCompId: req.body.selectedCompId,
+        textEdit: req.body.textEdit,
         sourceMaterial: req.body.sourceMaterial,
         history: req.body.history
       },
       signal
     )
   )
-  ok(res, result)
 })
 
 export const uploadImage = asyncHandler(async (req, res) => {

@@ -14,6 +14,11 @@ import {
 import * as emailService from '@/services/email.service'
 
 // Mock bcrypt để tăng tốc độ test và tránh tốn CPU hashing
+jest.mock('@/lib/minio', () => ({
+  BUCKET_MEDIA: 'media',
+  minioClient: { putObject: jest.fn().mockResolvedValue({}) }
+}))
+
 jest.mock('bcrypt', () => ({
   compare: jest.fn(),
   hash: jest.fn()
@@ -22,6 +27,7 @@ jest.mock('bcrypt', () => ({
 const mockUserFindOne = jest.fn()
 const mockUserFindById = jest.fn()
 const mockUserCreate = jest.fn()
+const mockAttempts = jest.fn().mockResolvedValue(1)
 const mockRedisGet = jest.fn()
 const mockRedisSet = jest.fn()
 const mockRedisDel = jest.fn()
@@ -39,6 +45,7 @@ jest.mock('@/models/user.model', () => ({
 
 jest.mock('@/lib/redis', () => ({
   redis: {
+    eval: (...args: unknown[]) => mockAttempts(...args),
     get: (...args: any[]) => mockRedisGet(...args),
     set: (...args: any[]) => mockRedisSet(...args),
     del: (...args: any[]) => mockRedisDel(...args),
@@ -63,6 +70,20 @@ describe('auth.service unit tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockRedisGet.mockReset().mockResolvedValue(null)
+  })
+
+  it('từ chối thêm lượt đăng nhập và OTP khi đã hết số lần trong cửa sổ', async () => {
+    mockAttempts.mockResolvedValueOnce(8)
+    await expect(login('test@example.com', 'password')).rejects.toMatchObject({
+      statusCode: 429
+    })
+    expect(bcrypt.compare).not.toHaveBeenCalled()
+    mockUserFindOne.mockResolvedValue(null)
+    mockAttempts.mockResolvedValueOnce(6)
+    await expect(
+      register('Giáo viên', 'test@example.com', 'password', '123456')
+    ).rejects.toMatchObject({ statusCode: 429 })
+    expect(mockUserCreate).not.toHaveBeenCalled()
   })
 
   describe('sendRegisterOtp', () => {
@@ -771,8 +792,10 @@ describe('auth.service unit tests', () => {
       })
 
       expect(mockUser.name).toBe('New Name')
-      expect(mockUser.avatar).toBe(validAvatar)
-      expect(result.avatar).toBe(validAvatar)
+      expect(mockUser.avatar).toMatch(
+        /^\/api\/v1\/media\/images\/u1\/[0-9a-f-]+\.png$/
+      )
+      expect(result.avatar).toBe(mockUser.avatar)
     })
   })
 })

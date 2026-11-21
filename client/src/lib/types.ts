@@ -8,6 +8,7 @@ export interface User {
   role: Role
   status?: UserStatus
   creditBalance: number
+  profileCooldownSeconds?: number
   avatar?: string | null
 }
 
@@ -50,10 +51,32 @@ export interface ImageCrop {
   left: number
 }
 
+export type InlineStyle = Pick<
+  SlideComponent,
+  | 'fontSize'
+  | 'fontWeight'
+  | 'fontStyle'
+  | 'textDecoration'
+  | 'fontFamily'
+  | 'color'
+  | 'textCase'
+>
+export interface TextFormat {
+  start: number
+  end: number
+  style: InlineStyle
+}
+export interface TextSelection {
+  slideId: string
+  componentId: string
+  start: number
+  end: number
+}
 export interface SlideComponent {
   id: string
   type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image' | 'shape'
   content: string
+  textFormats?: TextFormat[]
   imageUrl?: string
   crop?: ImageCrop
   shapeType?: ShapeType

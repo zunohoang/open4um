@@ -81,6 +81,10 @@ export const AuthPage = () => {
       setError('Vui lòng điền đầy đủ họ tên, email và mật khẩu')
       return
     }
+    if (form.name.trim().length < 2) {
+      setError('Tên phải có ít nhất 2 ký tự')
+      return
+    }
     if (form.password.length < 6) {
       setError('Mật khẩu phải có ít nhất 6 ký tự')
       return
@@ -89,7 +93,10 @@ export const AuthPage = () => {
     resetErrors()
     setLoading(true)
     try {
-      const res = await authApi.sendRegisterOtp({ email: form.email })
+      const res = await authApi.sendRegisterOtp({
+        email: form.email,
+        name: form.name.trim()
+      })
       showToast(
         res.message || 'Mã OTP đã được gửi đến email của bạn',
         'success'
@@ -110,6 +117,10 @@ export const AuthPage = () => {
     if (!isEmailVerificationEnabled) {
       if (!form.email || !form.name || !form.password) {
         setError('Vui lòng điền đầy đủ họ tên, email và mật khẩu')
+        return
+      }
+      if (form.name.trim().length < 2) {
+        setError('Tên phải có ít nhất 2 ký tự')
         return
       }
       if (form.password.length < 6) {
@@ -445,13 +456,14 @@ export const AuthPage = () => {
                   <input
                     className='mt-2 w-full border border-stone-300 bg-stone-50 p-3 text-center font-mono text-2xl font-bold tracking-widest outline-orange-600'
                     type='text'
-                    maxLength={6}
+                    inputMode='numeric'
+                    autoComplete='one-time-code'
                     placeholder='••••••'
                     value={form.otp}
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        otp: e.target.value.replace(/\D/g, '')
+                        otp: e.target.value.replace(/\D/g, '').slice(0, 6)
                       })
                     }
                     required
@@ -571,12 +583,13 @@ export const AuthPage = () => {
                   <input
                     className='mt-2 w-full border border-stone-300 bg-stone-50 p-3 font-mono tracking-widest outline-orange-600'
                     type='text'
-                    maxLength={6}
+                    inputMode='numeric'
+                    autoComplete='one-time-code'
                     value={forgotForm.otp}
                     onChange={(e) =>
                       setForgotForm({
                         ...forgotForm,
-                        otp: e.target.value.replace(/\D/g, '')
+                        otp: e.target.value.replace(/\D/g, '').slice(0, 6)
                       })
                     }
                     placeholder='123456'

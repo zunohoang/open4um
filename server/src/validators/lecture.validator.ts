@@ -104,6 +104,14 @@ export const aiChatSchema = z.object({
   slideId: z.string().optional(),
   currentSlide: aiChatSlideSnapshotSchema.optional(),
   selectedCompId: z.string().optional(),
+  textEdit: z
+    .object({
+      action: z.enum(['rewrite', 'shorten', 'expand']),
+      start: z.number().int().nonnegative(),
+      end: z.number().int().positive().max(10000)
+    })
+    .refine((range) => range.end > range.start, 'Đoạn văn bản không hợp lệ')
+    .optional(),
   sourceMaterial: z.string().max(10000).optional(),
   history: z
     .array(

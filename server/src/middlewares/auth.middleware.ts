@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express'
+import { requestContext } from './requestContext.middleware'
 import jwt from 'jsonwebtoken'
 import { createHash } from 'node:crypto'
 import { env } from '@/config/env'
@@ -58,6 +59,8 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       401
     )
   }
+  const context = requestContext.getStore()
+  if (context) context.userId = payload.id
   req.user = { ...payload, role: user.role }
   next()
 }

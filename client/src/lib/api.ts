@@ -17,6 +17,11 @@ export const apiClient = axios.create({
 
 // Gắn accessToken vào mọi request đi ra
 apiClient.interceptors.request.use((config) => {
+  if (
+    !config.headers.has('X-Request-Id') &&
+    typeof crypto.randomUUID === 'function'
+  )
+    config.headers.set('X-Request-Id', crypto.randomUUID())
   const token =
     useAuthStore.getState().accessToken || localStorage.getItem('accessToken')
   if (token && config.headers) {

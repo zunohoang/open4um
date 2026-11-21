@@ -40,7 +40,7 @@ describe('error.middleware', () => {
     })
   })
 
-  it('xử lý lỗi PayloadTooLargeError (413): trả về status 413 và thông báo lỗi tệp tin', () => {
+  it('xử lý lỗi PayloadTooLargeError (413): trả về status 413 và thông báo kích thước dữ liệu', () => {
     const payloadError = Object.assign(new Error('request entity too large'), {
       status: 413,
       type: 'entity.too.large'
@@ -51,7 +51,8 @@ describe('error.middleware', () => {
     expect(res.status).toHaveBeenCalledWith(413)
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+      message:
+        'Dữ liệu gửi lên vượt quá dung lượng cho phép. Vui lòng giảm kích thước bản lưu hoặc tệp tải lên.'
     })
   })
 })

@@ -166,12 +166,12 @@ export const LeftSidebarRail = ({
   return (
     <div className='flex h-full select-none'>
       {/* 1. THANH ICON RAIL HẸP BÊN TRÁI (CANVA SLIM RAIL) */}
-      <nav className='flex w-18 shrink-0 flex-col items-center border-r border-emerald-900/60 bg-brand-ink py-3 text-stone-300'>
+      <nav className='flex w-14 lg:w-18 shrink-0 flex-col items-center border-r border-emerald-900/60 bg-brand-ink py-3 text-stone-300'>
         {/* Tab Văn bản */}
         <button
           type='button'
           onClick={() => setLeftRailTab('text')}
-          className={`group flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'text' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -186,7 +186,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('shapes')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'shapes' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -201,7 +201,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('uploads')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'uploads' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -216,7 +216,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('templates')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'templates' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -231,7 +231,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('theme')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'theme' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -246,7 +246,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('layers')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'layers' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -260,7 +260,7 @@ export const LeftSidebarRail = ({
 
       {/* 2. DRAWER MỞ RỘNG BÊN CẠNH RAIL (EXPANDABLE DRAWER) */}
       {isDrawerOpen && (
-        <aside className='flex w-72 shrink-0 flex-col border-r border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
+        <aside className='absolute inset-y-0 left-14 z-40 flex w-[min(18rem,calc(100%-3.5rem))] lg:static lg:w-72 shrink-0 flex-col border-r border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
           {/* TAB VĂN BẢN (TEXT) */}
           {leftRailTab === 'text' && (
             <div className='flex flex-1 flex-col overflow-y-auto p-4'>

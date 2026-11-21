@@ -7,6 +7,11 @@ export interface AiChatPayload {
   slideId?: string
   currentSlide?: Slide
   selectedCompId?: string
+  textEdit?: {
+    action: 'rewrite' | 'shorten' | 'expand'
+    start: number
+    end: number
+  }
   sourceMaterial?: string
   history?: Array<{ role: 'user' | 'assistant'; text: string }>
 }
@@ -22,6 +27,7 @@ export interface AiSlideProposalData {
 
 export interface AiChatResponseData {
   reply: string
+  replacement?: string
   action:
     | 'UPDATE_CURRENT_SLIDE'
     | 'UPDATE_SLIDE'

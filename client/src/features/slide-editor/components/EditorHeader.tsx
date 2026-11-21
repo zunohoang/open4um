@@ -54,7 +54,7 @@ export const EditorHeader = ({
   const toggleAiPanel = useEditorStore((state) => state.toggleAiPanel)
 
   return (
-    <header className='relative flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
+    <header className='max-sm:[&_[data-account-name]]:hidden relative z-40 grid w-full shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-1 py-1 lg:flex lg:h-14 lg:justify-between border-b border-emerald-900/80 bg-brand-ink px-2 lg:px-4 text-white shadow-xs select-none'>
       {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Autosave Toggle, Save Status */}
       <div className='relative z-10 flex shrink-0 items-center gap-2'>
         <button
@@ -74,7 +74,7 @@ export const EditorHeader = ({
           </span>
         </button>
 
-        <span className='text-emerald-800'>|</span>
+        <span className='hidden lg:block text-emerald-800'>|</span>
 
         {/* Nút Undo */}
         <button
@@ -106,7 +106,7 @@ export const EditorHeader = ({
           <Redo2 size={16} />
         </button>
 
-        <span className='text-emerald-800'>|</span>
+        <span className='hidden lg:block text-emerald-800'>|</span>
 
         {/* Công tắc Bật / Tắt Tự động lưu (Autosave) */}
         <div
@@ -138,7 +138,7 @@ export const EditorHeader = ({
         </div>
 
         {/* Trạng thái lưu (Cố định chiều rộng w-[116px] để chống giật / xô lệch layout) */}
-        <div className='flex w-29 shrink-0 items-center justify-start'>
+        <div className='flex lg:w-29 shrink-0 items-center justify-start'>
           {saveStatus === 'saving' ? (
             <div className='flex items-center gap-1.5 px-1 py-1 text-xs text-amber-300'>
               <Loader2
@@ -201,7 +201,7 @@ export const EditorHeader = ({
       </div>
 
       {/* KHU VỰC GIỮA: Tên bài giảng căn giữa tuyệt đối (Absolute Centering) */}
-      <div className='pointer-events-none absolute left-1/2 top-1/2 flex w-full max-w-50 -translate-x-1/2 -translate-y-1/2 items-center justify-center px-2 sm:max-w-xs md:max-w-sm lg:max-w-md'>
+      <div className='flex min-w-0 flex-1 items-center justify-center px-2 lg:max-w-md'>
         <input
           type='text'
           value={title}
@@ -213,7 +213,7 @@ export const EditorHeader = ({
       </div>
 
       {/* KHU VỰC PHẢI: Nút Dàn ý, AI Copilot, Xuất bản, Trình chiếu */}
-      <div className='relative z-10 flex shrink-0 items-center gap-2'>
+      <div className='relative z-10 col-span-2 flex shrink-0 items-center justify-end gap-1 lg:gap-2'>
         {/* Nút xem lại Dàn ý */}
         {onOpenOutline && (
           <button

@@ -1,3 +1,4 @@
+import { mediaUrl } from '@/lib/mediaUrl'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLogoutConfirm } from '@/features/auth/hooks/useLogoutConfirm'
@@ -53,13 +54,16 @@ export const UserAccountMenu = () => {
         aria-haspopup='menu'
         aria-expanded={open}
       >
-        <span className='max-w-30 truncate font-sans text-xs font-bold text-emerald-950 sm:max-w-40'>
+        <span
+          data-account-name
+          className='max-w-30 truncate font-sans text-xs font-bold text-emerald-950 sm:max-w-40'
+        >
           {user?.name || 'Tài khoản'}
         </span>
         <div className='flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-sans text-xs font-bold text-white'>
           {user?.avatar ? (
             <img
-              src={user.avatar}
+              src={mediaUrl(user.avatar)}
               alt={user.name || 'Ảnh đại diện'}
               className='h-full w-full object-cover'
             />
@@ -93,7 +97,7 @@ export const UserAccountMenu = () => {
             <div className='flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 text-sm font-bold text-white'>
               {user?.avatar ? (
                 <img
-                  src={user.avatar}
+                  src={mediaUrl(user.avatar)}
                   alt={user.name || 'Ảnh đại diện'}
                   className='h-full w-full object-cover'
                 />

@@ -1,20 +1,25 @@
 import { AppError } from '@/utils/AppError'
-import { LectureModel } from '@/models/lecture.model'
+import { externalizeImages } from '@/utils/lectureImages'
+import {
+  requestContext,
+  updateAiTask
+} from '@/middlewares/requestContext.middleware'
+import { logger } from '@/lib/logger'
+import { LectureModel, type LectureDocument } from '@/models/lecture.model'
 import { AiUsageLogModel } from '@/models/aiUsageLog.model'
 import { UserModel } from '@/models/user.model'
 import { getCreditConfig } from '@/services/admin.service'
 import { debitCredits, refundCredits } from '@/services/credit.service'
 import { FolderModel } from '@/models/folder.model'
-import { minioClient, BUCKET_MEDIA } from '@/lib/minio'
 import { buildSlideComponents, THEME_PRESETS } from '@/constants/theme-options'
 import { getAiReadableSlideContext } from '@/utils/aiChatContext'
 import { isValidObjectId, Types } from 'mongoose'
-import { decodeImageDataUrl } from '@/utils/imageData'
 import {
   generateOutlineFromPrompt,
   refineOutlineWithFeedback,
   generateSlidesFromOutline,
   chatAndProposeSlideEdit,
+  editSelectedText,
   type GeneratedOutline
 } from '@/services/ai.service'
 
@@ -46,6 +51,92 @@ const getRevisionFilter = (revision: number) =>
   revision === 0
     ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
     : { revision }
+
+// Only undo a write that still belongs to this request. A later edit owns its revision.
+async function undoAiWrite(
+  written: LectureDocument,
+  before: LectureDocument | null,
+  fields: string[]
+) {
+  const identity = { _id: written._id, userId: written.userId, deletedAt: null }
+  const guard = {
+    ...identity,
+    ...getRevisionFilter(written.revision ?? 0),
+    updatedAt: written.updatedAt,
+    [`aiChatHistory.${written.aiChatHistory?.length ?? 0}`]: { $exists: false }
+  }
+  if (!before) return (await LectureModel.deleteOne(guard)).deletedCount === 1
+  const restore = Object.fromEntries(
+    fields.map((key) => [key, before.get(key)])
+  )
+  const result = await LectureModel.updateOne(
+    guard,
+    {
+      $set: {
+        ...restore,
+        revision: before.revision ?? 0,
+        updatedAt: before.updatedAt
+      }
+    },
+    { timestamps: false }
+  )
+  if (result.matchedCount) return true
+  // A concurrent save advanced the document. Restore only fields still equal to our write.
+  const results = await Promise.all(
+    fields.map((key) => {
+      if (key === 'aiChatHistory') {
+        const appended = written.aiChatHistory
+          .slice(before.aiChatHistory.length)
+          .map((message) => message.id)
+        return LectureModel.updateOne(
+          identity,
+          { $pull: { aiChatHistory: { id: { $in: appended } } } },
+          { timestamps: false }
+        )
+      }
+      return LectureModel.updateOne(
+        { ...identity, [key]: { $eq: written.get(key) } },
+        { $set: { [key]: before.get(key) } },
+        { timestamps: false }
+      )
+    })
+  )
+  return results.every((result) => result.matchedCount === 1)
+}
+
+async function rollbackAi(
+  userId: string,
+  amount: number,
+  usageId: unknown,
+  written: LectureDocument | null | undefined,
+  before: LectureDocument | null,
+  fields: string[]
+) {
+  const result = await Promise.allSettled([
+    refundCredits(userId, amount).then(() =>
+      updateAiTask({ creditRefunded: amount })
+    ),
+    usageId
+      ? AiUsageLogModel.deleteOne({ _id: usageId }).then(() =>
+          updateAiTask({ usageLogId: null })
+        )
+      : undefined,
+    written
+      ? undoAiWrite(written, before, fields).then((lectureRestored) =>
+          updateAiTask({ lectureRestored })
+        )
+      : undefined
+  ])
+  for (const entry of result) {
+    if (entry.status === 'rejected') {
+      logger.error(
+        { err: entry.reason, lectureId: written?._id },
+        'Không hoàn tất hoàn tác yêu cầu AI'
+      )
+      throw entry.reason
+    }
+  }
+}
 
 export const generateOutline = async (
   userId: string,
@@ -92,8 +183,18 @@ export const generateOutline = async (
     'Không đủ credit để sinh dàn ý bài giảng'
   )
 
-  let lecture
+  updateAiTask({ creditDebited: config.pricePerOutline })
+  let lecture: LectureDocument | null | undefined
   let usageId: unknown
+  const undoWrite = () =>
+    rollbackAi(
+      userId,
+      config.pricePerOutline,
+      usageId,
+      lecture,
+      existingLecture,
+      ['prompt', 'outline']
+    )
   try {
     signal?.throwIfAborted()
     if (options?.lectureId) {
@@ -133,21 +234,25 @@ export const generateOutline = async (
       })
     }
 
+    updateAiTask({ lectureId: String(lecture._id) })
     const usage = await AiUsageLogModel.create({
       userId,
       prompt: options?.feedback
         ? `${prompt} | Góp ý: ${options.feedback}`
         : prompt,
-      slideCount: outline.sections.length,
+      slideCount: 0,
       creditSpent: config.pricePerOutline
     })
     usageId = usage._id
+    updateAiTask({ usageLogId: String(usageId) })
     signal?.throwIfAborted()
   } catch (error) {
-    await refundCredits(userId, config.pricePerOutline)
-    if (usageId) await AiUsageLogModel.deleteOne({ _id: usageId })
+    await undoWrite()
     throw error
   }
+
+  const context = requestContext.getStore()
+  if (context) context.undoUndelivered = undoWrite
 
   return {
     lecture,
@@ -217,8 +322,18 @@ export const createLecture = async (
     creditSpent,
     `Không đủ credit để tạo bài giảng. Cần ${creditSpent} credit.`
   )
-  let lecture
+  updateAiTask({ creditDebited: creditSpent })
+  let lecture: LectureDocument | null | undefined
   let usageId: unknown
+  const undoWrite = () =>
+    rollbackAi(userId, creditSpent, usageId, lecture, existingLecture, [
+      'title',
+      'prompt',
+      'theme',
+      'outline',
+      'slides',
+      'folderId'
+    ])
   try {
     signal?.throwIfAborted()
     lecture = data.lectureId
@@ -240,6 +355,7 @@ export const createLecture = async (
         409
       )
     }
+    updateAiTask({ lectureId: String(lecture._id) })
     const usage = await AiUsageLogModel.create({
       userId,
       prompt: data.prompt || data.title,
@@ -247,12 +363,15 @@ export const createLecture = async (
       creditSpent
     })
     usageId = usage._id
+    updateAiTask({ usageLogId: String(usageId) })
     signal?.throwIfAborted()
   } catch (error) {
-    await refundCredits(userId, creditSpent)
-    if (usageId) await AiUsageLogModel.deleteOne({ _id: usageId })
+    await undoWrite()
     throw error
   }
+
+  const context = requestContext.getStore()
+  if (context) context.undoUndelivered = undoWrite
 
   return {
     ...lecture.toObject(),
@@ -330,6 +449,8 @@ export const listLectures = async ({
     .sort(sort)
     .skip((page - 1) * limit)
     .limit(limit)
+  if (sortBy === 'title')
+    query.collation({ locale: 'vi', strength: 2, numericOrdering: true })
   if (summary) query.select(LECTURE_SUMMARY_PROJECTION).lean()
 
   const [items, total] = await Promise.all([
@@ -380,43 +501,7 @@ const findOwnedLecture = async (userId: string, id: string) => {
   throw new AppError('Không tìm thấy bài giảng', 404)
 }
 
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif'
-}
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const IMAGE_KEY_PATTERN =
-  /^images\/[a-f0-9]{24}\/[0-9a-f-]{36}\.(png|jpg|webp|gif)$/
-
-// SRS UC011 bước 5: tải ảnh lên server (MinIO) thay vì nhúng base64 vào slide
-export const uploadImage = async (userId: string, dataUrl: string) => {
-  const { buffer, mime } = decodeImageDataUrl(dataUrl, MAX_IMAGE_BYTES)
-  const ext = IMAGE_EXTENSIONS[mime]
-
-  const key = `images/${userId}/${crypto.randomUUID()}.${ext}`
-  await minioClient.putObject(BUCKET_MEDIA, key, buffer, buffer.length, {
-    'Content-Type': mime
-  })
-  return { key }
-}
-
-// Ảnh trong slide được nhúng bằng thẻ <img> nên đọc công khai; key chứa UUID khó đoán
-export const getImage = async (key: string) => {
-  if (!IMAGE_KEY_PATTERN.test(key))
-    throw new AppError('Không tìm thấy ảnh', 404)
-  const stat = await minioClient.statObject(BUCKET_MEDIA, key).catch(() => null)
-  if (!stat) throw new AppError('Không tìm thấy ảnh', 404)
-  const stream = await minioClient.getObject(BUCKET_MEDIA, key)
-  return {
-    stream,
-    contentType:
-      (stat.metaData?.['content-type'] as string | undefined) ??
-      'application/octet-stream',
-    size: stat.size
-  }
-}
+export { uploadImage, getImage } from '@/lib/storage'
 
 export const getLecture = async (userId: string, id: string) => {
   const lecture = await findOwnedLecture(userId, id)
@@ -446,6 +531,8 @@ export const updateLecture = async (
   }
 
   const { revision, ...changes } = data
+  if (changes.slides || changes.aiChatHistory)
+    await externalizeImages(userId, [changes.slides, changes.aiChatHistory])
   const filter: Record<string, unknown> = {
     _id: lecture._id,
     userId,
@@ -543,6 +630,11 @@ export const aiChatInEditor = async (
     slideId?: string
     currentSlide?: Record<string, unknown>
     selectedCompId?: string
+    textEdit?: {
+      action: 'rewrite' | 'shorten' | 'expand'
+      start: number
+      end: number
+    }
     sourceMaterial?: string
     history?: Array<{ role: 'user' | 'assistant'; text: string }>
   },
@@ -618,37 +710,66 @@ export const aiChatInEditor = async (
       slidesCatalog.map((s) => `Slide ${s.slideNumber}: ${s.title}`).join('; ')
   }
 
-  if (payload.sourceMaterial !== undefined) {
-    lecture.set('sourceMaterial', payload.sourceMaterial)
+  const range = payload.textEdit
+  const content = selectedElement?.content
+  if (
+    range &&
+    (!hasMatchingSnapshot ||
+      typeof content !== 'string' ||
+      selectedElement?.type === 'shape' ||
+      selectedElement?.type === 'image' ||
+      range.start < 0 ||
+      range.start >= range.end ||
+      range.end > content.length ||
+      !content.slice(range.start, range.end).trim())
+  ) {
+    throw new AppError('Vui lòng chọn lại đoạn văn bản cần sửa.', 422)
   }
+  const aiResult =
+    range && typeof content === 'string'
+      ? await editSelectedText(
+          range.action,
+          content.slice(range.start, range.end),
+          signal
+        )
+      : await chatAndProposeSlideEdit(
+          payload.message,
+          {
+            presentationTitle: lecture.title,
+            totalSlides: slides.length,
+            currentSlideIndex: activeIndex,
+            currentSlide,
+            surroundingSlides: {
+              prev: prevSlide,
+              next: nextSlide
+            },
+            slidesCatalog,
+            outlineOverview,
+            contextSummary: initialSummary,
+            selectedElement,
+            sourceMaterial:
+              payload.sourceMaterial ??
+              (lecture.get('sourceMaterial') as string) ??
+              '',
+            history: payload.history,
+            theme: (lecture.get('theme') as string) || undefined,
+            creditBalance: user.creditBalance,
+            pricePerSlide: config.pricePerSlide,
+            maxCreatableSlides: Math.floor(
+              user.creditBalance / config.pricePerSlide
+            )
+          },
+          signal
+        )
 
-  const aiResult = await chatAndProposeSlideEdit(
-    payload.message,
-    {
-      presentationTitle: lecture.title,
-      totalSlides: slides.length,
-      currentSlideIndex: activeIndex,
-      currentSlide,
-      surroundingSlides: {
-        prev: prevSlide,
-        next: nextSlide
-      },
-      slidesCatalog,
-      outlineOverview,
-      contextSummary: initialSummary,
-      selectedElement,
-      sourceMaterial:
-        payload.sourceMaterial ||
-        (lecture.get('sourceMaterial') as string) ||
-        '',
-      history: payload.history,
-      theme: (lecture.get('theme') as string) || undefined,
-      creditBalance: user.creditBalance,
-      pricePerSlide: config.pricePerSlide,
-      maxCreatableSlides: Math.floor(user.creditBalance / config.pricePerSlide)
-    },
-    signal
+  if (
+    range &&
+    typeof content === 'string' &&
+    aiResult.replacement &&
+    content.length - (range.end - range.start) + aiResult.replacement.length >
+      10000
   )
+    throw new AppError('Văn bản sau khi sửa vượt quá 10.000 ký tự.', 422)
 
   const rawProposals = aiResult.proposals || []
   const includesSlideUpdate =
@@ -725,9 +846,6 @@ export const aiChatInEditor = async (
   }
 
   signal?.throwIfAborted()
-  if (aiResult.updatedSummary) {
-    lecture.set('contextSummary', aiResult.updatedSummary)
-  }
 
   const targetIdx =
     typeof aiResult.targetSlideIndex === 'number' &&
@@ -792,15 +910,30 @@ export const aiChatInEditor = async (
     `Không đủ credit cho kết quả AI này. Cần ${creditSpent} credit.`
   )
   let usageId: unknown
+  let saved: LectureDocument | null | undefined
+  updateAiTask({ creditDebited: creditSpent })
+  const undoWrite = () =>
+    rollbackAi(userId, creditSpent, usageId, saved, lecture, [
+      'aiChatHistory',
+      'contextSummary',
+      ...(payload.sourceMaterial !== undefined ? ['sourceMaterial'] : [])
+    ])
   try {
     signal?.throwIfAborted()
-    lecture.set('aiChatHistory', updatedHistory)
-    const saved = await LectureModel.findOneAndUpdate(
-      { _id: lecture._id, userId, deletedAt: null },
+    saved = await LectureModel.findOneAndUpdate(
+      {
+        _id: lecture._id,
+        userId,
+        deletedAt: null,
+        ...getRevisionFilter(lecture.revision ?? 0),
+        updatedAt: lecture.updatedAt,
+        [`aiChatHistory.${existingHistory.length}`]: { $exists: false }
+      },
       {
         $set: {
           aiChatHistory: updatedHistory,
-          contextSummary: lecture.get('contextSummary'),
+          contextSummary:
+            aiResult.updatedSummary ?? lecture.get('contextSummary'),
           ...(payload.sourceMaterial !== undefined
             ? { sourceMaterial: payload.sourceMaterial }
             : {})
@@ -808,24 +941,33 @@ export const aiChatInEditor = async (
       },
       { new: true }
     )
-    if (!saved) throw new AppError('Bài giảng không còn khả dụng', 404)
+    if (!saved) {
+      await getLecture(userId, lectureId)
+      throw new AppError(
+        'Bài giảng đã thay đổi. Vui lòng gửi lại yêu cầu AI.',
+        409
+      )
+    }
+    updateAiTask({ lectureId: String(lecture._id) })
     const usage = await AiUsageLogModel.create({
       userId,
       prompt: payload.message,
-      slideCount:
-        createdSlideCount ||
-        (includesSlideUpdate ? Math.max(1, proposals.length) : 0),
+      slideCount: createdSlideCount,
       creditSpent
     })
     usageId = usage._id
+    updateAiTask({ usageLogId: String(usageId) })
     signal?.throwIfAborted()
   } catch (error) {
-    await refundCredits(userId, creditSpent)
-    if (usageId) await AiUsageLogModel.deleteOne({ _id: usageId })
+    await undoWrite()
     throw error
   }
 
+  const context = requestContext.getStore()
+  if (context) context.undoUndelivered = undoWrite
+
   return {
+    replacement: aiResult.replacement,
     reply: aiResult.reply,
     action: aiResult.action,
     targetSlideIndex: targetIdx,

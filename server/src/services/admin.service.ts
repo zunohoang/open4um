@@ -202,10 +202,12 @@ export const listAiUsage = async (
   const filter: Record<string, unknown> = {}
   if (fromDate || toDate) {
     const toExclusive = toDate
-      ? new Date(toDate.getTime() + 24 * 60 * 60 * 1000)
+      ? new Date(toDate.getTime() + DAY_MS - STATS_UTC_OFFSET_MS)
       : undefined
     filter.createdAt = {
-      ...(fromDate ? { $gte: fromDate } : {}),
+      ...(fromDate
+        ? { $gte: new Date(fromDate.getTime() - STATS_UTC_OFFSET_MS) }
+        : {}),
       ...(toExclusive ? { $lt: toExclusive } : {})
     }
   }

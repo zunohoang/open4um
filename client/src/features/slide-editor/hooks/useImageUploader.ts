@@ -1,3 +1,4 @@
+import { requestError } from '@/lib/requestError'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { editorApi } from '../api/editor.api'
@@ -62,9 +63,7 @@ export const useImageUploader = (
       if (controller.signal.aborted) return
       setFailedFile(file)
       showToast(
-        error instanceof Error
-          ? error.message
-          : 'Tải ảnh lên thất bại. Bấm "Thử lại" để tải lại.',
+        requestError(error, 'Tải ảnh lên thất bại. Bấm "Thử lại" để tải lại.'),
         'error'
       )
     } finally {
