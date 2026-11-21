@@ -44,7 +44,6 @@ const positiveCreditValue = (label: string) =>
 
 export const updateCreditConfigSchema = z
   .object({
-    pricePerLecture: positiveCreditValue('Giá sinh bài giảng').optional(),
     pricePerSlide: positiveCreditValue('Giá mỗi slide').optional(),
     pricePerAiEdit: positiveCreditValue('Giá chỉnh sửa AI').optional(),
     pricePerOutline: positiveCreditValue('Giá sinh dàn ý').optional(),

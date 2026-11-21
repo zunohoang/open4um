@@ -6,6 +6,7 @@ export const isCorsOriginAllowed = (origin: string | undefined) => {
 }
 
 export const corsOptions: CorsOptions = {
+  exposedHeaders: ['X-Request-Id'],
   origin(origin, callback) {
     callback(null, isCorsOriginAllowed(origin))
   }

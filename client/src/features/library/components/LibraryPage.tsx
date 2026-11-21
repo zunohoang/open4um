@@ -1,23 +1,78 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { MoreVertical } from 'lucide-react'
 import { lectureApi } from '@/features/library/api/lecture.api'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { ExportModal, useToast } from '@/components/ui'
+import { Pagination } from '@/components/ui/Pagination'
+import { useToast } from '@/components/ui'
+import { ExportModal } from '@/features/export/components/ExportModal'
 import { SlidePreview } from './SlidePreview'
-import type { Folder, Lecture } from '@/lib/types'
+import type { Folder, LectureSummary } from '@/lib/types'
 
 interface LibraryPageProps {
-  onOpen?: (lecture: Lecture) => void
-  onPresent?: (lecture: Lecture) => void
   viewMode?: 'library' | 'trash'
+}
+
+// SRS UC027: đúng 3 tiêu chí sắp xếp
+const SORT_OPTIONS = {
+  newest: { label: 'Mới nhất', sortBy: 'createdAt', sortOrder: 'desc' },
+  oldest: { label: 'Cũ nhất', sortBy: 'createdAt', sortOrder: 'asc' },
+  az: { label: 'A-Z', sortBy: 'title', sortOrder: 'asc' }
+} as const
+type SortOption = keyof typeof SORT_OPTIONS
+
+const LECTURE_DRAG_TYPE = 'application/x-lecture-id'
+
+// SRS UC024: tên tĩnh đổi thành ô nhập; Enter/click ra ngoài để lưu, bỏ trống thì giữ tên cũ
+const InlineRename = ({
+  value,
+  onDone,
+  onInvalid,
+  className
+}: {
+  value: string
+  onDone: (next: string | null) => void
+  onInvalid: () => void
+  className?: string
+}) => {
+  const [draft, setDraft] = useState(value)
+  const finishedRef = useRef(false)
+  const finish = (next: string | null) => {
+    if (finishedRef.current) return
+    finishedRef.current = true
+    onDone(next)
+  }
+  const submit = () => {
+    if (finishedRef.current) return
+    const next = draft.trim()
+    finish(next || null)
+    if (!next) onInvalid()
+  }
+  return (
+    <input
+      autoFocus
+      aria-label='Tên mới'
+      value={draft}
+      maxLength={200}
+      onFocus={(e) => e.target.select()}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={submit}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return
+        if (e.key === 'Enter') submit()
+        if (e.key === 'Escape') finish(null)
+      }}
+      className={`w-full border border-orange-700 bg-white px-1 outline-none ${className ?? ''}`}
+    />
+  )
 }
 
 interface ContextMenuState {
   x: number
   y: number
-  lecture: Lecture
+  lecture: LectureSummary
 }
 
 // Hàm tính số ngày đếm ngược còn lại (30 ngày kể từ deletedAt)
@@ -31,11 +86,7 @@ const getDaysRemaining = (deletedAt: string | null) => {
   return Math.max(0, days)
 }
 
-export const LibraryPage = ({
-  onOpen,
-  onPresent,
-  viewMode
-}: LibraryPageProps) => {
+export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
   const { showToast } = useToast()
   const notifySuccess = useCallback(
     (msg: string) => showToast(msg, 'success'),
@@ -52,92 +103,126 @@ export const LibraryPage = ({
   const activeViewMode: 'library' | 'trash' =
     viewMode || (location.pathname.startsWith('/trash') ? 'trash' : 'library')
 
-  const handleOpen = (lecture: Lecture) => {
-    if (onOpen) {
-      onOpen(lecture)
-    } else {
-      navigate(`/editor/${lecture._id}`)
-    }
-  }
+  const openCreateLecture = useOutletContext<
+    { openCreateLecture?: () => void } | undefined
+  >()?.openCreateLecture
 
-  const handlePresent = (lecture: Lecture) => {
-    if (onPresent) {
-      onPresent(lecture)
-    } else {
-      navigate(`/presentation/${lecture._id}`)
-    }
-  }
+  const handleOpen = (lecture: LectureSummary) =>
+    navigate(`/editor/${lecture._id}`)
+  const handlePresent = (lecture: LectureSummary) =>
+    navigate(`/presentation/${lecture._id}`)
 
-  const [lectures, setLectures] = useState<Lecture[]>([])
+  const [lectures, setLectures] = useState<LectureSummary[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
-  const [search, setSearch] = useState('')
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
-  const [sortBy, setSortBy] = useState<'createdAt' | 'updatedAt' | 'title'>(
-    'createdAt'
-  )
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [counts, setCounts] = useState({
+    total: 0,
+    unorganized: 0,
+    folders: {} as Record<string, number>
+  })
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [search, setSearchInput] = useState('')
+  const [selectedFolderId, setFolderFilter] = useState<string | null>(null)
+  const [sortOption, setSort] = useState<SortOption>('newest')
+  const setSearch = (value: string) => {
+    setPage(1)
+    setSearchInput(value)
+  }
+  const setSelectedFolderId = (value: string | null) => {
+    setPage(1)
+    setFolderFilter(value)
+  }
+  const setSortOption = (value: SortOption) => {
+    setPage(1)
+    setSort(value)
+  }
+  // id bài giảng hoặc `folder:<id>` đang được đổi tên tại chỗ
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
 
   // State menu chuột phải
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
-  // State Modal tạo & đổi tên thư mục
+  // State Modal tạo thư mục
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false)
-  const [folderToEdit, setFolderToEdit] = useState<Folder | null>(null)
   const [folderNameInput, setFolderNameInput] = useState('')
   const [folderError, setFolderError] = useState<string | null>(null)
   const [isFolderSubmitting, setIsFolderSubmitting] = useState(false)
 
-  // State đổi tên bài giảng
-  const [renamingLecture, setRenamingLecture] = useState<Lecture | null>(null)
-  const [renameTitleInput, setRenameTitleInput] = useState('')
-
   // State chuyển thư mục bài giảng
-  const [movingLecture, setMovingLecture] = useState<Lecture | null>(null)
+  const [movingLecture, setMovingLecture] = useState<LectureSummary | null>(
+    null
+  )
   const [targetFolderId, setTargetFolderId] = useState<string>('')
 
   // State xuất bản bài giảng (Modal lựa chọn ảnh hoặc PDF)
-  const [lectureToExport, setLectureToExport] = useState<Lecture | null>(null)
+  const [lectureToExport, setLectureToExport] = useState<LectureSummary | null>(
+    null
+  )
 
   // State xóa bài giảng / thư mục
   const [lectureToDelete, setLectureToDelete] = useState<string | null>(null)
   const [lectureToPermanentlyDelete, setLectureToPermanentlyDelete] =
-    useState<Lecture | null>(null)
+    useState<LectureSummary | null>(null)
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null)
 
   // Tải dữ liệu
+  const loadControllerRef = useRef<AbortController | null>(null)
   const load = useCallback(async () => {
+    loadControllerRef.current?.abort()
+    const controller = new AbortController()
+    loadControllerRef.current = controller
+    const { signal } = controller
+    setIsLoading(true)
+    setLoadError(false)
     try {
       if (activeViewMode === 'trash') {
         const [trashRes, nextFolders] = await Promise.all([
-          lectureApi.trash(),
-          lectureApi.folders()
+          lectureApi.trashSummaries(signal),
+          lectureApi.folders(signal)
         ])
-        const trashItems = Array.isArray(trashRes)
-          ? trashRes
-          : (trashRes as { items: Lecture[] }).items || []
-        setLectures(trashItems)
+        if (signal.aborted) return
+        setLectures(trashRes)
         setFolders(nextFolders)
       } else {
-        const [result, nextFolders] = await Promise.all([
-          lectureApi.list({
-            search: search.trim() || undefined,
-            folderId: selectedFolderId || undefined,
-            sortBy,
-            sortOrder: sortBy === 'title' ? 'asc' : 'desc',
-            limit: '100'
-          }),
-          lectureApi.folders()
+        const [result, nextFolders, nextCounts] = await Promise.all([
+          lectureApi.summaries(
+            {
+              search: search.trim() || undefined,
+              folderId: selectedFolderId || undefined,
+              sortBy: SORT_OPTIONS[sortOption].sortBy,
+              sortOrder: SORT_OPTIONS[sortOption].sortOrder,
+              limit: '24',
+              page: String(page)
+            },
+            signal
+          ),
+          lectureApi.folders(signal),
+          lectureApi.counts(signal)
         ])
+        if (signal.aborted) return
         setLectures(result.items)
         setFolders(nextFolders)
+        setTotal(result.total)
+        setCounts(nextCounts)
+        if (page > Math.max(1, Math.ceil(result.total / 24)))
+          setPage(Math.max(1, Math.ceil(result.total / 24)))
       }
     } catch {
+      if (signal.aborted) return
+      setLoadError(true)
       notifyError('Không tải được dữ liệu từ máy chủ')
+    } finally {
+      if (!signal.aborted) setIsLoading(false)
     }
-  }, [search, selectedFolderId, sortBy, activeViewMode, notifyError])
+  }, [search, selectedFolderId, sortOption, page, activeViewMode, notifyError])
 
   useEffect(() => {
     void load()
+    return () => loadControllerRef.current?.abort()
   }, [load])
 
   // Đóng menu chuột phải khi click ra ngoài hoặc nhấn phím ESC
@@ -168,7 +253,7 @@ export const LibraryPage = ({
   }, [contextMenu])
 
   // Bắt sự kiện chuột phải trên bài giảng
-  const handleContextMenu = (e: React.MouseEvent, lecture: Lecture) => {
+  const handleContextMenu = (e: React.MouseEvent, lecture: LectureSummary) => {
     e.preventDefault()
     setContextMenu({
       x: e.clientX,
@@ -178,7 +263,10 @@ export const LibraryPage = ({
   }
 
   // Xử lý mở/đóng menu khi nhấp chuột trái vào nút Kebab ba chấm (...)
-  const handleKebabMenuClick = (e: React.MouseEvent, lecture: Lecture) => {
+  const handleKebabMenuClick = (
+    e: React.MouseEvent,
+    lecture: LectureSummary
+  ) => {
     e.stopPropagation()
     // Nếu menu của chính bài giảng này đang mở, click lại sẽ đóng menu (toggle)
     if (contextMenu?.lecture._id === lecture._id) {
@@ -205,15 +293,7 @@ export const LibraryPage = ({
 
   // Thao tác Thư mục
   const openCreateFolderModal = () => {
-    setFolderToEdit(null)
     setFolderNameInput('')
-    setFolderError(null)
-    setIsFolderModalOpen(true)
-  }
-
-  const openEditFolderModal = (folder: Folder) => {
-    setFolderToEdit(folder)
-    setFolderNameInput(folder.name)
     setFolderError(null)
     setIsFolderModalOpen(true)
   }
@@ -227,13 +307,8 @@ export const LibraryPage = ({
 
     try {
       setIsFolderSubmitting(true)
-      if (folderToEdit) {
-        await lectureApi.updateFolder(folderToEdit._id, trimmed)
-        notifySuccess('Đã cập nhật tên thư mục thành công')
-      } else {
-        await lectureApi.createFolder(trimmed)
-        notifySuccess('Đã tạo thư mục mới thành công')
-      }
+      await lectureApi.createFolder(trimmed)
+      notifySuccess('Đã tạo thư mục mới thành công')
       setIsFolderModalOpen(false)
       void load()
     } catch {
@@ -260,21 +335,49 @@ export const LibraryPage = ({
     }
   }
 
-  // Thao tác Đổi tên bài giảng
-  const handleRenameLecture = async () => {
-    if (!renamingLecture) return
-    const trimmed = renameTitleInput.trim()
-    if (!trimmed) return
-
+  // Đổi tên tại chỗ (bài giảng hoặc thư mục); null = bỏ trống/hủy -> giữ tên cũ (UC024 4a)
+  const handleRename = async (
+    target: { type: 'lecture' | 'folder'; id: string; current: string },
+    next: string | null
+  ) => {
+    setRenamingId(null)
+    if (!next || next === target.current) return
     try {
-      await lectureApi.update(renamingLecture._id, { title: trimmed })
-      setRenamingLecture(null)
-      notifySuccess('Đã đổi tên bài giảng thành công')
+      if (target.type === 'lecture') {
+        await lectureApi.update(target.id, { title: next })
+      } else {
+        await lectureApi.updateFolder(target.id, next)
+      }
+      notifySuccess('Đã đổi tên thành công')
       void load()
     } catch {
-      notifyError('Không thể đổi tên bài giảng')
+      notifyError('Không thể đổi tên')
     }
   }
+
+  // SRS UC023: kéo thả bài giảng vào thư mục (folderId null = Chưa phân loại)
+  const dropProps = (folderId: string | null) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes(LECTURE_DRAG_TYPE)) return
+      e.preventDefault()
+      setDropTargetId(folderId ?? 'unorganized')
+    },
+    onDragLeave: () => setDropTargetId(null),
+    onDrop: async (e: React.DragEvent) => {
+      e.preventDefault()
+      setDropTargetId(null)
+      const lectureId = e.dataTransfer.getData(LECTURE_DRAG_TYPE)
+      const lecture = lectures.find((l) => l._id === lectureId)
+      if (!lecture || (lecture.folderId ?? null) === folderId) return
+      try {
+        await lectureApi.update(lectureId, { folderId })
+        notifySuccess('Đã di chuyển bài giảng thành công')
+        void load()
+      } catch {
+        notifyError('Không thể di chuyển bài giảng')
+      }
+    }
+  })
 
   // Thao tác Chuyển bài giảng vào thư mục
   const handleMoveLectureToFolder = async () => {
@@ -284,7 +387,7 @@ export const LibraryPage = ({
         folderId: targetFolderId || null
       })
       setMovingLecture(null)
-      notifySuccess('Đã chuyển thư mục bài giảng thành công')
+      notifySuccess('Đã di chuyển bài giảng thành công')
       void load()
     } catch {
       notifyError('Không thể chuyển bài giảng vào thư mục')
@@ -307,9 +410,7 @@ export const LibraryPage = ({
     try {
       await lectureApi.moveToTrash(lectureToDelete)
       setLectureToDelete(null)
-      notifySuccess(
-        'Đã chuyển bài giảng vào thùng rác (đếm ngược 30 ngày tự động xóa)'
-      )
+      notifySuccess('Đã xóa bài giảng (có thể khôi phục trong Thùng rác)')
       void load()
     } catch {
       notifyError('Không thể chuyển bài giảng vào thùng rác')
@@ -340,10 +441,74 @@ export const LibraryPage = ({
     }
   }
 
+  // Tiêu đề thư mục: click tên hoặc "Đổi tên" để sửa tại chỗ (UC024)
+  const renderFolderHeading = (folder: Folder, count: number) => (
+    <div className='flex items-baseline justify-between pb-2'>
+      <div className='flex min-w-0 items-center gap-3'>
+        <h2 className='flex items-center gap-2 text-2xl font-medium text-emerald-950 font-display'>
+          <span>📁</span>
+          {renamingId === `folder:${folder._id}` ? (
+            <InlineRename
+              value={folder.name}
+              onInvalid={() => notifyError('Tên thư mục không được để trống')}
+              onDone={(next) =>
+                void handleRename(
+                  { type: 'folder', id: folder._id, current: folder.name },
+                  next
+                )
+              }
+            />
+          ) : (
+            <span
+              className='cursor-text'
+              title='Click để đổi tên thư mục'
+              onClick={() => setRenamingId(`folder:${folder._id}`)}
+            >
+              {folder.name}
+            </span>
+          )}
+        </h2>
+        <span className='border border-stone-300 bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600'>
+          {count} bài giảng
+        </span>
+      </div>
+      <div className='flex gap-2 font-sans text-xs font-semibold'>
+        <button
+          type='button'
+          onClick={() => setRenamingId(`folder:${folder._id}`)}
+          className='border border-stone-300 bg-white px-2.5 py-1 text-stone-600 transition hover:border-stone-400 hover:text-emerald-950'
+        >
+          Đổi tên
+        </button>
+        <button
+          type='button'
+          onClick={() => setFolderToDelete(folder)}
+          className='border border-stone-300 bg-white px-2.5 py-1 text-red-700 transition hover:border-red-300 hover:bg-red-50'
+        >
+          Xóa
+        </button>
+      </div>
+    </div>
+  )
+
+  const chipClass = (active: boolean, dropKey: string) =>
+    `flex shrink-0 items-center gap-2 border px-4 py-2 font-sans text-xs font-semibold transition ${
+      dropTargetId === dropKey
+        ? 'border-orange-700 bg-orange-50 text-orange-800'
+        : active
+          ? 'border-emerald-950 bg-stone-200/80 font-bold text-emerald-950'
+          : 'border-stone-300 bg-white text-stone-600 hover:border-stone-400 hover:text-emerald-950'
+    }`
+
   // Hàm render card bài giảng
-  const renderLectureCard = (lecture: Lecture) => (
+  const renderLectureCard = (lecture: LectureSummary) => (
     <article
       key={lecture._id}
+      draggable={activeViewMode !== 'trash' && renamingId !== lecture._id}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(LECTURE_DRAG_TYPE, lecture._id)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
       onContextMenu={(e) => handleContextMenu(e, lecture)}
       onClick={() => {
         if (activeViewMode === 'trash') {
@@ -359,28 +524,19 @@ export const LibraryPage = ({
         {/* Kết xuất trực quan Slide đầu tiên của bài giảng */}
         <div className='h-full w-full transition-transform duration-300 group-hover:scale-[1.02]'>
           <SlidePreview
-            slide={lecture.slides?.[0]}
+            slide={lecture.previewSlide}
             lectureTitle={lecture.title}
+            lectureTheme={lecture.theme}
           />
         </div>
 
         {/* Lớp overlay chứa Badge trạng thái (góc trái) & Nút Kebab ba chấm (góc phải) */}
-        <div className='absolute inset-x-0 top-0 flex items-center justify-between p-2.5 pointer-events-none'>
-          {/* Badge góc trái */}
-          {activeViewMode === 'trash' ? (
-            <span className='rounded-xs border border-red-300 bg-red-50/95 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 shadow-2xs backdrop-blur-xs'>
-              ⏳ Còn {getDaysRemaining(lecture.deletedAt)} ngày
-            </span>
-          ) : (
-            <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
-              {lecture.slides.length} SLIDES
-            </span>
-          )}
-
+        <div className='absolute right-0 top-0 flex items-center p-2.5 pointer-events-none'>
           {/* Nút menu ba chấm (...) rõ ràng ở góc thẻ bài giảng để nhấp chuột trái */}
           <button
             type='button'
             aria-label='Tùy chọn thao tác bài giảng'
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={(e) => handleKebabMenuClick(e, lecture)}
             className='pointer-events-auto flex h-7 w-7 items-center justify-center rounded-xs border border-stone-300 bg-white/95 text-stone-700 shadow-2xs backdrop-blur-xs transition hover:border-emerald-950 hover:bg-emerald-950 hover:text-white active:scale-95'
             title='Tùy chọn thao tác (Đổi tên, Nhân bản, Di chuyển, Xóa...)'
@@ -390,15 +546,46 @@ export const LibraryPage = ({
         </div>
       </div>
 
+      <div className='mt-2'>
+        {/* Badge góc trái */}
+        {activeViewMode === 'trash' ? (
+          <span className='rounded-xs border border-red-300 bg-red-50/95 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 shadow-2xs backdrop-blur-xs'>
+            ⏳ Còn {getDaysRemaining(lecture.deletedAt)} ngày
+          </span>
+        ) : (
+          <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
+            {lecture.slideCount} SLIDES
+          </span>
+        )}
+      </div>
       {/* Tiêu đề bài giảng & Metadata bên dưới */}
       <div className='flex items-start justify-between gap-3 pt-3.5'>
         <div className='min-w-0 flex-1'>
-          <h3
-            className='truncate text-xl font-medium text-emerald-950 font-display transition group-hover:text-orange-800'
-            title={lecture.title}
-          >
-            {lecture.title}
-          </h3>
+          {renamingId === lecture._id ? (
+            <InlineRename
+              value={lecture.title}
+              onInvalid={() => notifyError('Tên bài giảng không được để trống')}
+              className='text-xl font-display text-emerald-950'
+              onDone={(next) =>
+                void handleRename(
+                  { type: 'lecture', id: lecture._id, current: lecture.title },
+                  next
+                )
+              }
+            />
+          ) : (
+            <h3
+              className='truncate text-xl font-medium text-emerald-950 font-display transition group-hover:text-orange-800'
+              title={lecture.title}
+              onClick={(e) => {
+                if (activeViewMode === 'trash') return
+                e.stopPropagation()
+                setRenamingId(lecture._id)
+              }}
+            >
+              {lecture.title}
+            </h3>
+          )}
           <div className='mt-1 flex items-center gap-2 font-sans text-xs text-stone-500'>
             {activeViewMode === 'trash' ? (
               <span className='text-stone-500'>
@@ -453,7 +640,7 @@ export const LibraryPage = ({
             >
               <span>📂 Tất cả bài giảng</span>
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px]'>
-                {lectures.length}
+                {counts.total}
               </span>
             </button>
 
@@ -461,47 +648,36 @@ export const LibraryPage = ({
             <button
               type='button'
               onClick={() => setSelectedFolderId('unorganized')}
-              className={`flex shrink-0 items-center gap-2 border px-4 py-2 font-sans text-xs font-semibold transition ${
-                selectedFolderId === 'unorganized'
-                  ? 'border-emerald-950 bg-stone-200/80 font-bold text-emerald-950'
-                  : 'border-stone-300 bg-white text-stone-600 hover:border-stone-400 hover:text-emerald-950'
-              }`}
+              {...dropProps(null)}
+              className={chipClass(
+                selectedFolderId === 'unorganized',
+                'unorganized'
+              )}
             >
               <span>📄 Chưa phân loại</span>
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px]'>
-                {lectures.filter((l) => !l.folderId).length}
+                {counts.unorganized}
               </span>
             </button>
 
             {/* Các thẻ thư mục người dùng tạo */}
             {folders.map((folder) => {
-              const count = lectures.filter(
-                (l) => l.folderId === folder._id
-              ).length
+              const count = counts.folders[folder._id] || 0
               return (
                 <button
                   key={folder._id}
                   type='button'
                   onClick={() => setSelectedFolderId(folder._id)}
-                  className={`flex shrink-0 items-center gap-2 border px-4 py-2 font-sans text-xs font-semibold transition ${
-                    selectedFolderId === folder._id
-                      ? 'border-emerald-950 bg-stone-200/80 font-bold text-emerald-950'
-                      : 'border-stone-300 bg-white text-stone-600 hover:border-stone-400 hover:text-emerald-950'
-                  }`}
+                  {...dropProps(folder._id)}
+                  className={chipClass(
+                    selectedFolderId === folder._id,
+                    folder._id
+                  )}
+                  title='Thả bài giảng vào đây để di chuyển'
                 >
                   <span>📁 {folder.name}</span>
                   <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px]'>
                     {count}
-                  </span>
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openEditFolderModal(folder)
-                    }}
-                    className='ml-1 text-stone-400 hover:text-emerald-950'
-                    title='Đổi tên / Xóa thư mục'
-                  >
-                    ✏️
                   </span>
                 </button>
               )
@@ -521,7 +697,7 @@ export const LibraryPage = ({
 
       {/* THANH BỘ LỌC & TÌM KIẾM BÊN TRÊN LIST */}
       {activeViewMode !== 'trash' && (
-        <div className='mb-7 grid gap-3 sm:grid-cols-[1fr_200px_160px]'>
+        <div className='mb-7 grid gap-3 sm:grid-cols-[1fr_160px]'>
           <div className='relative'>
             <input
               type='text'
@@ -533,36 +709,43 @@ export const LibraryPage = ({
           </div>
 
           <select
-            aria-label='Lọc theo thư mục'
-            value={selectedFolderId || ''}
-            onChange={(e) => setSelectedFolderId(e.target.value || null)}
+            aria-label='Sắp xếp bài giảng'
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as SortOption)}
             className='border border-stone-300 bg-stone-50 p-3 font-sans text-xs text-stone-700 outline-orange-700'
           >
-            <option value=''>Tất cả thư mục</option>
-            {folders.map((folder) => (
-              <option key={folder._id} value={folder._id}>
-                {folder.name}
+            {Object.entries(SORT_OPTIONS).map(([key, option]) => (
+              <option key={key} value={key}>
+                {option.label}
               </option>
             ))}
-          </select>
-
-          <select
-            aria-label='Sắp xếp bài giảng'
-            value={sortBy}
-            onChange={(e) =>
-              setSortBy(e.target.value as 'createdAt' | 'updatedAt' | 'title')
-            }
-            className='border border-stone-300 bg-stone-50 p-3 font-sans text-xs text-stone-700 outline-orange-700'
-          >
-            <option value='createdAt'>Mới tạo (Mặc định)</option>
-            <option value='updatedAt'>Mới cập nhật</option>
-            <option value='title'>Tên (A-Z)</option>
           </select>
         </div>
       )}
 
       {/* NỘI DUNG DANH SÁCH BÀI GIẢNG / THÙNG RÁC */}
-      {activeViewMode === 'trash' ? (
+      {isLoading ? (
+        <p
+          role='status'
+          className='py-12 text-center font-sans text-sm text-stone-500'
+        >
+          Đang tải bài giảng...
+        </p>
+      ) : loadError ? (
+        <div
+          role='alert'
+          className='border border-red-200 bg-red-50 p-8 text-center font-sans text-sm text-red-800'
+        >
+          <p>Không tải được dữ liệu từ máy chủ.</p>
+          <button
+            type='button'
+            onClick={() => void load()}
+            className='mt-3 underline'
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : activeViewMode === 'trash' ? (
         <div>
           {lectures.length > 0 ? (
             <div className='grid gap-6 sm:grid-cols-2 lg:grid-cols-3'>
@@ -581,8 +764,15 @@ export const LibraryPage = ({
         </div>
       ) : (
         <div>
+          {search.trim() && lectures.length === 0 ? (
+            <div className='border border-dashed border-stone-400 p-16 text-center font-sans text-sm text-stone-500'>
+              Không tìm thấy kết quả nào
+            </div>
+          ) : null}
+
           {/* TRƯỜNG HỢP 1: ĐANG LỌC THEO MỘT THƯ MỤC CỤ THỂ */}
-          {selectedFolderId &&
+          {!(search.trim() && lectures.length === 0) &&
+            selectedFolderId &&
             selectedFolderId !== 'unorganized' &&
             (() => {
               const currentFolder = folders.find(
@@ -593,27 +783,7 @@ export const LibraryPage = ({
               )
               return (
                 <section className='mb-12'>
-                  <div className='flex items-baseline justify-between pb-2'>
-                    <div className='flex items-center gap-3'>
-                      <h2 className='text-2xl font-medium text-emerald-950 font-display flex items-center gap-2'>
-                        <span>📁</span>
-                        <span>{currentFolder?.name || 'Thư mục'}</span>
-                      </h2>
-                      <span className='border border-stone-300 bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600'>
-                        {folderLectures.length} bài giảng
-                      </span>
-                    </div>
-                    {currentFolder && (
-                      <button
-                        type='button'
-                        onClick={() => openEditFolderModal(currentFolder)}
-                        className='flex items-center gap-1.5 border border-stone-300 bg-white px-3 py-1.5 font-sans text-xs font-semibold text-stone-600 transition hover:border-stone-400 hover:text-emerald-950'
-                      >
-                        <span>✏️</span>
-                        <span>Đổi tên / Xóa thư mục</span>
-                      </button>
-                    )}
-                  </div>
+                  {currentFolder && renderFolderHeading(currentFolder, total)}
 
                   {/* Đường kẻ ngang */}
                   <div className='h-[1.5px] w-full bg-stone-300 mb-6'></div>
@@ -628,7 +798,8 @@ export const LibraryPage = ({
                       <p className='text-xs text-stone-500'>
                         Thư mục này hiện chưa có bài giảng nào. Nhấn chuột phải
                         vào bất kỳ bài giảng nào và chọn{' '}
-                        <strong>"Chuyển thư mục"</strong> để thêm vào đây.
+                        <strong>"Di chuyển tới..."</strong> hoặc kéo thả bài
+                        giảng vào thư mục để thêm vào đây.
                       </p>
                     </div>
                   )}
@@ -637,7 +808,8 @@ export const LibraryPage = ({
             })()}
 
           {/* TRƯỜNG HỢP 2: ĐANG CHỌN XEM "CHƯA PHÂN LOẠI" */}
-          {selectedFolderId === 'unorganized' &&
+          {!(search.trim() && lectures.length === 0) &&
+            selectedFolderId === 'unorganized' &&
             (() => {
               const unorganizedLectures = lectures.filter((l) => !l.folderId)
               return (
@@ -675,7 +847,8 @@ export const LibraryPage = ({
             })()}
 
           {/* TRƯỜNG HỢP 3: XEM TẤT CẢ (selectedFolderId === null || '') -> HIỂN THỊ TỪNG THƯ MỤC LÀ TITLE, KẺ NGANG RA, BÊN DƯỚI LÀ BÀI GIẢNG THUỘC TỆP ĐÓ */}
-          {(selectedFolderId === null || selectedFolderId === '') &&
+          {!(search.trim() && lectures.length === 0) &&
+            (selectedFolderId === null || selectedFolderId === '') &&
             (() => {
               const unorganizedLectures = lectures.filter((l) => !l.folderId)
               const totalLectures = lectures.length
@@ -687,10 +860,17 @@ export const LibraryPage = ({
                       Thư viện còn trống
                     </h3>
                     <p className='my-3 font-sans text-sm text-stone-500'>
-                      {search
-                        ? 'Không tìm thấy bài giảng phù hợp với từ khóa.'
-                        : 'Tạo bài giảng đầu tiên từ một prompt hoặc canvas trống.'}
+                      Bắt đầu bằng cách mô tả nội dung để AI tạo bài giảng.
                     </p>
+                    {openCreateLecture && (
+                      <button
+                        type='button'
+                        onClick={openCreateLecture}
+                        className='mt-2 bg-orange-700 px-5 py-3 font-sans text-xs font-bold uppercase tracking-wider text-white hover:bg-orange-800'
+                      >
+                        Tạo bài giảng đầu tiên của bạn
+                      </button>
+                    )}
                   </div>
                 )
               }
@@ -707,27 +887,12 @@ export const LibraryPage = ({
 
                     return (
                       <section key={folder._id}>
-                        {/* Tiêu đề thư mục */}
-                        <div className='flex items-baseline justify-between pb-2'>
-                          <div className='flex items-center gap-3'>
-                            <h2 className='text-2xl font-medium text-emerald-950 font-display flex items-center gap-2'>
-                              <span>📁</span>
-                              <span>{folder.name}</span>
-                            </h2>
-                            <span className='border border-stone-300 bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600'>
-                              {folderLectures.length} bài giảng
-                            </span>
-                          </div>
-                          <button
-                            type='button'
-                            onClick={() => openEditFolderModal(folder)}
-                            className='flex items-center gap-1.5 border border-stone-300 bg-white px-2.5 py-1 font-sans text-xs font-semibold text-stone-600 transition hover:border-stone-400 hover:text-emerald-950'
-                            title='Đổi tên / Xóa thư mục'
-                          >
-                            <span>✏️</span>
-                            <span>Tùy chọn</span>
-                          </button>
-                        </div>
+                        {renderFolderHeading(
+                          folder,
+                          search
+                            ? folderLectures.length
+                            : counts.folders[folder._id] || 0
+                        )}
 
                         {/* Đường kẻ ngang */}
                         <div className='h-[1.5px] w-full bg-stone-300 mb-6'></div>
@@ -742,8 +907,8 @@ export const LibraryPage = ({
                             <p className='text-xs text-stone-500'>
                               Thư mục <strong>"{folder.name}"</strong> chưa có
                               bài giảng nào. Nhấn chuột phải vào bài giảng bất
-                              kỳ và chọn <strong>"Chuyển thư mục"</strong> để
-                              đưa vào đây.
+                              kỳ và chọn <strong>"Di chuyển tới..."</strong>{' '}
+                              hoặc kéo thả bài giảng vào để đưa vào đây.
                             </p>
                           </div>
                         )}
@@ -796,6 +961,18 @@ export const LibraryPage = ({
       )}
 
       {/* MENU CHUỘT PHẢI & KEBAB MENU (CUSTOM CONTEXT MENU) */}
+      {activeViewMode === 'library' &&
+        !isLoading &&
+        !loadError &&
+        total > 0 && (
+          <Pagination
+            page={page}
+            total={total}
+            limit={24}
+            onPageChange={setPage}
+            itemName='bài giảng'
+          />
+        )}
       {contextMenu && (
         <div
           ref={contextMenuRef}
@@ -893,7 +1070,7 @@ export const LibraryPage = ({
                 className='flex w-full items-center gap-2 px-3 py-2 text-left font-medium hover:bg-stone-100 hover:text-emerald-950 transition'
               >
                 <span>📁</span>
-                <span>Chuyển vào thư mục</span>
+                <span>Di chuyển tới...</span>
               </button>
 
               {/* 4. Nhân bản */}
@@ -906,21 +1083,20 @@ export const LibraryPage = ({
                 className='flex w-full items-center gap-2 px-3 py-2 text-left font-medium hover:bg-stone-100 hover:text-emerald-950 transition'
               >
                 <span>📋</span>
-                <span>Nhân bản bài giảng</span>
+                <span>Nhân bản</span>
               </button>
 
               {/* 5. Đổi tên bài giảng */}
               <button
                 type='button'
                 onClick={() => {
-                  setRenamingLecture(contextMenu.lecture)
-                  setRenameTitleInput(contextMenu.lecture.title)
+                  setRenamingId(contextMenu.lecture._id)
                   setContextMenu(null)
                 }}
                 className='flex w-full items-center gap-2 px-3 py-2 text-left font-medium hover:bg-stone-100 hover:text-emerald-950 transition'
               >
                 <span>🏷️</span>
-                <span>Đổi tên bài giảng</span>
+                <span>Đổi tên</span>
               </button>
 
               {/* 6. Chuyển vào thùng rác (Soft Delete) */}
@@ -934,7 +1110,7 @@ export const LibraryPage = ({
                   className='flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-orange-800 hover:bg-orange-50 transition'
                 >
                   <span>🗑️</span>
-                  <span>Chuyển vào thùng rác</span>
+                  <span>Xóa</span>
                 </button>
               </div>
             </div>
@@ -946,7 +1122,7 @@ export const LibraryPage = ({
       <Modal
         open={isFolderModalOpen}
         onClose={() => setIsFolderModalOpen(false)}
-        title={folderToEdit ? 'Đổi tên thư mục' : 'Tạo thư mục mới'}
+        title='Tạo thư mục mới'
       >
         <form
           onSubmit={(e) => {
@@ -978,22 +1154,7 @@ export const LibraryPage = ({
             </div>
           )}
 
-          <div className='mt-6 flex items-center justify-between gap-2 pt-2'>
-            {folderToEdit ? (
-              <button
-                type='button'
-                className='text-xs font-semibold text-red-700 hover:text-red-900 transition'
-                onClick={() => {
-                  setIsFolderModalOpen(false)
-                  setFolderToDelete(folderToEdit)
-                }}
-              >
-                🗑️ Xóa thư mục này
-              </button>
-            ) : (
-              <div />
-            )}
-
+          <div className='mt-6 flex items-center justify-end gap-2 pt-2'>
             <div className='flex gap-2'>
               <button
                 type='button'
@@ -1001,63 +1162,16 @@ export const LibraryPage = ({
                 onClick={() => setIsFolderModalOpen(false)}
                 disabled={isFolderSubmitting}
               >
-                Hủy
+                Hủy bỏ
               </button>
               <button
                 type='submit'
                 className='bg-orange-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-orange-800 disabled:opacity-50'
                 disabled={isFolderSubmitting}
               >
-                {isFolderSubmitting ? 'Đang lưu...' : 'Lưu thư mục'}
+                {isFolderSubmitting ? 'Đang lưu...' : 'Lưu'}
               </button>
             </div>
-          </div>
-        </form>
-      </Modal>
-
-      {/* MODAL ĐỔI TÊN BÀI GIẢNG */}
-      <Modal
-        open={Boolean(renamingLecture)}
-        onClose={() => setRenamingLecture(null)}
-        title='Đổi tên bài giảng'
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            void handleRenameLecture()
-          }}
-          className='space-y-4 font-sans'
-        >
-          <div>
-            <label
-              htmlFor='rename-title-input'
-              className='block text-xs font-bold text-stone-700 uppercase tracking-wider'
-            >
-              Tiêu đề mới
-            </label>
-            <input
-              id='rename-title-input'
-              className='mt-2 w-full border border-stone-300 bg-white p-3 text-xs outline-orange-700'
-              value={renameTitleInput}
-              onChange={(e) => setRenameTitleInput(e.target.value)}
-              autoFocus
-            />
-          </div>
-
-          <div className='mt-6 flex justify-end gap-2 pt-2'>
-            <button
-              type='button'
-              className='border border-stone-400 px-4 py-2.5 text-xs font-semibold hover:bg-stone-100'
-              onClick={() => setRenamingLecture(null)}
-            >
-              Hủy
-            </button>
-            <button
-              type='submit'
-              className='bg-orange-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-orange-800'
-            >
-              Cập nhật tên
-            </button>
           </div>
         </form>
       </Modal>
@@ -1066,7 +1180,7 @@ export const LibraryPage = ({
       <Modal
         open={Boolean(movingLecture)}
         onClose={() => setMovingLecture(null)}
-        title='Chuyển bài giảng vào thư mục'
+        title='Di chuyển bài giảng'
       >
         <div className='space-y-4 font-sans'>
           <p className='text-xs text-stone-600'>
@@ -1129,11 +1243,8 @@ export const LibraryPage = ({
       {/* DIALOG XÁC NHẬN CHUYỂN VÀO THÙNG RÁC (SOFT DELETE - ĐẾM NGƯỢC 30 NGÀY) */}
       <ConfirmDialog
         open={Boolean(lectureToDelete)}
-        title='Chuyển bài giảng vào Thùng rác'
-        message='Bài giảng sẽ được chuyển vào Thùng rác và đếm ngược 30 ngày trước khi hệ thống tự động xóa vĩnh viễn. Trong 30 ngày này, bạn có thể khôi phục lại bài giảng bất cứ lúc nào.'
-        confirmLabel='Chuyển vào thùng rác'
-        cancelLabel='Hủy'
-        onConfirm={() => void handleConfirmDeleteLecture()}
+        message='Bạn có chắc chắn muốn xóa?'
+        onConfirm={handleConfirmDeleteLecture}
         onCancel={() => setLectureToDelete(null)}
       />
 
@@ -1144,7 +1255,7 @@ export const LibraryPage = ({
         message={`Bạn có chắc chắn muốn xóa vĩnh viễn bài giảng "${lectureToPermanentlyDelete?.title}" không? Toàn bộ slide và dữ liệu liên quan sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu và KHÔNG THỂ khôi phục lại.`}
         confirmLabel='Xóa vĩnh viễn'
         cancelLabel='Hủy'
-        onConfirm={() => void handleConfirmPermanentDeleteLecture()}
+        onConfirm={handleConfirmPermanentDeleteLecture}
         onCancel={() => setLectureToPermanentlyDelete(null)}
       />
 
@@ -1155,7 +1266,7 @@ export const LibraryPage = ({
         message={`Bạn có chắc chắn muốn xóa thư mục "${folderToDelete?.name}" không? Các bài giảng bên trong sẽ trở về trạng thái chưa phân loại.`}
         confirmLabel='Xóa thư mục'
         cancelLabel='Hủy'
-        onConfirm={() => void handleConfirmDeleteFolder()}
+        onConfirm={handleConfirmDeleteFolder}
         onCancel={() => setFolderToDelete(null)}
       />
 

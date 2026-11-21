@@ -1,50 +1,86 @@
-import { useEffect } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { AdminPage } from '@/features/admin/components/AdminPage'
+import { lazy, Suspense, useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthPage } from '@/features/auth/components/AuthPage'
 import { authApi } from '@/features/auth/api/auth.api'
-import { EditorPage } from '@/features/slide-editor/components/EditorPage'
 import { LibraryPage } from '@/features/library/components/LibraryPage'
-import { PresentationPage } from '@/features/presentation/components/PresentationPage'
-import { ProfilePage } from '@/features/auth/components/ProfilePage'
-import { ChangePasswordPage } from '@/features/auth/components/ChangePasswordPage'
 import { WorkspaceHeader } from '@/components/layout/WorkspaceHeader'
 import { UserLayout } from '@/components/layout/UserLayout'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
-export const App = () => {
-  const navigate = useNavigate()
-  const { user, accessToken, refreshToken, setSession, clearSession } =
-    useAuthStore()
+const AdminPage = lazy(() =>
+  import('@/features/admin/components/AdminPage').then((m) => ({
+    default: m.AdminPage
+  }))
+)
+const EditorPage = lazy(() =>
+  import('@/features/slide-editor/components/EditorPage').then((m) => ({
+    default: m.EditorPage
+  }))
+)
+const PresentationPage = lazy(() =>
+  import('@/features/presentation/components/PresentationPage').then((m) => ({
+    default: m.PresentationPage
+  }))
+)
+const ProfilePage = lazy(() =>
+  import('@/features/auth/components/ProfilePage').then((m) => ({
+    default: m.ProfilePage
+  }))
+)
+const ChangePasswordPage = lazy(() =>
+  import('@/features/auth/components/ChangePasswordPage').then((m) => ({
+    default: m.ChangePasswordPage
+  }))
+)
+
+export const App = () => (
+  <Suspense fallback={null}>
+    <AppRoutes />
+  </Suspense>
+)
+
+const AppRoutes = () => {
+  const { user, accessToken } = useAuthStore()
+  const { pathname } = useLocation()
 
   useEffect(() => {
-    if (!accessToken || user) return
+    if (!accessToken) return
+    let active = true
     void authApi
       .profile()
-      .then((nextUser) =>
-        setSession({
-          user: nextUser,
-          accessToken: useAuthStore.getState().accessToken ?? accessToken,
-          refreshToken: refreshToken ?? ''
-        })
-      )
-      .catch(clearSession)
-  }, [accessToken, clearSession, refreshToken, setSession, user])
+      .then((nextUser) => {
+        if (!active || !useAuthStore.getState().accessToken) return
+        const {
+          user: currentUser,
+          setSession,
+          updateUser,
+          refreshToken
+        } = useAuthStore.getState()
+        if (currentUser) updateUser(nextUser)
+        else
+          setSession({
+            user: nextUser,
+            accessToken: useAuthStore.getState().accessToken ?? accessToken,
+            refreshToken: refreshToken ?? ''
+          })
+      })
+      .catch(() => {
+        /* Interceptor xử lý phiên hết hạn; lỗi mạng giữ phiên hiện tại. */
+      })
+    return () => {
+      active = false
+    }
+  }, [accessToken, pathname])
 
   if (!accessToken || !user) return <AuthPage />
 
   const isAdmin = user.role === 'admin'
 
-  const logout = () => {
-    if (refreshToken) void authApi.logout(refreshToken)
-    clearSession()
-  }
-
   // Admin chỉ cần quản trị hệ thống, không cần các tab khác -> UI content container không có sidebar
   if (isAdmin) {
     return (
       <div className='min-h-screen bg-brand-paper font-sans'>
-        <WorkspaceHeader onAdmin={() => navigate('/admin')} onLogout={logout} />
+        <WorkspaceHeader />
         <main className='pt-16 min-h-screen'>
           <Routes>
             <Route path='/admin' element={<AdminPage />} />

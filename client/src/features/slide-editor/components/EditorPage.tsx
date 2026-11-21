@@ -1,5 +1,17 @@
-import { ExportModal } from '@/components/ui/ExportModal'
+import type { TextSelection } from '@/lib/types'
+import {
+  applyFormat,
+  editedText,
+  inlineKeys,
+  replaceText,
+  segments
+} from '../utils/textFormat'
+import { shouldFail } from '@/lib/qaFaults'
+import { requestError } from '@/lib/requestError'
+import { useShallow } from 'zustand/react/shallow'
+import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { editorApi } from '@/features/slide-editor/api/editor.api'
 import type {
@@ -11,14 +23,21 @@ import type {
 } from '@/lib/types'
 import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { getThemeById } from '../constants/theme-options'
+import {
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useParams
+} from 'react-router-dom'
+import { getThemeById, withSlideColors } from '../constants/theme-options'
 import {
   AiChatMessage,
+  createWelcomeMessages,
   useEditorStore,
   type AiSlideProposalItem
 } from '../store/editor.store'
 import {
+  clearLocalChatHistory,
   clearOfflineDraft,
   getOfflineDraft,
   saveOfflineDraft
@@ -32,8 +51,9 @@ import { SlideCanvas } from './SlideCanvas'
 import { SlideFilmstrip } from './SlideFilmstrip'
 import { SourceMaterialModal } from './SourceMaterialModal'
 import { OutlineModal } from './OutlineModal'
+import { AiGenerationWizard } from '@/features/lecture-generation/components/AiGenerationWizard'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
-
+import { createSerialAutosaver, hasSameSavedContent } from '../utils/autosave'
 const resolveProposalTargetIndex = (
   slides: Slide[],
   proposedSlide: Slide,
@@ -71,10 +91,37 @@ export const EditorPage = ({
   onPresent
 }: EditorPageProps) => {
   const { showToast } = useToast()
+  const [selection, setSelection] = useState<TextSelection | null>(null)
+  useEffect(() => {
+    const clear = (event: PointerEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest('[data-selection-tools],[data-slide-canvas-text]')
+      )
+        setSelection(null)
+    }
+    document.addEventListener('pointerdown', clear, true)
+    return () => document.removeEventListener('pointerdown', clear, true)
+  }, [])
+  const [slideFailure, setSlideFailure] = useState<{
+    kind: 'add' | 'duplicate'
+    retry: () => void
+  } | null>(null)
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 1023px)')
+    const closePanels = () => {
+      if (narrow.matches)
+        useEditorStore.setState({ isDrawerOpen: false, isAiPanelOpen: false })
+    }
+    closePanels()
+    narrow.addEventListener('change', closePanels)
+    return () => narrow.removeEventListener('change', closePanels)
+  }, [])
+  const aiRequestRef = useRef<AbortController | null>(null)
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const location = useLocation()
-  const { user, updateUser } = useAuthStore()
+  const { updateUser } = useAuthStore()
 
   const {
     activeSlideIndex,
@@ -95,22 +142,48 @@ export const EditorPage = ({
     sourceMaterial,
     setSourceMaterial,
     isSourceMaterialModalOpen,
-    setIsSourceMaterialModalOpen
-  } = useEditorStore()
+    setIsSourceMaterialModalOpen,
+    clearHistory
+  } = useEditorStore(
+    useShallow((state) => ({
+      activeSlideIndex: state.activeSlideIndex,
+      setActiveSlideIndex: state.setActiveSlideIndex,
+      selectedCompId: state.selectedCompId,
+      setSelectedCompId: state.setSelectedCompId,
+      recordHistory: state.recordHistory,
+      undo: state.undo,
+      redo: state.redo,
+      addAiMessage: state.addAiMessage,
+      setAiMessages: state.setAiMessages,
+      updateAiMessageStatus: state.updateAiMessageStatus,
+      aiMessages: state.aiMessages,
+      previewSlide: state.previewSlide,
+      previewSlideAction: state.previewSlideAction,
+      previewTargetSlideId: state.previewTargetSlideId,
+      setPreviewSlide: state.setPreviewSlide,
+      sourceMaterial: state.sourceMaterial,
+      setSourceMaterial: state.setSourceMaterial,
+      isSourceMaterialModalOpen: state.isSourceMaterialModalOpen,
+      setIsSourceMaterialModalOpen: state.setIsSourceMaterialModalOpen,
+      clearHistory: state.clearHistory
+    }))
+  )
 
-  const lectureFromState = (location.state as { lecture?: Lecture })?.lecture
+  const routeState = location.state as {
+    lecture?: Lecture
+    startAi?: boolean
+  } | null
+  const lectureFromState = routeState?.lecture
+  // SRS UC021 bước 5: bài giảng vừa tạo mở kèm màn hình nhập Prompt AI
+  const [showAiWizard, setShowAiWizard] = useState(Boolean(routeState?.startAi))
   const lectureId = params.id || initialLecture?._id || lectureFromState?._id
+  useEffect(() => () => aiRequestRef.current?.abort(), [lectureId])
 
-  // Kiểm tra ngay khi khởi tạo xem có bản nháp offline trong localStorage không
-  const [lecture, setLecture] = useState<Lecture | null>(() => {
-    if (lectureId) {
-      const draft = getOfflineDraft(lectureId)
-      if (draft) {
-        return draft.lecture
-      }
-    }
-    return initialLecture || lectureFromState || null
-  })
+  // Bản nháp offline (nếu có) được hỏi Khôi phục/Bỏ qua sau khi tải xong (SRS UC009 5a/5b)
+  const [lecture, setLecture] = useState<Lecture | null>(
+    () => initialLecture || lectureFromState || null
+  )
+  const [pendingDraft, setPendingDraft] = useState<Lecture | null>(null)
   const [isLoading, setIsLoading] = useState(!lecture)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isUnauthorized, setIsUnauthorized] = useState(false)
@@ -130,27 +203,46 @@ export const EditorPage = ({
   })
 
   // Trạng thái lưu: nếu mở từ bản nháp offline chưa đồng bộ, khởi tạo là 'offline_saved'
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
-    if (lectureId && getOfflineDraft(lectureId)) {
-      return 'offline_saved'
-    }
-    return 'saved'
-  })
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [countdown, setCountdown] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isLeaving, setIsLeaving] = useState(false)
+  const leaveApprovedRef = useRef(false)
+  const lastValidTitleRef = useRef(lecture?.title || 'Bài giảng chưa đặt tên')
+  const loadRequestRef = useRef<AbortController | null>(null)
+  const saveBlockedRef = useRef(false)
+  const networkFailureNotifiedRef = useRef(false)
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      !leaveApprovedRef.current &&
+      saveStatus !== 'saved' &&
+      currentLocation.pathname !== nextLocation.pathname
+  )
 
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   )
   const lectureRef = useRef(lecture)
+  const [autosaver] = useState(() => createSerialAutosaver(editorApi.autosave))
+  // Each candidate points back to the slide order and history before the operation.
+  const listChanges = useRef(
+    new WeakMap<
+      Slide[],
+      {
+        previous: Slide[]
+        undo: ReturnType<typeof useEditorStore.getState>['undoStack']
+        redo: ReturnType<typeof useEditorStore.getState>['redoStack']
+        selectedIndex: number
+        selectedComp: string | null
+        message: string
+      }
+    >()
+  )
+  const pendingSavesRef = useRef(0)
   useEffect(() => {
     lectureRef.current = lecture
   }, [lecture])
-
-  const aiMessagesRef = useRef(aiMessages)
-  useEffect(() => {
-    aiMessagesRef.current = aiMessages
-  }, [aiMessages])
 
   const clearCountdownTimers = useCallback(() => {
     if (countdownTimerRef.current) {
@@ -183,22 +275,23 @@ export const EditorPage = ({
   // Thực hiện lưu bài giảng: kiểm tra online/offline
   const executeSave = useCallback(
     async (toSave: Lecture, isAuto = false) => {
+      if (saveBlockedRef.current) return false
       setSaveStatus('saving')
       clearCountdownTimers()
 
-      const payload: Lecture = {
-        ...toSave,
-        aiChatHistory:
-          toSave.aiChatHistory && toSave.aiChatHistory.length > 0
-            ? toSave.aiChatHistory
-            : (aiMessagesRef.current as unknown as Array<
-                Record<string, unknown>
-              >)
-      }
+      const payload = toSave.title.trim()
+        ? toSave
+        : { ...toSave, title: lastValidTitleRef.current }
 
       // 1. Nếu không có kết nối mạng: lưu tạm vào localStorage
       if (!navigator.onLine) {
-        saveOfflineDraft(payload)
+        if (!saveOfflineDraft(payload)) {
+          setSaveStatus('error')
+          setSaveError(
+            'Trình duyệt không còn đủ dung lượng lưu bản nháp. Vui lòng giữ trang này và kết nối lại để lưu lên máy chủ.'
+          )
+          return false
+        }
         setSaveStatus('offline_saved')
         if (!isAuto) {
           showToast(
@@ -206,114 +299,229 @@ export const EditorPage = ({
             'info'
           )
         }
-        return
+        return false
       }
 
       // 2. Nếu có mạng: gửi lên server
+      pendingSavesRef.current += 1
       try {
-        await editorApi.autosave(payload)
-        clearOfflineDraft(payload._id)
-        setSaveStatus('saved')
+        const receipt = await autosaver.save(payload)
+        listChanges.current.delete(payload.slides)
+        networkFailureNotifiedRef.current = false
+        lastValidTitleRef.current = payload.title
+        setSaveError(null)
+        if (lectureRef.current?._id === payload._id) {
+          const current = lectureRef.current
+          const unchanged = hasSameSavedContent(current, toSave)
+          const next = {
+            ...(unchanged ? payload : current),
+            revision: receipt.revision,
+            updatedAt: receipt.savedAt
+          }
+          lectureRef.current = next
+          setLecture(next)
+          if (unchanged) {
+            if (payload !== toSave) {
+              showToast(
+                'Tên bài giảng không được để trống. Đã giữ lại tên hợp lệ trước đó.',
+                'info'
+              )
+            }
+            clearOfflineDraft(payload._id)
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'saved')
+          } else {
+            setSaveStatus(pendingSavesRef.current > 1 ? 'saving' : 'unsaved')
+          }
+        }
         if (!isAuto) {
           showToast('Đã lưu bài giảng lên máy chủ thành công', 'success')
         }
+        return true
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
-        saveOfflineDraft(payload)
-        setSaveStatus('offline_saved')
-        showToast(
-          'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.',
-          'error'
-        )
+        let latestLecture =
+          lectureRef.current?._id === payload._id ? lectureRef.current : payload
+        const status = isAxiosError(err) ? err.response?.status : undefined
+        let operationError: string | undefined
+        if (
+          status &&
+          latestLecture.slides === payload.slides &&
+          lectureRef.current?._id === payload._id
+        ) {
+          let checkpoint = listChanges.current.get(payload.slides)
+          while (checkpoint) {
+            listChanges.current.delete(latestLecture.slides)
+            operationError ??= checkpoint.message
+            latestLecture = { ...latestLecture, slides: checkpoint.previous }
+            useEditorStore.setState({
+              undoStack: checkpoint.undo,
+              redoStack: checkpoint.redo,
+              activeSlideIndex: checkpoint.selectedIndex,
+              selectedCompId: checkpoint.selectedComp
+            })
+            checkpoint = listChanges.current.get(checkpoint.previous)
+          }
+          if (operationError) {
+            lectureRef.current = latestLecture
+            setLecture(latestLecture)
+          }
+        }
+        const draftSaved = saveOfflineDraft(latestLecture)
+        if (status) {
+          if ([403, 404, 409].includes(status)) saveBlockedRef.current = true
+          const serverMessage =
+            (err as { response?: { data?: { message?: string } } }).response
+              ?.data?.message || 'Không thể lưu bài giảng.'
+          const message = draftSaved
+            ? serverMessage
+            : `${serverMessage} Trình duyệt cũng không lưu được bản nháp. Vui lòng giữ trang này để tránh mất chỉnh sửa.`
+          setSaveError(message)
+          setSaveStatus('error')
+          showToast(operationError ?? message, 'error')
+        } else {
+          const message = draftSaved
+            ? 'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.'
+            : 'Không thể kết nối máy chủ và không lưu được bản nháp trong trình duyệt. Vui lòng giữ trang này để tránh mất chỉnh sửa.'
+          if (lectureRef.current?._id === payload._id) {
+            setSaveError(message)
+            setSaveStatus(
+              draftSaved
+                ? pendingSavesRef.current > 1
+                  ? 'saving'
+                  : 'offline_saved'
+                : 'error'
+            )
+          }
+          // Chỉ báo một lần mỗi đợt lỗi mạng; lưu thủ công vẫn luôn có phản hồi.
+          if (!isAuto || !networkFailureNotifiedRef.current)
+            showToast(message, 'error')
+          networkFailureNotifiedRef.current = true
+        }
+        return false
+      } finally {
+        pendingSavesRef.current -= 1
       }
     },
-    [clearCountdownTimers, showToast]
+    [autosaver, clearCountdownTimers, showToast]
   )
+
+  const flushChanges = useCallback(
+    async (keepDraftOnly = false) => {
+      if (keepDraftOnly && lectureRef.current) {
+        const kept = saveOfflineDraft(lectureRef.current)
+        if (kept) leaveApprovedRef.current = true
+        if (!kept)
+          showToast(
+            'Không thể giữ bản nháp trong trình duyệt. Vui lòng lưu lên máy chủ trước khi rời trang.',
+            'error'
+          )
+        return kept
+      }
+      let pending = lectureRef.current
+      while (pending) {
+        if (!(await executeSave(pending, false))) return false
+        const latest = lectureRef.current
+        if (latest && hasSameSavedContent(latest, pending)) {
+          leaveApprovedRef.current = true
+          return true
+        }
+        pending = latest
+      }
+      leaveApprovedRef.current = true
+      return true
+    },
+    [executeSave, showToast]
+  )
+
+  useEffect(() => {
+    useEditorStore
+      .getState()
+      .setBeforeLeave(saveStatus === 'saved' ? null : flushChanges)
+    return () => useEditorStore.getState().setBeforeLeave(null)
+  }, [flushChanges, saveStatus])
 
   // Tải dữ liệu bài giảng từ server
   const loadLecture = useCallback(async () => {
     if (!params.id) return
-    if (!lectureRef.current) {
+    loadRequestRef.current?.abort()
+    const controller = new AbortController()
+    loadRequestRef.current = controller
+    if (!lectureRef.current || lectureRef.current._id !== params.id) {
       setIsLoading(true)
     }
     setLoadError(null)
     setIsUnauthorized(false)
+    clearHistory()
 
     try {
-      const loaded = await editorApi.get(params.id)
-
-      // Kiểm tra quyền truy cập theo Use-case
-      if (
-        user &&
-        loaded.userId &&
-        loaded.userId !== user.id &&
-        user.role !== 'admin'
-      ) {
-        setIsUnauthorized(true)
-        setIsLoading(false)
-        return
-      }
+      const loaded = await editorApi.get(params.id, controller.signal)
+      if (controller.signal.aborted) return
+      autosaver.reset(loaded)
+      saveBlockedRef.current = false
+      lectureRef.current = loaded
+      lastValidTitleRef.current = loaded.title
+      setSourceMaterial(loaded.sourceMaterial || '')
+      setSaveError(null)
 
       // Kiểm tra xem có bản nháp offline chưa đồng bộ không
-      const draft = getOfflineDraft(params.id)
+      const draft = getOfflineDraft(params.id, useAuthStore.getState().user?.id)
       const hasUnsyncedChanges =
         draft &&
-        (JSON.stringify(draft.lecture.slides) !==
-          JSON.stringify(loaded.slides) ||
-          draft.lecture.title !== loaded.title)
-
-      if (draft && hasUnsyncedChanges) {
-        setLecture(draft.lecture)
-        setSaveStatus('offline_saved')
-        showToast(
-          'Đã khôi phục bản nháp chỉnh sửa offline. Nhấn Ctrl+S hoặc nút Lưu để cập nhật lên máy chủ.',
-          'info'
+        (
+          [
+            'title',
+            'slides',
+            'theme',
+            'sourceMaterial',
+            'contextSummary'
+          ] as const
+        ).some(
+          (field) =>
+            JSON.stringify(draft.lecture[field]) !==
+            JSON.stringify(loaded[field])
         )
-      } else {
-        setLecture(loaded)
-        setSaveStatus('saved')
-        if (draft) clearOfflineDraft(params.id)
-      }
 
-      // Khôi phục lịch sử chat AI từ dữ liệu bài giảng trên máy chủ
-      const chatHistory = draft?.lecture.aiChatHistory || loaded.aiChatHistory
-      if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
-        setAiMessages(chatHistory as unknown as AiChatMessage[])
-        try {
-          localStorage.setItem(
-            `abslider_chat_${loaded._id}`,
-            JSON.stringify(chatHistory)
-          )
-        } catch {
-          // ignore
-        }
-      }
-
-      // Khôi phục vị trí slide gần nhất từ sessionStorage theo Use-case
-      const savedIndexStr = sessionStorage.getItem(
-        `open4um_last_slide_${loaded._id}`
+      setLecture(loaded)
+      setAiMessages(
+        loaded.aiChatHistory?.length
+          ? (loaded.aiChatHistory as unknown as AiChatMessage[])
+          : createWelcomeMessages()
       )
-      if (savedIndexStr !== null) {
-        const savedIndex = Number(savedIndexStr)
-        if (
-          !isNaN(savedIndex) &&
+      setSaveStatus('saved')
+      if (draft && hasUnsyncedChanges) setPendingDraft(draft.lecture)
+      else if (draft) clearOfflineDraft(params.id)
+
+      // SRS UC009 bước 7: chọn slide mở gần nhất, nếu không có thì slide đầu tiên
+      const savedIndex = Number(
+        sessionStorage.getItem(`open4um_last_slide_${loaded._id}`)
+      )
+      setActiveSlideIndex(
+        Number.isInteger(savedIndex) &&
           savedIndex >= 0 &&
           savedIndex < loaded.slides.length
-        ) {
-          setActiveSlideIndex(savedIndex)
-        }
-      }
+          ? savedIndex
+          : 0
+      )
     } catch (err) {
+      if (controller.signal.aborted) return
+      // SRS UC009 2a: không có quyền truy cập
+      if (isAxiosError(err) && err.response?.status === 403) {
+        setIsUnauthorized(true)
+        return
+      }
       // Khi server tắt hoặc offline: thử mở bản nháp offline từ localStorage
-      const draft = getOfflineDraft(params.id)
-      if (draft) {
+      const draft = getOfflineDraft(params.id, useAuthStore.getState().user?.id)
+      if (draft && (!isAxiosError(err) || !err.response)) {
         setLecture(draft.lecture)
+        lectureRef.current = draft.lecture
+        setSourceMaterial(draft.lecture.sourceMaterial || '')
+        setAiMessages(createWelcomeMessages())
         setSaveStatus('offline_saved')
         showToast(
           'Đang offline (máy chủ không phản hồi). Đã mở bản nháp lưu tạm trong trình duyệt.',
           'info'
         )
-      } else if (!lectureRef.current) {
+      } else {
         const msg = isAxiosError(err)
           ? (err.response?.data as { message?: string })?.message ||
             'Không thể tải bài giảng'
@@ -321,57 +529,46 @@ export const EditorPage = ({
         setLoadError(msg)
       }
     } finally {
-      setIsLoading(false)
+      if (!controller.signal.aborted) setIsLoading(false)
     }
-  }, [params.id, user, setActiveSlideIndex, setAiMessages, showToast])
+  }, [
+    params.id,
+    autosaver,
+    clearHistory,
+    setActiveSlideIndex,
+    setAiMessages,
+    setSourceMaterial,
+    showToast
+  ])
 
   useEffect(() => {
     if (params.id) {
       void loadLecture()
     }
+    return () => loadRequestRef.current?.abort()
   }, [params.id, loadLecture])
 
-  // Khôi phục nhanh lịch sử chat AI từ localStorage ngay khi mở bài giảng
   useEffect(() => {
-    if (!lectureId) return
-    try {
-      const cached = localStorage.getItem(`abslider_chat_${lectureId}`)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setAiMessages(parsed)
-          return
-        }
-      }
-      setAiMessages([
-        {
-          id: 'welcome-msg',
-          role: 'assistant',
-          text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
-          timestamp: new Date().toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit'
-          })
-        }
-      ])
-    } catch {
-      // ignore
+    clearLocalChatHistory()
+    setAiMessages(createWelcomeMessages())
+    setSourceMaterial('')
+    setIsSourceMaterialModalOpen(false)
+    setSelectedCompId(null)
+    setPreviewSlide(null)
+    leaveApprovedRef.current = false
+    networkFailureNotifiedRef.current = false
+    return () => {
+      setSourceMaterial('')
+      setIsSourceMaterialModalOpen(false)
     }
-  }, [lectureId, setAiMessages])
-
-  // Tự động lưu lịch sử chat vào localStorage mỗi khi có tin nhắn mới hoặc cập nhật trạng thái
-  useEffect(() => {
-    if (!lectureId || aiMessages.length === 0) return
-    if (aiMessages.length === 1 && aiMessages[0].id === 'welcome-msg') return
-    try {
-      localStorage.setItem(
-        `abslider_chat_${lectureId}`,
-        JSON.stringify(aiMessages)
-      )
-    } catch {
-      // ignore
-    }
-  }, [lectureId, aiMessages])
+  }, [
+    lectureId,
+    setAiMessages,
+    setSourceMaterial,
+    setIsSourceMaterialModalOpen,
+    setSelectedCompId,
+    setPreviewSlide
+  ])
 
   // Đồng bộ vị trí slide đang xem vào sessionStorage
   useEffect(() => {
@@ -386,7 +583,8 @@ export const EditorPage = ({
   // Cảnh báo người dùng khi có thay đổi chưa được lưu trước khi đóng tab
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (saveStatus === 'unsaved') {
+      if (saveStatus !== 'saved') {
+        if (lectureRef.current) saveOfflineDraft(lectureRef.current)
         e.preventDefault()
         e.returnValue = ''
       }
@@ -398,16 +596,18 @@ export const EditorPage = ({
   // Cập nhật trạng thái bài giảng và kích hoạt đếm ngược Autosave nếu đang bật
   const mutateLecture = useCallback(
     (next: Lecture, shouldRecordHistory = true) => {
+      leaveApprovedRef.current = false
       if (shouldRecordHistory && lectureRef.current) {
         recordHistory(lectureRef.current.slides)
       }
 
+      lectureRef.current = next
       setLecture(next)
-      setSaveStatus('unsaved')
+      setSaveStatus(saveBlockedRef.current ? 'error' : 'unsaved')
       clearCountdownTimers()
 
       // Nếu Autosave đang bật: đếm ngược debounce 2 giây rồi tự động lưu
-      if (isAutoSave) {
+      if (isAutoSave && !saveBlockedRef.current) {
         setCountdown(2)
 
         countdownIntervalRef.current = setInterval(() => {
@@ -506,6 +706,7 @@ export const EditorPage = ({
       // Nếu đang focus vào input/textarea bên ngoài Canvas (như ô chat AI hoặc ô tiêu đề),
       // hãy để trình duyệt tự xử lý undo/redo của input đó
       const target = e.target as HTMLElement | null
+      if (document.querySelector('[role="dialog"]')) return
       const isExternalInput =
         target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
@@ -545,13 +746,6 @@ export const EditorPage = ({
     return () => clearCountdownTimers()
   }, [clearCountdownTimers])
 
-  // Đồng bộ sourceMaterial từ bài giảng vào store nếu có
-  useEffect(() => {
-    if (lecture?.sourceMaterial && !sourceMaterial) {
-      setSourceMaterial(lecture.sourceMaterial)
-    }
-  }, [lecture?.sourceMaterial, sourceMaterial, setSourceMaterial])
-
   // THAO TÁC TRÊN SLIDE VÀ COMPONENT
   const currentSlide = lecture?.slides[activeSlideIndex]
   const isPreviewVisible = Boolean(
@@ -565,20 +759,62 @@ export const EditorPage = ({
     ? getSlideComponents(activeSlideToDisplay, lecture?.theme)
     : []
   const selectedComponent =
-    currentComponents.find((c) => c.id === selectedCompId) || null
+    currentComponents.find((component) => component.id === selectedCompId) ||
+    null
 
-  // Cập nhật thuộc tính của một component
   const handleUpdateComponent = useCallback(
     (
       compId: string,
       patch: Partial<SlideComponent>,
-      shouldRecordHistory = true
+      shouldRecordHistory = true,
+      slideId?: string
     ) => {
       const currentLecture = lectureRef.current
-      if (!currentLecture || !currentLecture.slides[activeSlideIndex]) return
+      const targetIndex = slideId
+        ? (currentLecture?.slides.findIndex((s) => s.id === slideId) ?? -1)
+        : useEditorStore.getState().activeSlideIndex
+      if (!currentLecture || !currentLecture.slides[targetIndex]) return false
 
-      const sourceSlide = currentLecture.slides[activeSlideIndex]
+      const sourceSlide = currentLecture.slides[targetIndex]
       const comps = getSlideComponents(sourceSlide, currentLecture.theme)
+      const target = comps.find((component) => component.id === compId)
+      if (
+        !target ||
+        Object.entries(patch).every(
+          ([key, value]) => target[key as keyof SlideComponent] === value
+        )
+      )
+        return false
+      if (
+        patch.content !== undefined &&
+        target.textFormats?.length &&
+        !patch.textFormats
+      )
+        patch = { ...patch, ...editedText(target, patch.content) }
+      if (
+        patch.width !== undefined &&
+        patch.fontSize &&
+        target.textFormats?.length
+      ) {
+        const scale = patch.fontSize / (target.fontSize ?? 20)
+        patch = {
+          ...patch,
+          textFormats: target.textFormats.map((run) =>
+            run.style.fontSize
+              ? {
+                  ...run,
+                  style: {
+                    ...run.style,
+                    fontSize: Math.max(
+                      8,
+                      Math.min(120, run.style.fontSize * scale)
+                    )
+                  }
+                }
+              : run
+          )
+        }
+      }
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
@@ -599,23 +835,137 @@ export const EditorPage = ({
       }
 
       const nextSlides = currentLecture.slides.map((s, idx) =>
-        idx === activeSlideIndex ? updatedSlide : s
+        idx === targetIndex ? updatedSlide : s
       )
       mutateLecture(
         { ...currentLecture, slides: nextSlides },
         shouldRecordHistory
       )
+      return true
     },
-    [activeSlideIndex, mutateLecture]
+    [mutateLecture]
   )
 
-  // Thêm khối văn bản mới
+  const textRange =
+    selection?.slideId === currentSlide?.id &&
+    selection?.componentId === selectedCompId
+      ? selection
+      : null
+  const formatSelection = useCallback(
+    (component: SlideComponent, patch: Partial<SlideComponent>) => {
+      if (!inlineKeys.some((key) => key in patch))
+        return handleUpdateComponent(component.id, patch)
+      if (textRange) {
+        if (
+          document.activeElement instanceof HTMLTextAreaElement &&
+          document.activeElement.hasAttribute('data-slide-canvas-text')
+        )
+          document.activeElement.blur()
+        return handleUpdateComponent(component.id, {
+          textFormats: applyFormat(
+            component,
+            textRange.start,
+            textRange.end,
+            patch
+          )
+        })
+      }
+      // A block-wide choice also updates older explicit styles on that attribute.
+      if (component.textFormats?.length) {
+        const textFormats = component.textFormats
+          .map((run) => ({
+            ...run,
+            style: Object.fromEntries(
+              Object.entries(run.style).filter(([key]) => !(key in patch))
+            )
+          }))
+          .filter((run) => Object.keys(run.style).length)
+        return handleUpdateComponent(component.id, { ...patch, textFormats })
+      }
+      return handleUpdateComponent(component.id, patch)
+    },
+    [handleUpdateComponent, textRange]
+  )
+  const selectionStyle =
+    selectedComponent && textRange
+      ? segments(selectedComponent, textRange.start, textRange.end)[0]?.style
+      : undefined
+  useEffect(() => {
+    const handleFormatShortcut = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"]')) return
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.isComposing ||
+        !selectedComponent
+      )
+        return
+      const target = event.target as HTMLElement | null
+      if (
+        target?.closest(
+          'input,select,textarea:not([data-slide-canvas-text]),[role="dialog"]'
+        )
+      )
+        return
+      if (
+        selectedComponent.type === 'image' ||
+        selectedComponent.type === 'shape'
+      )
+        return
+      const key = event.key.toLowerCase()
+      const patch: Partial<SlideComponent> | undefined =
+        key === 'b'
+          ? {
+              fontWeight:
+                (selectionStyle?.fontWeight ?? selectedComponent.fontWeight) ===
+                'bold'
+                  ? 'normal'
+                  : 'bold'
+            }
+          : key === 'i'
+            ? {
+                fontStyle:
+                  (selectionStyle?.fontStyle ?? selectedComponent.fontStyle) ===
+                  'italic'
+                    ? 'normal'
+                    : 'italic'
+              }
+            : key === 'u'
+              ? {
+                  textDecoration:
+                    (selectionStyle?.textDecoration ??
+                      selectedComponent.textDecoration) === 'underline'
+                      ? 'none'
+                      : 'underline'
+                }
+              : undefined
+      if (!patch) return
+      event.preventDefault()
+      formatSelection(selectedComponent, patch)
+    }
+    window.addEventListener('keydown', handleFormatShortcut)
+    return () => window.removeEventListener('keydown', handleFormatShortcut)
+  }, [selectedComponent, formatSelection, selectionStyle])
+
   const handleAddTextComponent = (
     type: 'title' | 'subtitle' | 'text' | 'bullets'
   ) => {
-    if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide, lecture.theme)
-    const newId = `comp-${Date.now()}`
+    const currentLecture = lectureRef.current
+    if (!currentLecture) return
+    const targetIndex = useEditorStore.getState().activeSlideIndex
+    const targetSlide = currentLecture.slides[targetIndex]
+    if (!targetSlide) {
+      showToast(
+        'Bài giảng chưa có slide. Hãy thêm slide trước khi chèn văn bản.',
+        'info'
+      )
+      return
+    }
+    const comps = getSlideComponents(targetSlide, currentLecture.theme)
+    const theme = withSlideColors(
+      getThemeById(targetSlide.theme || currentLecture.theme),
+      targetSlide
+    )
+    const newId = `comp-${crypto.randomUUID()}`
 
     const newComp: SlideComponent = {
       id: newId,
@@ -627,7 +977,8 @@ export const EditorPage = ({
             ? 'Dòng phụ đề mới'
             : 'Nội dung văn bản mới...',
       x: 12,
-      y: 20 + comps.length * 6,
+      // Giữ khối mới trong vùng nhìn thấy, kể cả slide có nhiều đối tượng.
+      y: 20 + (comps.length % 6) * 6,
       width: 76,
       fontSize: type === 'title' ? 36 : type === 'subtitle' ? 18 : 20,
       fontWeight: type === 'title' ? 'bold' : 'normal',
@@ -636,16 +987,17 @@ export const EditorPage = ({
       textCase: 'normal',
       textAlign: 'left',
       fontFamily: type === 'title' ? 'display' : 'sans',
-      color: '#173c39'
+      color: theme.textPrimary
     }
 
     const updatedComps = [...comps, newComp]
-    const updatedSlide: Slide = { ...currentSlide, components: updatedComps }
-    const nextSlides = lecture.slides.map((s, idx) =>
-      idx === activeSlideIndex ? updatedSlide : s
+    const updatedSlide: Slide = { ...targetSlide, components: updatedComps }
+    const nextSlides = currentLecture.slides.map((s, idx) =>
+      idx === targetIndex ? updatedSlide : s
     )
 
-    mutateLecture({ ...lecture, slides: nextSlides })
+    mutateLecture({ ...currentLecture, slides: nextSlides })
+    setPreviewSlide(null)
     setSelectedCompId(newId)
   }
 
@@ -703,7 +1055,7 @@ export const EditorPage = ({
       x: 35,
       y: 30,
       width: isLine ? 40 : isSquareOrCircle ? 25 : 35,
-      height: isLine ? 2 : isSquareOrCircle ? 25 : 20
+      height: isLine ? 2 : isSquareOrCircle ? (25 * 16) / 9 : 20
     }
 
     const updatedComps = [...comps, newComp]
@@ -738,9 +1090,14 @@ export const EditorPage = ({
   }
 
   // Xóa component
-  const handleDeleteComponent = (compId: string) => {
-    if (!lecture || !currentSlide) return
-    const comps = getSlideComponents(currentSlide, lecture.theme)
+  const handleDeleteComponent = (
+    compId: string,
+    shouldRecordHistory = true
+  ) => {
+    const currentLecture = lectureRef.current
+    const active = currentLecture?.slides[activeSlideIndex]
+    if (!currentLecture || !active) return
+    const comps = getSlideComponents(active, currentLecture.theme)
     const updatedComps = comps.filter((c) => c.id !== compId)
 
     // Đồng bộ lại title, subtitle, bullets tương ứng với các components còn lại
@@ -749,7 +1106,7 @@ export const EditorPage = ({
     const bulletsComp = updatedComps.find((c) => c.type === 'bullets')
 
     const updatedSlide: Slide = {
-      ...currentSlide,
+      ...active,
       title: titleComp ? titleComp.content : '',
       subtitle: subComp ? subComp.content : '',
       bullets: bulletsComp
@@ -757,13 +1114,52 @@ export const EditorPage = ({
         : [],
       components: updatedComps
     }
-    const nextSlides = lecture.slides.map((s, idx) =>
+    const nextSlides = currentLecture.slides.map((s, idx) =>
       idx === activeSlideIndex ? updatedSlide : s
     )
 
-    mutateLecture({ ...lecture, slides: nextSlides })
+    mutateLecture(
+      { ...currentLecture, slides: nextSlides },
+      shouldRecordHistory
+    )
     if (selectedCompId === compId) setSelectedCompId(null)
   }
+
+  // SRS UC012: đổi thứ tự lớp; phần tử đứng sau trong mảng được vẽ đè lên trên
+  const handleChangeLayer = (compId: string, direction: 'up' | 'down') => {
+    if (!lecture || !currentSlide) return
+    const comps = [...getSlideComponents(currentSlide, lecture.theme)]
+    const from = comps.findIndex((c) => c.id === compId)
+    const to = direction === 'up' ? from + 1 : from - 1
+    if (from < 0 || to < 0 || to >= comps.length) return
+    ;[comps[from], comps[to]] = [comps[to], comps[from]]
+    mutateLecture({
+      ...lecture,
+      slides: lecture.slides.map((s, idx) =>
+        idx === activeSlideIndex ? { ...currentSlide, components: comps } : s
+      )
+    })
+  }
+
+  // SRS UC012 7b-7d / UC015: Delete xóa đối tượng đang chọn, không chọn đối tượng thì xóa slide; đang gõ chữ thì để trình duyệt xóa chữ
+  useEffect(() => {
+    const handleDeleteKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' || e.isComposing) return
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT'
+      if (isTyping || showAiWizard || document.querySelector('[role="dialog"]'))
+        return
+      e.preventDefault()
+      if (selectedCompId) handleDeleteComponent(selectedCompId)
+      else if (currentSlide) handleDeleteSlide(currentSlide.id)
+    }
+    window.addEventListener('keydown', handleDeleteKey)
+    return () => window.removeEventListener('keydown', handleDeleteKey)
+  })
 
   // Đổi giao diện bài giảng (Theme) và đồng bộ màu sắc các slide hiện có
   const handleThemeChange = (themeId: string) => {
@@ -848,96 +1244,150 @@ export const EditorPage = ({
     showToast(`Đã áp dụng bố cục: ${layout}`, 'success')
   }
 
-  const handleAddSlide = (atIndex?: number) => {
-    if (!lecture) return
-    const targetIndex = atIndex ?? lecture.slides.length
-    const rawSlide: Slide = {
-      id: `slide-${crypto.randomUUID()}`,
-      title: 'Tiêu đề slide',
-      bullets: []
+  function handleAddSlide(atIndex?: number) {
+    const current = lectureRef.current
+    if (!current) return
+    const index = Math.min(
+      atIndex ?? activeSlideIndex + 1,
+      current.slides.length
+    )
+    try {
+      if (shouldFail('addSlide')) throw new Error('addSlide')
+      const slide: Slide = {
+        id: `slide-${crypto.randomUUID()}`,
+        title: 'Tiêu đề slide',
+        bullets: []
+      }
+      slide.components = getSlideComponents(slide, current.theme)
+      const slides = [...current.slides]
+      slides.splice(index, 0, slide)
+      mutateLecture({ ...current, slides })
+      setActiveSlideIndex(index)
+      setSlideFailure(null)
+    } catch {
+      setSlideFailure({ kind: 'add', retry: () => handleAddSlide(index) })
     }
-    const newSlide: Slide = {
-      ...rawSlide,
-      components: getSlideComponents(rawSlide, lecture.theme)
-    }
-
-    const nextSlides = [...lecture.slides]
-    nextSlides.splice(targetIndex, 0, newSlide)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-    setActiveSlideIndex(targetIndex)
   }
 
-  const handleDeleteSlide = (slideId: string) => {
-    if (!lecture) return
-    if (lecture.slides.length <= 1) {
+  function handleDuplicateSlide(slideId: string) {
+    const current = lectureRef.current
+    if (!current) return
+    try {
+      if (shouldFail('duplicateSlide')) throw new Error('duplicateSlide')
+      const sourceIndex = current.slides.findIndex(
+        (slide) => slide.id === slideId
+      )
+      if (sourceIndex < 0) {
+        setSlideFailure(null)
+        return
+      }
+      const copy = structuredClone(current.slides[sourceIndex])
+      copy.components = getSlideComponents(copy, current.theme).map((comp) => ({
+        ...comp,
+        id: `comp-${crypto.randomUUID()}`
+      }))
+      copy.id = `slide-${crypto.randomUUID()}`
+      const slides = [...current.slides]
+      slides.splice(sourceIndex + 1, 0, copy)
+      mutateLecture({ ...current, slides })
+      setActiveSlideIndex(sourceIndex + 1)
+      setSlideFailure(null)
+    } catch {
+      setSlideFailure({
+        kind: 'duplicate',
+        retry: () => handleDuplicateSlide(slideId)
+      })
+    }
+  }
+
+  function changeSlideList(
+    current: Lecture,
+    slides: Slide[],
+    selectedIndex: number,
+    message: string
+  ) {
+    const { undoStack, redoStack, activeSlideIndex, selectedCompId } =
+      useEditorStore.getState()
+    listChanges.current.set(slides, {
+      previous: current.slides,
+      undo: undoStack,
+      redo: redoStack,
+      selectedIndex: activeSlideIndex,
+      selectedComp: selectedCompId,
+      message
+    })
+    mutateLecture({ ...current, slides })
+    setActiveSlideIndex(selectedIndex)
+  }
+
+  function handleDeleteSlide(slideId: string) {
+    const current = lectureRef.current
+    if (!current) return
+    if (current.slides.length <= 1) {
       showToast('Bài giảng phải có ít nhất một slide', 'error')
       return
     }
-
-    const targetIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (targetIndex === -1) return
-
-    const nextSlides = lecture.slides.filter((s) => s.id !== slideId)
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-
-    if (targetIndex < activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex - 1)
-    } else if (targetIndex === activeSlideIndex) {
-      setActiveSlideIndex(Math.min(activeSlideIndex, nextSlides.length - 1))
-    }
-  }
-
-  const handleDuplicateSlide = (slideId: string) => {
-    if (!lecture) return
-    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (sourceIndex === -1) return
-
-    const sourceSlide = lecture.slides[sourceIndex]
-    const clonedSlide: Slide = {
-      ...sourceSlide,
-      id: `slide-${crypto.randomUUID()}`,
-      components: getSlideComponents(sourceSlide, lecture.theme).map(
-        (comp) => ({
-          ...comp,
-          id: `comp-${crypto.randomUUID()}`
-        })
+    try {
+      if (shouldFail('deleteSlide')) throw new Error('deleteSlide')
+      const index = current.slides.findIndex((slide) => slide.id === slideId)
+      if (index < 0) return
+      const slides = current.slides.filter((slide) => slide.id !== slideId)
+      changeSlideList(
+        current,
+        slides,
+        index < activeSlideIndex
+          ? activeSlideIndex - 1
+          : Math.min(activeSlideIndex, slides.length - 1),
+        'Không thể xóa slide. Danh sách slide được giữ nguyên.'
+      )
+    } catch {
+      showToast(
+        'Không thể xóa slide. Danh sách slide được giữ nguyên.',
+        'error'
       )
     }
-
-    const nextSlides = [...lecture.slides]
-    nextSlides.splice(sourceIndex + 1, 0, clonedSlide)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-    setActiveSlideIndex(sourceIndex + 1)
   }
 
-  const handleMoveSlide = (slideId: string, toIndex: number) => {
-    if (!lecture) return
-    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (sourceIndex === -1 || sourceIndex === toIndex) return
-
-    const nextSlides = [...lecture.slides]
-    const [moved] = nextSlides.splice(sourceIndex, 1)
-    nextSlides.splice(toIndex, 0, moved)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-
-    if (sourceIndex === activeSlideIndex) {
-      setActiveSlideIndex(toIndex)
-    } else if (sourceIndex < activeSlideIndex && toIndex >= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex - 1)
-    } else if (sourceIndex > activeSlideIndex && toIndex <= activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex + 1)
+  function handleMoveSlide(slideId: string, toIndex: number) {
+    const current = lectureRef.current
+    if (!current) return
+    try {
+      if (shouldFail('moveSlide')) throw new Error('moveSlide')
+      const index = current.slides.findIndex((slide) => slide.id === slideId)
+      if (
+        index < 0 ||
+        index === toIndex ||
+        toIndex < 0 ||
+        toIndex >= current.slides.length
+      )
+        return
+      const slides = [...current.slides]
+      const [moved] = slides.splice(index, 1)
+      slides.splice(toIndex, 0, moved)
+      changeSlideList(
+        current,
+        slides,
+        toIndex,
+        'Không thể cập nhật thứ tự slide. Đã khôi phục thứ tự trước đó.'
+      )
+    } catch {
+      showToast(
+        'Không thể cập nhật thứ tự slide. Đã khôi phục thứ tự trước đó.',
+        'error'
+      )
     }
   }
 
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ
-  const handleApplyAiPrompt = async (instruction: string) => {
-    if (!lecture || !currentSlide || !instruction.trim()) return
+  const handleApplyAiPrompt = async (
+    instruction: string,
+    edit?: { action: 'shorten' | 'expand' | 'rewrite'; range: TextSelection }
+  ) => {
+    if (!lecture || !currentSlide || !instruction.trim() || isAiLoading)
+      return false
+    if (lectureRef.current?._id !== lecture._id) return false
+    const controller = new AbortController()
+    aiRequestRef.current = controller
     const requestTargetSlideId = currentSlide.id
     const requestTargetSlideIndex = activeSlideIndex
     try {
@@ -957,16 +1407,74 @@ export const EditorPage = ({
         components: getSlideComponents(currentSlide, lecture.theme)
       }
 
-      const response = await editorApi.aiChat(lecture._id, {
-        message: instruction,
-        slideId: currentSlide.id,
-        currentSlide: currentSlideSnapshot,
-        selectedCompId: selectedCompId || undefined,
-        sourceMaterial: sourceMaterial || lecture.sourceMaterial || undefined,
-        history: historyPayload
-      })
+      const response = await editorApi.aiChat(
+        lecture._id,
+        {
+          message: instruction,
+          slideId: currentSlide.id,
+          currentSlide: currentSlideSnapshot,
+          selectedCompId: selectedCompId || undefined,
+          textEdit: edit
+            ? {
+                action: edit.action,
+                start: edit.range.start,
+                end: edit.range.end
+              }
+            : undefined,
+          sourceMaterial: sourceMaterial,
+          history: historyPayload
+        },
+        controller.signal
+      )
+      if (controller.signal.aborted || lectureRef.current?._id !== lecture._id)
+        return false
 
       updateUser({ creditBalance: response.creditBalance })
+
+      if (edit) {
+        const latest = lectureRef.current
+        const slide = latest.slides.find((s) => s.id === edit.range.slideId)
+        const component =
+          slide &&
+          getSlideComponents(slide, latest.theme).find(
+            (c) => c.id === edit.range.componentId
+          )
+        const before = currentSlideSnapshot.components?.find(
+          (c) => c.id === edit.range.componentId
+        )
+        if (response.aiChatHistory) {
+          setAiMessages(response.aiChatHistory as unknown as AiChatMessage[])
+          lectureRef.current = {
+            ...latest,
+            aiChatHistory: response.aiChatHistory
+          }
+          setLecture(lectureRef.current)
+        }
+        if (
+          !component ||
+          component.content !== before?.content ||
+          !response.replacement
+        ) {
+          showToast(
+            'Đoạn gốc đã thay đổi. Kết quả AI được giữ trong cuộc trò chuyện.',
+            'info'
+          )
+          return true
+        }
+        handleUpdateComponent(
+          component.id,
+          replaceText(
+            component,
+            edit.range.start,
+            edit.range.end,
+            response.replacement
+          ),
+          true,
+          slide!.id
+        )
+        setSelection(null)
+        return true
+      }
 
       const targetIndex =
         typeof response.targetSlideIndex === 'number' &&
@@ -1082,7 +1590,49 @@ export const EditorPage = ({
         }
       }
 
-      if (
+      // SRS UC008 bước 5: chỉnh sửa slide đang active được áp dụng trực tiếp (Undo để hoàn tác)
+      const shouldAutoApply =
+        canShowPreview &&
+        slideAction === 'UPDATE_SLIDE' &&
+        (response.proposals?.length ?? 0) <= 1
+      if (shouldAutoApply && slideToPreview && lectureRef.current) {
+        const latest = lectureRef.current
+        const appliedMessages = useEditorStore
+          .getState()
+          .aiMessages.map((m, idx, list) =>
+            idx === list.length - 1 && m.role === 'assistant'
+              ? {
+                  ...m,
+                  status: 'accepted' as const,
+                  proposals: m.proposals?.map((p) => ({
+                    ...p,
+                    status: 'accepted' as const
+                  }))
+                }
+              : m
+          )
+        setAiMessages(appliedMessages)
+        mutateLecture({
+          ...latest,
+          slides: latest.slides.map((s, idx) =>
+            idx === latestTargetIndex
+              ? {
+                  ...slideToPreview,
+                  components: getSlideComponents(slideToPreview, latest.theme)
+                }
+              : s
+          ),
+          aiChatHistory: appliedMessages as unknown as Array<
+            Record<string, unknown>
+          >
+        })
+        setPreviewSlide(null)
+        setSelectedCompId(null)
+        showToast(
+          `Đã áp dụng chỉnh sửa AI vào Slide ${latestTargetIndex + 1}`,
+          'success'
+        )
+      } else if (
         canShowPreview &&
         slideToPreview &&
         response.proposals &&
@@ -1114,13 +1664,13 @@ export const EditorPage = ({
           prev ? { ...prev, contextSummary: response.updatedSummary } : prev
         )
       }
+      return true
     } catch (err) {
-      const msg = isAxiosError(err)
-        ? (err.response?.data as { message?: string })?.message ||
-          'Không thể thực hiện yêu cầu AI'
-        : 'Không thể thực hiện yêu cầu AI'
+      if (controller.signal.aborted) return false
+      const msg = requestError(err, 'Không thể thực hiện yêu cầu AI', true)
       addAiMessage('assistant', `⚠️ Không thể xử lý yêu cầu: ${msg}`)
       showToast(msg, 'error')
+      return false
     } finally {
       setIsAiLoading(false)
     }
@@ -1354,49 +1904,103 @@ export const EditorPage = ({
 
   // AI Quick Actions (Viết lại / Rút gọn / Mở rộng) từ mini-action pill
   const handleAiQuickAction = (action: 'rewrite' | 'shorten' | 'expand') => {
-    const promptMap = {
-      rewrite:
-        'Hãy viết lại các ý trong slide này cho mạch lạc, thu hút và sắc nét hơn',
-      shorten:
-        'Rút gọn nội dung slide này thành 3 ý chính súc tích, ngắn gọn, dễ nhớ',
-      expand:
-        'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
+    if (!textRange || !selectedComponent) return
+    const actionLabels = {
+      rewrite: 'Viết lại',
+      shorten: 'Rút gọn',
+      expand: 'Mở rộng'
     }
-    void handleApplyAiPrompt(promptMap[action])
+    void handleApplyAiPrompt(actionLabels[action] + ' đoạn văn bản đã chọn', {
+      action,
+      range: textRange
+    })
   }
 
-  const handleBack = () => {
-    if (saveStatus === 'unsaved' && lectureRef.current) {
-      clearCountdownTimers()
-      void executeSave(lectureRef.current, false)
+  const handleBack = async () => {
+    if (isLeaving) return
+    setIsLeaving(true)
+    const saved = saveStatus === 'saved' || (await flushChanges())
+    setIsLeaving(false)
+    if (!saved) {
+      if (!onBack) navigate('/library')
+      return
     }
+    leaveApprovedRef.current = true
     if (onBack) onBack()
     else navigate('/library')
   }
 
-  const handlePresent = () => {
-    if (!lecture) return
-    if (onPresent) onPresent(lecture)
-    else navigate(`/presentation/${lecture._id}`, { state: { lecture } })
+  const handlePresent = async () => {
+    if (!lecture || isLeaving) return
+    if (!lecture.slides.length) {
+      showToast('Bài giảng chưa có slide để trình chiếu', 'info')
+      return
+    }
+    setIsLeaving(true)
+    const saved = saveStatus === 'saved' || (await flushChanges())
+    setIsLeaving(false)
+    if (!saved) return
+    const current = lectureRef.current!
+    leaveApprovedRef.current = true
+    if (onPresent) onPresent(current)
+    else
+      navigate(`/presentation/${current._id}`, {
+        state: {
+          lecture: current,
+          startIndex: activeSlideIndex,
+          fromEditor: true
+        }
+      })
   }
 
   // Tự động tạo lại Dàn ý bài giảng bằng AI khi người dùng yêu cầu
   const handleRegenerateOutline = async () => {
     if (!lecture) return
+    if (saveStatus !== 'saved' && !(await flushChanges())) return
+    const snapshot = lectureRef.current
+    if (!snapshot) return
+    const controller = new AbortController()
+    aiRequestRef.current = controller
     setIsOutlineLoading(true)
     try {
-      const prompt = lecture.title || 'Bài giảng trình chiếu'
-      const result = await generationApi.outline(prompt, {
-        currentOutline: lecture.outline || undefined,
-        lectureId: lecture._id
-      })
+      const prompt = snapshot.title || 'Bài giảng trình chiếu'
+      const result = await generationApi.outline(
+        prompt,
+        {
+          currentOutline: snapshot.outline || undefined,
+          lectureId: snapshot._id
+        },
+        controller.signal
+      )
+      if (controller.signal.aborted || lectureRef.current?._id !== snapshot._id)
+        return
       updateUser({ creditBalance: result.creditBalance })
       if (result.outline) {
-        mutateLecture({ ...lecture, outline: result.outline })
+        const current = lectureRef.current
+        if (result.lecture && hasSameSavedContent(current, snapshot)) {
+          lectureRef.current = result.lecture
+          setLecture(result.lecture)
+          autosaver.reset(result.lecture)
+          setSourceMaterial(result.lecture.sourceMaterial || '')
+          setSaveStatus('saved')
+        } else {
+          saveOfflineDraft(current)
+          saveBlockedRef.current = true
+          clearCountdownTimers()
+          setSaveStatus('error')
+          setSaveError(
+            'Nội dung đã thay đổi trong lúc AI xử lý. Bản chỉnh sửa của bạn được giữ lại; hãy tải lại để chọn dữ liệu cần dùng.'
+          )
+          return
+        }
         showToast('Đã tạo dàn ý bài giảng mới thành công', 'success')
       }
-    } catch {
-      showToast('Không thể tạo lại dàn ý lúc này', 'error')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      showToast(
+        requestError(error, 'Không thể tạo lại dàn ý lúc này', true),
+        'error'
+      )
     } finally {
       setIsOutlineLoading(false)
     }
@@ -1470,6 +2074,53 @@ export const EditorPage = ({
 
   return (
     <div className='flex h-screen flex-col overflow-hidden bg-brand-paper'>
+      <ConfirmDialog
+        open={!!slideFailure}
+        title={
+          slideFailure?.kind === 'add'
+            ? 'Không thể thêm slide'
+            : 'Không thể nhân bản slide'
+        }
+        message={
+          slideFailure?.kind === 'add'
+            ? 'Không khởi tạo được slide mới. Bài giảng được giữ nguyên.'
+            : 'Không sao chép được dữ liệu slide. Không có slide mới nào được tạo.'
+        }
+        confirmLabel='Thử lại'
+        cancelLabel='Hủy'
+        onConfirm={() => slideFailure?.retry()}
+        onCancel={() => setSlideFailure(null)}
+      />
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title='Bài giảng có thay đổi chưa lưu'
+        message='Bài giảng chưa lưu lên máy chủ. Bạn có thể lưu trước khi rời trang, hoặc giữ bản nháp trong trình duyệt để khôi phục sau.'
+        confirmLabel='Lưu và rời trang'
+        secondaryLabel='Rời và giữ bản nháp'
+        onSecondary={async () => {
+          if ((await flushChanges(true)) && blocker.state === 'blocked') {
+            leaveApprovedRef.current = true
+            blocker.proceed()
+          }
+        }}
+        cancelLabel='Ở lại'
+        pending={isLeaving}
+        onConfirm={() => {
+          if (isLeaving) return
+          setIsLeaving(true)
+          void flushChanges()
+            .then((saved) => {
+              if (saved && blocker.state === 'blocked') {
+                leaveApprovedRef.current = true
+                blocker.proceed()
+              }
+            })
+            .finally(() => setIsLeaving(false))
+        }}
+        onCancel={() => {
+          if (blocker.state === 'blocked') blocker.reset()
+        }}
+      />
       {/* 1. HEADER CANVA */}
       <EditorHeader
         title={lecture.title}
@@ -1477,23 +2128,40 @@ export const EditorPage = ({
           const next = { ...lecture, title: newTitle }
           mutateLecture(next, false)
         }}
-        onBack={handleBack}
+        onBack={() => void handleBack()}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onManualSave={handleManualSave}
         onOpenExport={() => setIsExportModalOpen(true)}
         onOpenOutline={() => setIsOutlineModalOpen(true)}
-        onPresent={handlePresent}
+        onPresent={() => void handlePresent()}
         saveStatus={saveStatus}
         countdown={countdown}
         isAutoSave={isAutoSave}
         onToggleAutoSave={handleToggleAutoSave}
       />
 
+      {saveError && (
+        <div
+          role='alert'
+          className='flex items-center justify-between gap-3 bg-red-50 px-4 py-2 font-sans text-xs text-red-800'
+        >
+          <span>{saveError}</span>
+          <button
+            type='button'
+            className='shrink-0 underline'
+            onClick={() => void loadLecture()}
+          >
+            Tải lại bài giảng
+          </button>
+        </div>
+      )}
+
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
-      <div className='flex flex-1 overflow-hidden'>
+      <div className='relative flex min-h-0 flex-1 overflow-hidden'>
         {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Hình khối / Upload ảnh / Mẫu slide / Giao diện */}
         <LeftSidebarRail
+          key={lectureId}
           onAddTextComponent={handleAddTextComponent}
           onAddImageComponent={handleAddImageComponent}
           onAddShapeComponent={handleAddShapeComponent}
@@ -1501,6 +2169,9 @@ export const EditorPage = ({
           outline={lecture.outline}
           currentThemeId={lecture.theme}
           onThemeChange={handleThemeChange}
+          layers={
+            currentSlide ? getSlideComponents(currentSlide, lecture.theme) : []
+          }
         />
 
         {/* KHU VỰC TRUNG TÂM: Floating Contextual Toolbar + Slide Canvas + Bottom Filmstrip */}
@@ -1508,15 +2179,25 @@ export const EditorPage = ({
           {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
           {selectedComponent && (
             <div className='absolute top-2 left-3 right-3 z-30 flex justify-center pointer-events-none transition-all'>
-              <div className='pointer-events-auto max-w-full overflow-x-auto no-scrollbar'>
+              <div
+                data-selection-tools
+                className='pointer-events-auto max-w-full overflow-x-auto no-scrollbar'
+              >
                 <FloatingContextualToolbar
-                  selectedComponent={selectedComponent}
-                  onUpdateComponent={(patch) => {
-                    if (selectedCompId)
-                      handleUpdateComponent(selectedCompId, patch)
-                  }}
+                  selectedComponent={
+                    selectionStyle
+                      ? { ...selectedComponent, ...selectionStyle }
+                      : selectedComponent
+                  }
+                  onUpdateComponent={(patch) =>
+                    formatSelection(selectedComponent, patch)
+                  }
                   onDuplicateComponent={handleDuplicateComponent}
                   onDeleteComponent={handleDeleteComponent}
+                  onChangeLayer={(direction) => {
+                    if (selectedCompId)
+                      handleChangeLayer(selectedCompId, direction)
+                  }}
                 />
               </div>
             </div>
@@ -1539,6 +2220,8 @@ export const EditorPage = ({
             onUpdateComponent={handleUpdateComponent}
             onDuplicateComponent={handleDuplicateComponent}
             onDeleteComponent={handleDeleteComponent}
+            selection={textRange}
+            onTextSelection={setSelection}
             onAiQuickAction={handleAiQuickAction}
             isAiLoading={isAiLoading}
             isPreview={isPreviewVisible}
@@ -1549,17 +2232,29 @@ export const EditorPage = ({
           {/* Dải Slide ngang ở đáy màn hình (Bottom Filmstrip) */}
           <SlideFilmstrip
             slides={lecture.slides}
+            lectureTheme={lecture.theme}
             activeSlideIndex={activeSlideIndex}
             onSelectSlide={setActiveSlideIndex}
             onAddSlide={handleAddSlide}
             onDuplicateSlide={handleDuplicateSlide}
             onDeleteSlide={handleDeleteSlide}
             onMoveSlide={handleMoveSlide}
+            onInvalidDrop={() =>
+              showToast(
+                'Vị trí thả không hợp lệ. Thứ tự slide được giữ nguyên.',
+                'error'
+              )
+            }
           />
         </main>
 
         {/* CỘT PHẢI: Trợ lý AI Copilot */}
         <AiCopilotPanel
+          key={lecture._id}
+          onSourceMaterialChange={(sourceMaterial) => {
+            if (lectureRef.current)
+              mutateLecture({ ...lectureRef.current, sourceMaterial }, false)
+          }}
           onApplyAiPrompt={handleApplyAiPrompt}
           onAcceptProposal={handleAcceptProposal}
           onAcceptAllProposals={handleAcceptAllProposals}
@@ -1576,25 +2271,29 @@ export const EditorPage = ({
       </div>
 
       {/* MODAL XUẤT BÀI GIẢNG */}
-      <ExportModal
-        open={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        lecture={lecture}
-        initialSlideIndex={activeSlideIndex}
-        onSuccess={(msg) => showToast(msg, 'success')}
-        onError={(msg) => showToast(msg, 'error')}
-      />
+      {/* Mount lại mỗi lần mở để 'slide hiện tại' luôn đúng slide đang chọn (SRS UC029) */}
+      {isExportModalOpen && (
+        <ExportModal
+          open={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          lecture={lecture}
+          initialSlideIndex={activeSlideIndex}
+          onSuccess={(msg) => showToast(msg, 'success')}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
 
       {/* MODAL TÀI LIỆU NGUỒN */}
       <SourceMaterialModal
         open={isSourceMaterialModalOpen}
         onClose={() => setIsSourceMaterialModalOpen(false)}
-        sourceMaterial={sourceMaterial || lecture?.sourceMaterial || ''}
+        sourceMaterial={sourceMaterial}
         onSave={(content) => {
           setSourceMaterial(content)
-          if (lecture) {
-            mutateLecture({ ...lecture, sourceMaterial: content })
-            showToast('Đã lưu tài liệu nguồn tham khảo', 'success')
+          if (lectureRef.current) {
+            const next = { ...lectureRef.current, sourceMaterial: content }
+            mutateLecture(next, false)
+            void executeSave(next, false)
           }
         }}
       />
@@ -1608,6 +2307,65 @@ export const EditorPage = ({
         isLoading={isOutlineLoading}
         onRegenerateOutline={handleRegenerateOutline}
       />
+
+      <ConfirmDialog
+        open={pendingDraft !== null}
+        title='Phát hiện dữ liệu chưa đồng bộ'
+        message='Trình duyệt còn lưu bản chỉnh sửa chưa đồng bộ. Khôi phục sẽ dùng bản nháp để thay thế nội dung hiện tại trên máy chủ sau khi lưu; Bỏ qua sẽ giữ dữ liệu máy chủ. Bạn muốn dùng bản nào?'
+        confirmLabel='Khôi phục'
+        cancelLabel='Bỏ qua'
+        onConfirm={() => {
+          if (pendingDraft) {
+            const restored = {
+              ...pendingDraft,
+              revision: lecture.revision ?? 0,
+              updatedAt: lecture.updatedAt,
+              aiChatHistory: lecture.aiChatHistory
+            }
+            autosaver.reset(lecture)
+            setSourceMaterial(restored.sourceMaterial || '')
+            mutateLecture(restored, false)
+            if (isAutoSave) void executeSave(restored, true)
+          }
+          setPendingDraft(null)
+        }}
+        onCancel={() => {
+          if (params.id) clearOfflineDraft(params.id)
+          setPendingDraft(null)
+        }}
+      />
+
+      {showAiWizard && (
+        <AiGenerationWizard
+          lecture={lecture}
+          onOutlineSaved={(saved) => {
+            setLecture(saved)
+            lectureRef.current = saved
+            autosaver.reset(saved)
+            setSourceMaterial(saved.sourceMaterial || '')
+            setSaveStatus('saved')
+          }}
+          onDone={(created) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { creditSpent, creditBalance, ...generated } =
+              created as Lecture & {
+                creditSpent?: number
+                creditBalance?: number
+              }
+            setLecture(generated)
+            lectureRef.current = generated
+            autosaver.reset(generated)
+            setSaveStatus('saved')
+            setActiveSlideIndex(0)
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+          onSkip={() => {
+            setShowAiWizard(false)
+            navigate(location.pathname, { replace: true, state: null })
+          }}
+        />
+      )}
     </div>
   )
 }

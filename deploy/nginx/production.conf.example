@@ -2,6 +2,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides.sbltcup.dev slides-cup.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 100m;
 
@@ -22,6 +23,13 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides-api.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 5;
+    gzip_types application/json;
 
     client_max_body_size 100m;
 
@@ -33,8 +41,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_connect_timeout 30s;
-        proxy_send_timeout 90s;
-        proxy_read_timeout 90s;
+        proxy_send_timeout 180s;
+        proxy_read_timeout 180s;
     }
 }
 
@@ -42,6 +50,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides-media.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 100m;
 

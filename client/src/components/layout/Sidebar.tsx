@@ -113,7 +113,7 @@ export const Sidebar = ({
                   d='M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25'
                 />
               </svg>
-              <span>Thư viện bài giảng</span>
+              <span>Trang chủ</span>
             </div>
             {typeof totalLectures === 'number' && (
               <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.2 font-mono text-[10px] font-semibold text-stone-700'>
@@ -150,39 +150,6 @@ export const Sidebar = ({
               <span>Thùng rác</span>
             </div>
           </button>
-
-          {/* Ngăn 3: Hồ sơ cá nhân */}
-
-          {/* Lối vào Quản trị (dành cho admin) */}
-          {isAdmin && (
-            <div className='pt-3 border-t border-stone-300'>
-              <button
-                type='button'
-                onClick={() => handleNav('admin', '/admin')}
-                className={`flex w-full items-center gap-2.5 border-l-2 px-3 py-2.5 text-xs transition ${
-                  currentTab === 'admin'
-                    ? 'border-orange-700 bg-stone-200/70 font-bold text-orange-900'
-                    : 'border-transparent text-stone-600 hover:bg-stone-200/40 hover:text-emerald-950'
-                }`}
-              >
-                <svg
-                  xmlns='http://www.w3.org/2000/svg'
-                  fill='none'
-                  viewBox='0 0 24 24'
-                  strokeWidth={1.75}
-                  stroke='currentColor'
-                  className='h-4 w-4 text-orange-700'
-                >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    d='M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75'
-                  />
-                </svg>
-                <span>Quản trị hệ thống</span>
-              </button>
-            </div>
-          )}
         </nav>
       </div>
 

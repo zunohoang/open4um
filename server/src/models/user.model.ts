@@ -16,6 +16,7 @@ const userSchema = new Schema(
       trim: true
     },
     passwordHash: { type: String, required: true },
+    tokenVersion: { type: Number, default: 0 },
     role: { type: String, enum: ['user', 'admin'] as const, default: 'user' },
     status: {
       type: String,

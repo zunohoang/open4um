@@ -12,6 +12,7 @@ import type {
 } from '@/types/auth.types'
 import { getCreditConfig } from '@/services/admin.service'
 import * as emailService from '@/services/email.service'
+import { uploadImage } from '@/lib/storage'
 
 const ACCESS_TOKEN_EXPIRES_IN = '15m'
 const REFRESH_TOKEN_EXPIRES_IN = '7d'
@@ -36,33 +37,77 @@ export const profileCooldownKey = (userId: string) =>
 export const profileCountKey = (userId: string) =>
   `ratelimit:profile:count:${userId}`
 
+// Reserve attempts atomically so parallel submissions share one fixed window.
+async function reserveAttempt(
+  kind: string,
+  email: string,
+  limit: number,
+  seconds: number
+) {
+  const key = `ratelimit:${kind}:${email.trim().toLowerCase()}`
+  const count = await redis.eval(
+    "local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return n",
+    1,
+    key,
+    seconds
+  )
+  if (Number(count) > limit)
+    throw new AppError(
+      'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau ' +
+        Math.ceil(seconds / 60) +
+        ' phút.',
+      429
+    )
+  return key
+}
+
 const generateOtp = (): string => {
   return crypto.randomInt(100000, 1000000).toString()
 }
 
-const signAccessToken = (id: string, role: Role) => {
-  const payload: AccessTokenPayload = { id, role, type: 'access' }
+const signAccessToken = (
+  id: string,
+  role: Role,
+  sessionId: string,
+  tokenVersion: number
+) => {
+  const payload: AccessTokenPayload = {
+    id,
+    role,
+    type: 'access',
+    sessionId,
+    tokenVersion
+  }
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRES_IN
   })
 }
 
-const signRefreshToken = (id: string, role: Role) => {
+const signRefreshToken = (
+  id: string,
+  role: Role,
+  sessionId: string,
+  tokenVersion: number
+) => {
   const payload: RefreshTokenPayload = {
     id,
     role,
     type: 'refresh',
-    jti: crypto.randomUUID()
+    jti: sessionId,
+    tokenVersion
   }
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: REFRESH_TOKEN_EXPIRES_IN
   })
 }
 
-const issueTokens = (id: string, role: Role) => ({
-  accessToken: signAccessToken(id, role),
-  refreshToken: signRefreshToken(id, role)
-})
+const issueTokens = (id: string, role: Role, tokenVersion = 0) => {
+  const sessionId = crypto.randomUUID()
+  return {
+    accessToken: signAccessToken(id, role, sessionId, tokenVersion),
+    refreshToken: signRefreshToken(id, role, sessionId, tokenVersion)
+  }
+}
 
 const toPublicUser = (user: UserDocument) => ({
   id: user._id.toString(),
@@ -109,12 +154,17 @@ export const register = async (
   if (existing) throw new AppError('Email đã được sử dụng', 409)
 
   if (env.ENABLE_EMAIL_VERIFICATION) {
+    const attempts = await reserveAttempt(
+      'register-otp',
+      normalizedEmail,
+      5,
+      OTP_TTL_SECONDS
+    )
     const storedOtp = await redis.get(registerOtpKey(normalizedEmail))
     if (!storedOtp || storedOtp !== otp) {
       throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
     }
-    await redis.del(registerOtpKey(normalizedEmail))
-    await redis.del(registerCooldownKey(normalizedEmail))
+    await redis.del(attempts)
   }
 
   const passwordHash = await bcrypt.hash(password, 10)
@@ -125,20 +175,30 @@ export const register = async (
     passwordHash,
     creditBalance: creditConfig.signupBonus
   })
+  if (env.ENABLE_EMAIL_VERIFICATION) {
+    await redis.del(registerOtpKey(normalizedEmail))
+    await redis.del(registerCooldownKey(normalizedEmail))
+  }
 
   return {
     user: toPublicUser(user),
-    ...issueTokens(user._id.toString(), user.role as Role)
+    ...issueTokens(
+      user._id.toString(),
+      user.role as Role,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
 export const login = async (email: string, password: string) => {
-  const user = await UserModel.findOne({ email })
-  if (!user) throw new AppError('Email hoặc mật khẩu không đúng', 401)
+  const attempts = await reserveAttempt('login', email, 7, 15 * 60)
+  const user = await UserModel.findOne({ email: email.trim().toLowerCase() })
+  if (!user) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
   const valid = await bcrypt.compare(password, user.passwordHash)
-  if (!valid) throw new AppError('Email hoặc mật khẩu không đúng', 401)
+  if (!valid) throw new AppError('Email hoặc mật khẩu không chính xác', 401)
 
+  await redis.del(attempts)
   if (user.status === 'locked') {
     const lockedAt = user.lockedAt || user.updatedAt || new Date()
     const daysPassed = Math.floor(
@@ -153,7 +213,11 @@ export const login = async (email: string, password: string) => {
 
   return {
     user: toPublicUser(user),
-    ...issueTokens(user._id.toString(), user.role as Role)
+    ...issueTokens(
+      user._id.toString(),
+      user.role as Role,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
@@ -177,7 +241,11 @@ export const refresh = async (refreshToken: string) => {
   if (blacklisted) throw new AppError('Refresh token đã bị thu hồi', 401)
 
   const user = await UserModel.findById(payload.id)
-  if (!user) throw new AppError('Tài khoản không tồn tại', 401)
+  if (!user || (payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0))
+    throw new AppError(
+      'Phiên làm việc đã bị thu hồi. Vui lòng đăng nhập lại.',
+      401
+    )
   if (user.status === 'locked') {
     throw new AppError(
       'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên nếu có khiếu nại.',
@@ -186,21 +254,28 @@ export const refresh = async (refreshToken: string) => {
   }
 
   return {
-    accessToken: signAccessToken(user._id.toString(), user.role as Role)
+    accessToken: signAccessToken(
+      user._id.toString(),
+      user.role as Role,
+      payload.jti,
+      user.tokenVersion ?? 0
+    )
   }
 }
 
-export const logout = async (refreshToken: string) => {
+export const logout = async (refreshToken: string, accessToken?: string) => {
+  if (accessToken) {
+    const hash = crypto.createHash('sha256').update(accessToken).digest('hex')
+    await redis.set(`blacklist:access:${hash}`, '1', 'EX', 15 * 60)
+  }
+  let payload: RefreshTokenPayload
   try {
-    const payload = jwt.verify(
-      refreshToken,
-      env.JWT_SECRET
-    ) as RefreshTokenPayload
-    if (payload.type === 'refresh') {
-      await redis.set(blacklistKey(payload.jti), '1', 'EX', 7 * 24 * 60 * 60)
-    }
+    payload = jwt.verify(refreshToken, env.JWT_SECRET) as RefreshTokenPayload
   } catch {
-    // token không hợp lệ thì coi như đã đăng xuất
+    return { message: 'Đăng xuất thành công' }
+  }
+  if (payload.type === 'refresh') {
+    await redis.set(blacklistKey(payload.jti), '1', 'EX', 7 * 24 * 60 * 60)
   }
   return { message: 'Đăng xuất thành công' }
 }
@@ -208,7 +283,19 @@ export const logout = async (refreshToken: string) => {
 export const getProfile = async (userId: string) => {
   const user = await UserModel.findById(userId)
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
-  return toPublicUser(user)
+  const [shortTtl, count, windowTtl] = await Promise.all([
+    redis.ttl(profileCooldownKey(userId)),
+    redis.get(profileCountKey(userId)),
+    redis.ttl(profileCountKey(userId))
+  ])
+  return {
+    ...toPublicUser(user),
+    profileCooldownSeconds: Math.max(
+      0,
+      shortTtl,
+      Number(count) >= PROFILE_UPDATE_MAX_PER_WINDOW ? windowTtl : 0
+    )
+  }
 }
 
 export interface UpdateProfileInput {
@@ -229,33 +316,15 @@ export const updateProfile = async (
   // Luồng 5b: Trường Họ tên bị bỏ trống -> Thông báo "Họ tên không được để trống"
   if (name !== undefined) {
     const trimmed = name.trim()
-    if (!trimmed) {
-      throw new AppError('Họ tên không được để trống', 400)
+    if (trimmed.length < 2) {
+      throw new AppError('Họ tên phải có ít nhất 2 ký tự', 400)
     }
   }
 
   // Luồng 5a: Ảnh vượt quá dung lượng cho phép hoặc sai định dạng -> Thông báo lỗi tệp tin
   if (avatar) {
-    if (avatar.startsWith('data:')) {
-      const match = avatar.match(
-        /^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i
-      )
-      if (!match) {
-        throw new AppError(
-          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
-          400
-        )
-      }
-      const base64Data = match[2]
-      const approxSizeBytes = (base64Data.length * 3) / 4
-      // Kích thước tối đa 2MB = 2 * 1024 * 1024 bytes
-      if (approxSizeBytes > 2 * 1024 * 1024) {
-        throw new AppError(
-          'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin',
-          400
-        )
-      }
-    } else if (
+    if (
+      !avatar.startsWith('data:') &&
       !avatar.startsWith('http://') &&
       !avatar.startsWith('https://') &&
       !avatar.startsWith('/')
@@ -306,7 +375,10 @@ export const updateProfile = async (
     user.name = trimmedName
   }
   if (avatarChanged) {
-    user.avatar = avatar || null
+    user.avatar = avatar?.startsWith('data:')
+      ? '/api/v1/media/' +
+        (await uploadImage(userId, avatar, 2 * 1024 * 1024)).key
+      : avatar || null
   }
   await user.save()
 
@@ -322,7 +394,16 @@ export const updateProfile = async (
     await redis.expire(profileCountKey(userId), PROFILE_UPDATE_WINDOW_SECONDS)
   }
 
-  return toPublicUser(user)
+  return {
+    ...toPublicUser(user),
+    profileCooldownSeconds:
+      newCount >= PROFILE_UPDATE_MAX_PER_WINDOW
+        ? Math.max(
+            PROFILE_UPDATE_COOLDOWN_SECONDS,
+            await redis.ttl(profileCountKey(userId))
+          )
+        : PROFILE_UPDATE_COOLDOWN_SECONDS
+  }
 }
 
 export const changePassword = async (
@@ -334,11 +415,15 @@ export const changePassword = async (
   if (!user) throw new AppError('Tài khoản không tồn tại', 404)
 
   const valid = await bcrypt.compare(oldPassword, user.passwordHash)
-  if (!valid) throw new AppError('Mật khẩu cũ không đúng', 400)
+  if (!valid) throw new AppError('Mật khẩu hiện tại không đúng', 400)
 
   user.passwordHash = await bcrypt.hash(newPassword, 10)
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   await user.save()
-  return { message: 'Đổi mật khẩu thành công' }
+  return {
+    message: 'Đổi mật khẩu thành công',
+    ...issueTokens(user._id.toString(), user.role as Role, user.tokenVersion)
+  }
 }
 
 export const forgotPassword = async (email: string) => {
@@ -405,15 +490,23 @@ export const resetPassword = async (
     )
   }
 
+  const attempts = await reserveAttempt(
+    'reset-otp',
+    normalizedEmail,
+    5,
+    OTP_TTL_SECONDS
+  )
   const storedOtp = await redis.get(forgotPasswordOtpKey(normalizedEmail))
   if (!storedOtp || storedOtp !== otp) {
     throw new AppError('Mã OTP không chính xác hoặc đã hết hạn', 400)
   }
 
   user.passwordHash = await bcrypt.hash(password, 10)
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   await user.save()
 
   await redis.del(forgotPasswordOtpKey(normalizedEmail))
+  await redis.del(attempts)
 
   return { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' }
 }

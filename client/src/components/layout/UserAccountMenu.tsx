@@ -1,20 +1,23 @@
+import { mediaUrl } from '@/lib/mediaUrl'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authApi } from '@/features/auth/api/auth.api'
+import { useLogoutConfirm } from '@/features/auth/hooks/useLogoutConfirm'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 
 const getInitial = (name?: string) => {
   if (!name) return 'U'
-  const words = name.trim().split(/\s+/)
+  const trimmed = name.trim()
+  const words = trimmed.split(/\s+/)
   const lastWord = words[words.length - 1]
-  return (lastWord?.[0] || name[0] || 'U').toUpperCase()
+  return (lastWord?.[0] || trimmed[0] || 'U').toUpperCase()
 }
 
 export const UserAccountMenu = () => {
   const navigate = useNavigate()
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const { user, refreshToken, clearSession } = useAuthStore()
+  const user = useAuthStore((state) => state.user)
+  const { requestLogout, logoutDialog } = useLogoutConfirm()
   const isAdmin = user?.role === 'admin'
   const initial = getInitial(user?.name)
 
@@ -24,15 +27,9 @@ export const UserAccountMenu = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
     }
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-
     document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape)
     }
   }, [open])
 
@@ -43,8 +40,7 @@ export const UserAccountMenu = () => {
 
   const logout = () => {
     setOpen(false)
-    if (refreshToken) void authApi.logout(refreshToken)
-    clearSession()
+    requestLogout()
   }
 
   return (
@@ -52,19 +48,22 @@ export const UserAccountMenu = () => {
       <button
         type='button'
         onClick={() => setOpen((current) => !current)}
-        className='flex items-center gap-2.5 border border-stone-300 bg-white py-1.5 pl-3.5 pr-2 transition hover:border-emerald-950 focus:outline-none focus:ring-2 focus:ring-brand-rust/60'
+        className='flex items-center gap-2.5 border border-stone-300 bg-white py-1.5 pl-3.5 pr-2 transition hover:border-emerald-950'
         title='Quản lý tài khoản'
         aria-label='Mở menu tài khoản'
         aria-haspopup='menu'
         aria-expanded={open}
       >
-        <span className='max-w-30 truncate font-sans text-xs font-bold text-emerald-950 sm:max-w-40'>
+        <span
+          data-account-name
+          className='max-w-30 truncate font-sans text-xs font-bold text-emerald-950 sm:max-w-40'
+        >
           {user?.name || 'Tài khoản'}
         </span>
         <div className='flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 font-sans text-xs font-bold text-white'>
           {user?.avatar ? (
             <img
-              src={user.avatar}
+              src={mediaUrl(user.avatar)}
               alt={user.name || 'Ảnh đại diện'}
               className='h-full w-full object-cover'
             />
@@ -98,7 +97,7 @@ export const UserAccountMenu = () => {
             <div className='flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden border border-stone-300 bg-orange-700 text-sm font-bold text-white'>
               {user?.avatar ? (
                 <img
-                  src={user.avatar}
+                  src={mediaUrl(user.avatar)}
                   alt={user.name || 'Ảnh đại diện'}
                   className='h-full w-full object-cover'
                 />
@@ -114,7 +113,13 @@ export const UserAccountMenu = () => {
                 {user?.email}
               </div>
               <div className='mt-1 flex items-center gap-2'>
-                <span className='border border-stone-300 bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-stone-700'>
+                <span
+                  className={`border px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider ${
+                    isAdmin
+                      ? 'border-orange-300 bg-orange-100 text-orange-900'
+                      : 'border-stone-300 bg-stone-100 text-stone-700'
+                  }`}
+                >
                   {isAdmin ? 'Quản trị viên' : 'Thành viên'}
                 </span>
                 {!isAdmin && (
@@ -134,12 +139,18 @@ export const UserAccountMenu = () => {
               </span>
             </div>
             {!isAdmin && (
-              <div className='flex justify-between border-b border-stone-100 pb-1.5'>
-                <span>Số dư hiện tại:</span>
-                <span className='font-mono font-bold text-orange-700'>
-                  {user?.creditBalance ?? 0} credit
-                </span>
-              </div>
+              <>
+                <div className='flex justify-between border-b border-stone-100 pb-1.5'>
+                  <span>Số dư hiện tại:</span>
+                  <span className='font-mono font-bold text-orange-700'>
+                    {user?.creditBalance ?? 0} credit
+                  </span>
+                </div>
+                <div className='border border-stone-200 bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-500'>
+                  💡 Số dư credit dùng để tự động tạo outline và sinh nội dung
+                  slide bài giảng thông minh.
+                </div>
+              </>
             )}
             <div className='space-y-1.5 pt-1'>
               <button
@@ -161,19 +172,34 @@ export const UserAccountMenu = () => {
             </div>
           </div>
 
-          <div className='border-t border-stone-200 pt-2.5'>
+          <div className='mt-3.5 space-y-1 border-t border-stone-200 pt-2.5'>
             <button
               type='button'
               role='menuitem'
               onClick={logout}
               className='flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-semibold text-red-700 transition hover:bg-red-50 hover:text-red-800'
             >
-              <span aria-hidden='true'>↪</span>
+              <svg
+                xmlns='http://www.w3.org/2000/svg'
+                fill='none'
+                viewBox='0 0 24 24'
+                strokeWidth={1.75}
+                stroke='currentColor'
+                className='h-4 w-4'
+                aria-hidden='true'
+              >
+                <path
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  d='M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75'
+                />
+              </svg>
               <span>Đăng xuất</span>
             </button>
           </div>
         </div>
       )}
+      {logoutDialog}
     </div>
   )
 }

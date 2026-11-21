@@ -1,10 +1,39 @@
 import { apiClient } from '@/lib/api'
-import type { Folder, Lecture, Paginated } from '@/lib/types'
+import type { Folder, Lecture, LectureSummary, Paginated } from '@/lib/types'
 
 export const lectureApi = {
+  counts: async (signal?: AbortSignal) =>
+    (
+      await apiClient.get<{
+        data: {
+          total: number
+          unorganized: number
+          folders: Record<string, number>
+        }
+      }>('/lectures/counts', { signal })
+    ).data.data,
   list: async (params: Record<string, string | undefined>) =>
     (await apiClient.get<{ data: Paginated<Lecture> }>('/lectures', { params }))
       .data.data,
+
+  summaries: async (
+    params: Record<string, string | undefined>,
+    signal?: AbortSignal
+  ) =>
+    (
+      await apiClient.get<{ data: Paginated<LectureSummary> }>('/lectures', {
+        params: { ...params, view: 'summary' },
+        signal
+      })
+    ).data.data,
+
+  trashSummaries: async (signal?: AbortSignal) =>
+    (
+      await apiClient.get<{ data: LectureSummary[] }>('/lectures/trash', {
+        params: { view: 'summary' },
+        signal
+      })
+    ).data.data,
 
   trash: async () => {
     const res = (
@@ -15,8 +44,8 @@ export const lectureApi = {
     return Array.isArray(res) ? res : res.items || []
   },
 
-  folders: async () =>
-    (await apiClient.get<{ data: Folder[] }>('/folders')).data.data,
+  folders: async (signal?: AbortSignal) =>
+    (await apiClient.get<{ data: Folder[] }>('/folders', { signal })).data.data,
 
   createFolder: async (name: string) =>
     (await apiClient.post<{ data: Folder }>('/folders', { name })).data.data,
@@ -40,7 +69,6 @@ export const lectureApi = {
 
   // Soft delete: Chuyển bài giảng vào thùng rác (đếm ngược 30 ngày)
   moveToTrash: async (id: string) => apiClient.delete(`/lectures/${id}`),
-  remove: async (id: string) => apiClient.delete(`/lectures/${id}`),
 
   // Xóa vĩnh viễn bài giảng khỏi database (hard delete)
   permanentDelete: async (id: string) =>
@@ -55,15 +83,5 @@ export const lectureApi = {
         title,
         theme
       })
-    ).data.data,
-
-  export: async (id: string) =>
-    (
-      await apiClient.post<{
-        data: {
-          downloadUrl: string | null
-          data: Record<string, unknown>
-        }
-      }>(`/lectures/${id}/export`)
     ).data.data
 }

@@ -8,6 +8,7 @@ export interface User {
   role: Role
   status?: UserStatus
   creditBalance: number
+  profileCooldownSeconds?: number
   avatar?: string | null
 }
 
@@ -42,11 +43,42 @@ export type ShapeType =
   | 'star'
   | 'line'
 
+// Phần trăm cắt bớt mỗi cạnh ảnh (SRS UC011 Crop)
+export interface ImageCrop {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export type InlineStyle = Pick<
+  SlideComponent,
+  | 'fontSize'
+  | 'fontWeight'
+  | 'fontStyle'
+  | 'textDecoration'
+  | 'fontFamily'
+  | 'color'
+  | 'textCase'
+>
+export interface TextFormat {
+  start: number
+  end: number
+  style: InlineStyle
+}
+export interface TextSelection {
+  slideId: string
+  componentId: string
+  start: number
+  end: number
+}
 export interface SlideComponent {
   id: string
   type: 'title' | 'subtitle' | 'bullets' | 'text' | 'quote' | 'image' | 'shape'
   content: string
+  textFormats?: TextFormat[]
   imageUrl?: string
+  crop?: ImageCrop
   shapeType?: ShapeType
   fillColor?: string
   borderColor?: string
@@ -134,6 +166,22 @@ export interface Lecture {
   deletedAt: string | null
   createdAt: string
   updatedAt: string
+  revision?: number
+}
+
+export type LectureSummary = Pick<
+  Lecture,
+  | '_id'
+  | 'userId'
+  | 'folderId'
+  | 'title'
+  | 'theme'
+  | 'deletedAt'
+  | 'createdAt'
+  | 'updatedAt'
+> & {
+  previewSlide?: Slide
+  slideCount: number
 }
 
 export interface Folder {
@@ -185,7 +233,6 @@ export interface DashboardStats {
 
 export interface CreditConfig {
   _id: string
-  pricePerLecture: number
   pricePerSlide: number
   pricePerAiEdit: number
   pricePerOutline: number

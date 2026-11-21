@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import {
   ArrowUp,
   BookOpen,
@@ -21,9 +22,12 @@ import {
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useEditorStore, type AiSlideProposalItem } from '../store/editor.store'
 import type { Slide } from '@/lib/types'
+import { AiDataNotice } from '@/components/ui/AiDataNotice'
+import { useToast } from '@/components/ui/Toast'
 
 interface AiCopilotPanelProps {
-  onApplyAiPrompt: (instruction: string) => Promise<void>
+  onSourceMaterialChange?: (content: string) => void
+  onApplyAiPrompt: (instruction: string) => Promise<boolean | void>
   onAcceptProposal: (
     messageId: string,
     proposedSlide: Slide,
@@ -64,6 +68,7 @@ const AI_COPILOT_LOADING_STEPS = [
 type PromptToolbarTab = 'suggestions' | 'context' | null
 
 export const AiCopilotPanel = ({
+  onSourceMaterialChange,
   onApplyAiPrompt,
   onAcceptProposal,
   onAcceptAllProposals,
@@ -77,6 +82,10 @@ export const AiCopilotPanel = ({
   onSelectSlide,
   isAiLoading
 }: AiCopilotPanelProps) => {
+  const { showToast } = useToast()
+  const [isReading, setIsReading] = useState(false)
+  const fileReadRef = useRef<AbortController | null>(null)
+  useEffect(() => () => fileReadRef.current?.abort(), [])
   const {
     isAiPanelOpen,
     toggleAiPanel,
@@ -87,11 +96,28 @@ export const AiCopilotPanel = ({
     sourceMaterial,
     setSourceMaterial,
     setIsSourceMaterialModalOpen
-  } = useEditorStore()
+  } = useEditorStore(
+    useShallow((state) => ({
+      isAiPanelOpen: state.isAiPanelOpen,
+      toggleAiPanel: state.toggleAiPanel,
+      aiMessages: state.aiMessages,
+      previewSlide: state.previewSlide,
+      previewTargetSlideId: state.previewTargetSlideId,
+      setPreviewSlide: state.setPreviewSlide,
+      sourceMaterial: state.sourceMaterial,
+      setSourceMaterial: state.setSourceMaterial,
+      setIsSourceMaterialModalOpen: state.setIsSourceMaterialModalOpen
+    }))
+  )
 
   const [instruction, setInstruction] = useState('')
   const [activePromptTab, setActivePromptTab] = useState<PromptToolbarTab>(null)
-  const [attachedFileName, setAttachedFileName] = useState<string | null>(null)
+  const [attachedFile, setAttachedFile] = useState<{
+    name: string
+    content: string
+  } | null>(null)
+  const attachedFileName =
+    attachedFile?.content === sourceMaterial ? attachedFile.name : null
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const [expandedProposals, setExpandedProposals] = useState<
     Record<string, boolean>
@@ -155,12 +181,21 @@ export const AiCopilotPanel = ({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    if (!instruction.trim() || isAiLoading) return
+    if (!instruction.trim() || isAiLoading || isReading) return
+    if (sourceMaterial.length > 10000) {
+      showToast(
+        'Tài liệu nguồn vượt quá 10.000 ký tự. Vui lòng rút gọn tài liệu trước khi gửi.',
+        'error'
+      )
+      return
+    }
 
     const promptText = instruction.trim()
-    setInstruction('')
     setActivePromptTab(null)
-    await onApplyAiPrompt(promptText)
+    if ((await onApplyAiPrompt(promptText)) !== false)
+      setInstruction((current) =>
+        current.trim() === promptText ? '' : current
+      )
   }
 
   const handleTogglePreview = (
@@ -191,51 +226,60 @@ export const AiCopilotPanel = ({
     setActivePromptTab(null)
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
 
-    setAttachedFileName(file.name)
     setIsAttachmentMenuOpen(false)
-
-    const reader = new FileReader()
-    if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-      reader.onload = (event) => {
-        const text = event.target?.result as string
-        if (text) {
-          setSourceMaterial(text)
-        }
+    if (!/\.(txt|md)$/i.test(file.name)) {
+      showToast('Chỉ hỗ trợ tệp văn bản TXT và MD', 'error')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showToast(
+        'Tệp quá lớn. Tài liệu nguồn chỉ được tối đa 10.000 ký tự.',
+        'error'
+      )
+      return
+    }
+    fileReadRef.current?.abort()
+    const controller = new AbortController()
+    fileReadRef.current = controller
+    setIsReading(true)
+    try {
+      const text = await file.text()
+      if (controller.signal.aborted) return
+      if (text.length > 10000) {
+        showToast('Tài liệu nguồn không được vượt quá 10.000 ký tự', 'error')
+        return
       }
-      reader.readAsText(file)
-    } else {
-      reader.onload = (event) => {
-        const text = (event.target?.result as string) || ''
-        const cleaned = text
-          // eslint-disable-next-line no-control-regex
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
-          .trim()
-        if (cleaned.length > 50) {
-          setSourceMaterial(cleaned.slice(0, 50000))
-        } else {
-          setSourceMaterial(
-            `[Tệp đính kèm: ${file.name} (${Math.round(file.size / 1024)} KB)]`
-          )
-        }
+      if (!text.trim()) {
+        showToast('Tệp văn bản không có nội dung', 'error')
+        return
       }
-      reader.readAsText(file)
+      setAttachedFile({ name: file.name, content: text })
+      setSourceMaterial(text)
+      onSourceMaterialChange?.(text)
+    } catch {
+      if (!controller.signal.aborted)
+        showToast('Không thể đọc tệp văn bản. Vui lòng thử lại.', 'error')
+    } finally {
+      if (!controller.signal.aborted) setIsReading(false)
     }
   }
 
   const handleRemoveAttachment = () => {
-    setAttachedFileName(null)
+    setAttachedFile(null)
     setSourceMaterial('')
+    onSourceMaterialChange?.('')
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
 
   return (
-    <aside className='flex w-88 shrink-0 flex-col border-l border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
+    <aside className='absolute inset-y-0 right-0 z-40 flex w-[min(22rem,calc(100%-3.5rem))] lg:static lg:w-88 shrink-0 flex-col border-l border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
       {/* Header Panel */}
       <div className='flex h-12 items-center justify-between border-b border-stone-200 px-4'>
         <div className='flex items-center gap-2'>
@@ -849,10 +893,16 @@ export const AiCopilotPanel = ({
         <input
           ref={fileInputRef}
           type='file'
-          accept='.docx,.pdf,.txt,.md'
+          accept='.txt,.md'
+          disabled={isReading}
           onChange={handleFileUpload}
           className='hidden'
         />
+        {isReading && (
+          <p role='status' className='text-xs text-stone-500'>
+            Đang đọc tài liệu...
+          </p>
+        )}
 
         {/* Quick Suggestion Chips (carousel/horizontal scroll) */}
         <div className='flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 text-[11px]'>
@@ -892,6 +942,7 @@ export const AiCopilotPanel = ({
           {/* Textarea */}
           <textarea
             id='ai-prompt-input'
+            maxLength={3000}
             rows={2}
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
@@ -901,7 +952,7 @@ export const AiCopilotPanel = ({
                 void handleSubmit()
               }
             }}
-            placeholder='Yêu cầu AI chỉnh sửa slide hoặc trao đổi...'
+            placeholder='Prompt vào đây'
             className='w-full resize-none border-0 bg-transparent p-0 text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0 leading-relaxed max-h-32 custom-scrollbar'
           />
 
@@ -930,7 +981,11 @@ export const AiCopilotPanel = ({
                     className='flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-stone-700 hover:bg-stone-100 transition cursor-pointer'
                   >
                     <FileUp size={14} className='text-brand-rust' />
-                    <span>Tải tệp (.docx, .pdf, .txt)</span>
+                    <span>
+                      {isReading
+                        ? 'Đang đọc tài liệu...'
+                        : 'Tải tệp văn bản (.txt, .md)'}
+                    </span>
                   </button>
                   <button
                     type='button'
@@ -995,6 +1050,7 @@ export const AiCopilotPanel = ({
             </div>
           </div>
         </div>
+        <AiDataNotice className='mt-1.5 px-1' />
       </div>
     </aside>
   )

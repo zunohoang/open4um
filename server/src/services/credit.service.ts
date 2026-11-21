@@ -7,7 +7,7 @@ export const debitCredits = async (
   insufficientMessage: string
 ) => {
   const user = await UserModel.findOneAndUpdate(
-    { _id: userId, creditBalance: { $gte: amount } },
+    { _id: userId, status: { $ne: 'locked' }, creditBalance: { $gte: amount } },
     { $inc: { creditBalance: -amount } },
     { new: true }
   )

@@ -1,8 +1,12 @@
-import type { Slide, SlideComponent } from '@/lib/types'
+import { SlideImage } from '@/features/slide-editor/components/SlideImage'
+import { slideLength } from '@/features/slide-editor/utils/slide'
+import type { Slide, SlideComponent, TextSelection } from '@/lib/types'
 import { Check, Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP, getThemeById } from '../constants/theme-options'
 import { getSlideComponents } from '../utils/slide'
+import { createFrameScheduler } from '../utils/frameScheduler'
+import { SlideText } from './SlideText'
 
 interface SlideCanvasProps {
   slide: Slide | null | undefined
@@ -17,9 +21,11 @@ interface SlideCanvasProps {
     id: string,
     patch: Partial<SlideComponent>,
     recordHistory?: boolean
-  ) => void
+  ) => boolean | void
   onDuplicateComponent: (comp: SlideComponent) => void
-  onDeleteComponent: (id: string) => void
+  onDeleteComponent: (id: string, recordHistory?: boolean) => void
+  selection: TextSelection | null
+  onTextSelection: (selection: TextSelection | null) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
   isAiLoading?: boolean
   isPreview?: boolean
@@ -27,16 +33,18 @@ interface SlideCanvasProps {
   onExitPreview?: () => void
 }
 
-/**
- * Chuyển đổi fontSize px sang đơn vị cqw (Container Query Width) để font chữ
- * luôn co giãn tỷ lệ thuận 100% với kích thước khung hình Canvas 16:9.
- * Chuẩn cơ sở: 960px chiều rộng (chuẩn slide 16:9 960x540).
- * Ví dụ: 32px trên canvas 960px = 3.333cqw.
- * Khi thu nhỏ canvas do mở sidebar AI, chữ tự thu nhỏ tương ứng để không bao giờ đè lên nhau.
- */
-const getResponsiveFontSize = (fontSize: number = 20): string => {
-  const cqw = (fontSize / 9.6).toFixed(3)
-  return `clamp(8px, ${cqw}cqw, ${fontSize * 1.6}px)`
+const SNAP_THRESHOLD = 1.5
+
+// SRS UC012 bước 5: hút mép trái/giữa/phải của đối tượng về mép và tâm slide (đơn vị %)
+const snapAxis = (start: number, size: number) => {
+  for (const target of [0, 50, 100]) {
+    for (const offset of [0, size / 2, size]) {
+      if (Math.abs(start + offset - target) <= SNAP_THRESHOLD) {
+        return { value: target - offset, guide: target }
+      }
+    }
+  }
+  return { value: start, guide: null }
 }
 
 export const SlideCanvas = ({
@@ -51,6 +59,8 @@ export const SlideCanvas = ({
   onUpdateComponent,
   onDuplicateComponent,
   onDeleteComponent,
+  selection,
+  onTextSelection,
   onAiQuickAction,
   isAiLoading = false,
   isPreview = false,
@@ -88,6 +98,11 @@ export const SlideCanvas = ({
     isComposingRef.current = false
   }, [editingTextId])
 
+  const [snapGuides, setSnapGuides] = useState<{
+    v: number | null
+    h: number | null
+  } | null>(null)
+
   // Quản lý trạng thái kéo thả di chuyển, co giãn hoặc xoay phần tử
   const [dragState, setDragState] = useState<{
     type: 'move' | 'resize' | 'rotate'
@@ -115,6 +130,15 @@ export const SlideCanvas = ({
     onSelectComponent(comp.id)
     hasRecordedHistoryRef.current = false
 
+    const element = e.currentTarget as HTMLElement
+    const canvas = canvasRef.current
+    const measuredWidth = canvas?.clientWidth
+      ? (element.offsetWidth / canvas.clientWidth) * 100
+      : 50
+    const measuredHeight = canvas?.clientHeight
+      ? (element.offsetHeight / canvas.clientHeight) * 100
+      : 5
+
     setDragState({
       type: 'move',
       compId: comp.id,
@@ -122,8 +146,8 @@ export const SlideCanvas = ({
       startY: e.clientY,
       initialX: comp.x,
       initialY: comp.y,
-      initialWidth: comp.width ?? 50,
-      initialHeight: comp.height ?? 20,
+      initialWidth: comp.width ?? measuredWidth,
+      initialHeight: comp.height ?? measuredHeight,
       initialFontSize: comp.fontSize ?? 20,
       initialRotation: comp.rotation ?? 0,
       centerX: 0,
@@ -151,7 +175,10 @@ export const SlideCanvas = ({
 
     if (canvasRef.current && compEl) {
       const canvasRect = canvasRef.current.getBoundingClientRect()
-      const compRect = compEl.getBoundingClientRect()
+      const compRect = {
+        width: compEl.offsetWidth,
+        height: compEl.offsetHeight
+      }
       if (canvasRect.width > 0 && canvasRect.height > 0) {
         if (!initW) {
           initW = Math.round((compRect.width / canvasRect.width) * 100)
@@ -219,10 +246,14 @@ export const SlideCanvas = ({
   useEffect(() => {
     if (!dragState || !canvasRef.current) return
 
+    let rect = canvasRef.current.getBoundingClientRect()
+    const updateBounds = () => {
+      if (canvasRef.current) rect = canvasRef.current.getBoundingClientRect()
+    }
+    const observer = new ResizeObserver(updateBounds)
+    observer.observe(canvasRef.current)
+
     const handleMouseMove = (e: MouseEvent) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
       if (rect.width === 0 || rect.height === 0) return
 
       const deltaX = e.clientX - dragState.startX
@@ -232,10 +263,13 @@ export const SlideCanvas = ({
         return
       }
 
-      let shouldRecord = false
-      if (!hasRecordedHistoryRef.current) {
-        hasRecordedHistoryRef.current = true
-        shouldRecord = true
+      const updateComponent = (patch: Partial<SlideComponent>) => {
+        const changed = onUpdateComponent(
+          dragState.compId,
+          patch,
+          !hasRecordedHistoryRef.current
+        )
+        if (changed !== false) hasRecordedHistoryRef.current = true
       }
 
       const deltaPercentX = (deltaX / rect.width) * 100
@@ -277,13 +311,9 @@ export const SlideCanvas = ({
         }
         if (finalRotation >= 360) finalRotation = 0
 
-        onUpdateComponent(
-          dragState.compId,
-          { rotation: finalRotation },
-          shouldRecord
-        )
+        updateComponent({ rotation: finalRotation })
       } else if (dragState.type === 'move') {
-        const nextX = Math.round(
+        const rawX = Math.round(
           Math.max(
             0,
             Math.min(
@@ -292,7 +322,7 @@ export const SlideCanvas = ({
             )
           )
         )
-        const nextY = Math.round(
+        const rawY = Math.round(
           Math.max(
             0,
             Math.min(
@@ -301,177 +331,101 @@ export const SlideCanvas = ({
             )
           )
         )
-        onUpdateComponent(
-          dragState.compId,
-          { x: nextX, y: nextY },
-          shouldRecord
+        const snapX = snapAxis(rawX, dragState.initialWidth)
+        const snapY = snapAxis(rawY, dragState.initialHeight)
+        setSnapGuides((previous) =>
+          previous?.v === snapX.guide && previous?.h === snapY.guide
+            ? previous
+            : { v: snapX.guide, h: snapY.guide }
         )
+        updateComponent({ x: snapX.value, y: snapY.value })
       } else if (dragState.type === 'resize' && dragState.handle) {
-        const minW = 5
-        const minH = 3
-        const x0 = dragState.initialX
-        const y0 = dragState.initialY
-        const w0 = Math.max(1, dragState.initialWidth)
-        const h0 = Math.max(1, dragState.initialHeight)
-        const R0 = x0 + w0
-        const B0 = y0 + h0
-        const dx = deltaPercentX
-        const dy = deltaPercentY
-
-        let nextX = x0
-        let nextY = y0
-        let nextW = w0
-        let nextH = h0
-        let nextFontSize: number | undefined
-
-        const isCorner =
-          dragState.handle === 'nw' ||
-          dragState.handle === 'ne' ||
-          dragState.handle === 'se' ||
-          dragState.handle === 'sw'
-
-        if (dragState.isText && isCorner) {
-          // Với block text: Kéo 4 góc sẽ scale đồng thời cả kích thước khung và font-size
-          let s = 1
-
-          switch (dragState.handle) {
-            case 'se': {
-              const sx = (w0 + dx) / w0
-              const sy = (h0 + dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(100 - x0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
-              nextX = x0
-              nextY = y0
-              break
-            }
-            case 'sw': {
-              const sx = (w0 - dx) / w0
-              const sy = (h0 + dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(R0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
-              nextX = R0 - nextW
-              nextY = y0
-              break
-            }
-            case 'ne': {
-              const sx = (w0 + dx) / w0
-              const sy = (h0 - dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(100 - x0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(B0, h0 * s))
-              nextX = x0
-              nextY = B0 - nextH
-              break
-            }
-            case 'nw': {
-              const sx = (w0 - dx) / w0
-              const sy = (h0 - dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(R0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(B0, h0 * s))
-              nextX = R0 - nextW
-              nextY = B0 - nextH
-              break
-            }
-          }
-
-          nextFontSize = Math.round(
-            Math.max(10, Math.min(160, dragState.initialFontSize * s))
+        const radians = (dragState.initialRotation * Math.PI) / 180
+        const cos = Math.cos(radians),
+          sin = Math.sin(radians)
+        const dx = ((cos * deltaX + sin * deltaY) * 100) / rect.width
+        const dy = ((-sin * deltaX + cos * deltaY) * 100) / rect.height
+        const edge = dragState.handle
+        const horizontal = edge.includes('e') ? 1 : edge.includes('w') ? -1 : 0
+        const vertical = edge.includes('s') ? 1 : edge.includes('n') ? -1 : 0
+        const {
+          initialWidth: w,
+          initialHeight: h,
+          initialX: x,
+          initialY: y
+        } = dragState
+        const scaleText = !!(dragState.isText && horizontal && vertical)
+        let width = Math.max(5, w + horizontal * dx)
+        let height = Math.max(3, h + vertical * dy)
+        if (scaleText) {
+          const scale = Math.max(
+            5 / w,
+            3 / h,
+            Math.abs(dx / w) >= Math.abs(dy / h) ? width / w : height / h
           )
-        } else {
-          // Các đối tượng hình khối, ảnh hoặc kéo các chốt cạnh (e, w, n, s) của text
-          switch (dragState.handle) {
-            case 'se':
-              nextX = x0
-              nextY = y0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'sw':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = y0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'ne':
-              nextX = x0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-
-            case 'nw':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-
-            case 'e':
-              nextX = x0
-              nextY = y0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextH = h0
-              break
-
-            case 'w':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = y0
-              nextH = h0
-              break
-
-            case 's':
-              nextX = x0
-              nextY = y0
-              nextW = w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'n':
-              nextX = x0
-              nextW = w0
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-          }
+          width = w * scale
+          height = h * scale
         }
-
+        // Keep the opposite handle stationary in screen coordinates.
+        const dw = width - w,
+          dh = height - h
+        const shiftX =
+          (horizontal * dw * cos -
+            (vertical * dh * sin * rect.height) / rect.width -
+            dw) /
+          2
+        const shiftY =
+          ((horizontal * dw * sin * rect.width) / rect.height +
+            vertical * dh * cos -
+            dh) /
+          2
+        let fraction = 1
+        const limit = (margin: number, movement: number) => {
+          if (movement > 0)
+            fraction = Math.min(fraction, Math.max(0, margin) / movement)
+        }
+        limit(x, -shiftX)
+        limit(y, -shiftY)
+        limit(100 - x - w, shiftX + dw)
+        limit(100 - y - h, shiftY + dh)
         const patch: Partial<SlideComponent> = {
-          x: Math.round(nextX),
-          y: Math.round(nextY),
-          width: Math.round(nextW),
-          height: Math.round(nextH)
+          x: x + shiftX * fraction,
+          y: y + shiftY * fraction,
+          width: w + dw * fraction,
+          height: h + dh * fraction
         }
-        if (nextFontSize !== undefined) {
-          patch.fontSize = nextFontSize
-        }
+        if (scaleText)
+          patch.fontSize = Math.max(
+            8,
+            Math.min(
+              120,
+              Math.round(dragState.initialFontSize * (1 + (dw * fraction) / w))
+            )
+          )
 
-        onUpdateComponent(dragState.compId, patch, shouldRecord)
+        updateComponent(patch)
       }
     }
 
+    const scheduler = createFrameScheduler(handleMouseMove)
+    const scheduleMove = (event: MouseEvent) => scheduler.schedule(event)
     const handleMouseUp = () => {
+      scheduler.flush()
       setDragState(null)
+      setSnapGuides(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mousemove', scheduleMove)
     window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('scroll', updateBounds, true)
+    window.addEventListener('resize', updateBounds)
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
+      scheduler.cancel()
+      observer.disconnect()
+      window.removeEventListener('mousemove', scheduleMove)
       window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('scroll', updateBounds, true)
+      window.removeEventListener('resize', updateBounds)
     }
   }, [dragState, onUpdateComponent])
 
@@ -485,89 +439,8 @@ export const SlideCanvas = ({
       ? getSlideComponents(originalSlide, theme.id)
       : (passedComponents ?? (slide ? getSlideComponents(slide, theme.id) : []))
 
-  // Helper tính toán màu chữ đảm bảo độ tương phản cao tuyệt đối theo theme
-  const getRenderTextColor = (comp: SlideComponent) => {
-    const rawColor = comp.color?.trim()
-    const isDarkBackground = Boolean(theme.isDark)
-    const darkPalette = [
-      '#173c39',
-      '#1c1917',
-      '#000000',
-      '#064e3b',
-      '#072b24',
-      '#0f172a',
-      '#1e293b',
-      '#334155',
-      '#57534e'
-    ]
-
-    // Nếu canvas là theme tối nhưng chữ mang màu tối của theme khác hoặc rỗng -> chuyển sang màu sáng tương ứng
-    if (
-      isDarkBackground &&
-      (!rawColor || darkPalette.includes(rawColor.toLowerCase()))
-    ) {
-      if (
-        comp.id.startsWith('header-') ||
-        comp.id.startsWith('step-num-') ||
-        comp.id.startsWith('callout-stat-') ||
-        comp.id.startsWith('list-tag-')
-      ) {
-        return theme.accentColor
-      }
-      if (
-        comp.type === 'subtitle' ||
-        comp.id.includes('-desc-') ||
-        comp.id.startsWith('footer-')
-      ) {
-        return theme.textSecondary
-      }
-      return theme.textPrimary
-    }
-
-    // Nếu là theme sáng nhưng chữ mang màu trắng/sáng của dark mode
-    const lightPalette = [
-      '#ffffff',
-      '#f8fafc',
-      '#f1f5f9',
-      '#a7f3d0',
-      '#94a3b8',
-      '#38bdf8',
-      '#34d399'
-    ]
-    if (
-      !isDarkBackground &&
-      rawColor &&
-      lightPalette.includes(rawColor.toLowerCase())
-    ) {
-      if (
-        comp.id.startsWith('header-') ||
-        comp.id.startsWith('step-num-') ||
-        comp.id.startsWith('callout-stat-') ||
-        comp.id.startsWith('list-tag-')
-      ) {
-        return theme.accentColor
-      }
-      if (
-        comp.type === 'subtitle' ||
-        comp.id.includes('-desc-') ||
-        comp.id.startsWith('footer-')
-      ) {
-        return theme.textSecondary
-      }
-      return theme.textPrimary
-    }
-
-    // Nếu là header nhưng mang màu đỏ gạch của theme classic trên theme khác
-    if (
-      comp.id.startsWith('header-') &&
-      rawColor === '#c45b3f' &&
-      theme.id !== 'classic-editorial'
-    ) {
-      return theme.accentColor
-    }
-
-    return rawColor || theme.textPrimary
-  }
+  const getRenderTextColor = (comp: SlideComponent) =>
+    comp.color?.trim() || theme.textPrimary
 
   // Helper render hình khối
   const renderShapeElement = (comp: SlideComponent) => {
@@ -587,7 +460,10 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
               borderRadius: '9999px'
             }}
           />
@@ -627,7 +503,7 @@ export const SlideCanvas = ({
           <div
             className='w-full'
             style={{
-              height: `${Math.max(2, strokeW || 2)}px`,
+              height: slideLength(Math.max(2, strokeW || 2)),
               backgroundColor: stroke || fill
             }}
           />
@@ -638,8 +514,11 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius || 16}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius || 16)
             }}
           />
         )
@@ -651,8 +530,11 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius)
             }}
           />
         )
@@ -661,7 +543,7 @@ export const SlideCanvas = ({
 
   return (
     <div
-      className='relative flex flex-1 items-center justify-center p-6 overflow-hidden'
+      className='relative flex flex-1 items-center justify-center p-2 sm:p-4 lg:p-6 overflow-hidden'
       onClick={() => {
         onSelectComponent(null)
         setEditingTextId(null)
@@ -683,6 +565,19 @@ export const SlideCanvas = ({
               : 'border-stone-200'
         }`}
       >
+        {snapGuides?.v != null && (
+          <div
+            className='pointer-events-none absolute inset-y-0 z-30 w-px bg-pink-500'
+            style={{ left: `${snapGuides.v}%` }}
+          />
+        )}
+        {snapGuides?.h != null && (
+          <div
+            className='pointer-events-none absolute inset-x-0 z-30 h-px bg-pink-500'
+            style={{ top: `${snapGuides.h}%` }}
+          />
+        )}
+
         {/* Banner chế độ xem trước đề xuất AI với nút gạt Before / After */}
         {isPreview && (
           <div className='absolute inset-x-0 top-0 z-40 flex items-center justify-between bg-amber-500/95 backdrop-blur-xs px-3.5 py-1.5 text-white shadow-md'>
@@ -762,7 +657,7 @@ export const SlideCanvas = ({
             isPreview ? 'top-10' : 'top-3'
           } ${theme.isDark ? 'text-slate-500' : 'text-stone-400'}`}
         >
-          {slideIndex + 1} / {totalSlides}
+          {totalSlides ? slideIndex + 1 : 0} / {totalSlides}
         </span>
 
         {/* Render các components trên Canvas */}
@@ -915,6 +810,7 @@ export const SlideCanvas = ({
 
                   {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG (GIỮ NGUYÊN CHIỀU NGANG THẲNG ĐỨNG KHI XOAY PHẦN TỬ) */}
                   <div
+                    data-selection-tools
                     onMouseDown={(e) => e.stopPropagation()}
                     className={`absolute left-1/2 flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
                       comp.y < 8 ? 'top-full mt-3.5' : 'bottom-full mb-3.5'
@@ -924,10 +820,11 @@ export const SlideCanvas = ({
                       transformOrigin: 'center center'
                     }}
                   >
-                    {isText && (
+                    {isText && selection?.componentId === comp.id && (
                       <>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('rewrite')}
                           disabled={isAiLoading}
                           className='flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-brand-rust hover:bg-brand-rust/10 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -939,6 +836,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('shorten')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -949,6 +847,7 @@ export const SlideCanvas = ({
                         <span className='text-stone-300'>|</span>
                         <button
                           type='button'
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => onAiQuickAction('expand')}
                           disabled={isAiLoading}
                           className='rounded-full px-2 py-0.5 text-[11px] font-bold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50 whitespace-nowrap shrink-0'
@@ -987,21 +886,27 @@ export const SlideCanvas = ({
                 </div>
               ) : comp.type === 'image' ? (
                 <div className='h-full w-full overflow-hidden rounded-sm pointer-events-none'>
-                  <img
-                    src={comp.imageUrl || comp.content}
-                    alt='Slide graphic'
-                    className={
-                      comp.height
-                        ? 'h-full w-full object-contain'
-                        : 'h-auto w-full max-h-[70vh] object-contain'
-                    }
-                  />
+                  <SlideImage component={comp} />
                 </div>
               ) : editingTextId === comp.id ? (
                 /* Chế độ sửa văn bản trực tiếp khi double-click */
                 <textarea
                   ref={textareaRef}
                   data-slide-canvas-text='true'
+                  onSelect={(e) => {
+                    const { selectionStart: start, selectionEnd: end } =
+                      e.currentTarget
+                    onTextSelection(
+                      slide && end > start
+                        ? {
+                            slideId: slide.id,
+                            componentId: comp.id,
+                            start,
+                            end
+                          }
+                        : null
+                    )
+                  }}
                   autoFocus
                   value={comp.content}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -1049,18 +954,22 @@ export const SlideCanvas = ({
                     }
                   }}
                   onBlur={(e) => {
+                    const hadTextChanges = isTextSessionRecordedRef.current
                     isTextSessionRecordedRef.current = false
                     isComposingRef.current = false
                     setEditingTextId(null)
                     // TC-18: Tự động xóa phần tử khỏi mảng components khi người dùng xóa hết nội dung và blur
                     if (!comp.content.trim() || !e.target.value.trim()) {
-                      onDeleteComponent(comp.id)
+                      onDeleteComponent(comp.id, !hadTextChanges)
                     }
                   }}
                   style={{
-                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
+                    fontSize: slideLength(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
+                    textDecoration: comp.textFormats?.length
+                      ? 'none'
+                      : (comp.textDecoration ?? 'none'),
                     textAlign: comp.textAlign ?? 'left',
                     color: getRenderTextColor(comp),
                     fontFamily:
@@ -1079,10 +988,12 @@ export const SlideCanvas = ({
                 /* Hiển thị văn bản bình thường */
                 <div
                   style={{
-                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
+                    fontSize: slideLength(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
-                    textDecoration: comp.textDecoration ?? 'none',
+                    textDecoration: comp.textFormats?.length
+                      ? 'none'
+                      : (comp.textDecoration ?? 'none'),
                     textAlign: comp.textAlign ?? 'left',
                     color: getRenderTextColor(comp),
                     fontFamily:
@@ -1097,26 +1008,12 @@ export const SlideCanvas = ({
                   }}
                   className='w-full select-none break-words'
                 >
-                  {comp.type === 'bullets' ? (
-                    <ul className='space-y-1.5 list-disc pl-5'>
-                      {comp.content
-                        .split('\n')
-                        .filter((s) => s.trim())
-                        .map((bullet, idx) => (
-                          <li key={idx} className='break-words'>
-                            {bullet}
-                          </li>
-                        ))}
-                    </ul>
-                  ) : comp.type === 'quote' ? (
-                    <div className='italic border-y border-stone-300 py-3 px-2 break-words'>
-                      “ {comp.content} ”
-                    </div>
-                  ) : (
-                    <div className='whitespace-pre-wrap break-words'>
-                      {comp.content}
-                    </div>
-                  )}
+                  <SlideText
+                    component={comp}
+                    selection={
+                      selection?.componentId === comp.id ? selection : null
+                    }
+                  />
                 </div>
               )}
             </div>

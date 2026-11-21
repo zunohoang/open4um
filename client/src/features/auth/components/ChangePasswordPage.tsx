@@ -1,3 +1,4 @@
+import { requestError } from '@/lib/requestError'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/features/auth/api/auth.api'
@@ -48,9 +49,10 @@ export const ChangePasswordPage = () => {
       setConfirmPassword('')
       setTimeout(() => setSuccessMessage(null), 4000)
     } catch (error: unknown) {
-      const message =
-        (error as { response?: { data?: { message?: string } } })?.response
-          ?.data?.message || 'Không thể đổi mật khẩu, vui lòng thử lại sau.'
+      const message = requestError(
+        error,
+        'Không thể đổi mật khẩu, vui lòng thử lại sau.'
+      )
       setErrorMessage(message)
     } finally {
       setIsSubmitting(false)

@@ -1,25 +1,25 @@
 import { z } from 'zod'
 
 const outlineSchema = z.object({
-  title: z.string().min(1, 'Tiêu đề outline không được để trống'),
+  title: z.string().trim().min(1, 'Tiêu đề outline không được để trống'),
   sections: z.array(
     z.object({
-      heading: z.string().min(1, 'Tiêu đề phần không được để trống'),
+      heading: z.string().trim().min(1, 'Tiêu đề phần không được để trống'),
       bullets: z.array(z.string())
     })
   )
 })
 
 export const generateOutlineSchema = z.object({
-  prompt: z.string().min(5, 'Yêu cầu prompt phải có ít nhất 5 ký tự'),
-  feedback: z.string().optional(),
+  prompt: z.string().trim().min(5, 'Yêu cầu prompt phải có ít nhất 5 ký tự'),
+  feedback: z.string().trim().min(1, 'Góp ý không được để trống').optional(),
   currentOutline: outlineSchema.optional(),
   lectureId: z.string().optional()
 })
 
 export const createLectureSchema = z.object({
   lectureId: z.string().optional(),
-  title: z.string().min(1, 'Tiêu đề bài giảng không được để trống'),
+  title: z.string().trim().min(1, 'Tiêu đề bài giảng không được để trống'),
   prompt: z.string().optional(),
   theme: z.string().optional(),
   folderId: z.string().nullable().optional(),
@@ -27,27 +27,37 @@ export const createLectureSchema = z.object({
 })
 
 export const createBlankLectureSchema = z.object({
-  title: z.string().min(1, 'Tiêu đề bài giảng không được để trống'),
+  title: z.string().trim().min(1, 'Tiêu đề bài giảng không được để trống'),
   theme: z.string().optional(),
   folderId: z.string().nullable().optional()
 })
 
 export const updateLectureSchema = z.object({
-  title: z.string().min(1, 'Tiêu đề bài giảng không được để trống').optional(),
+  revision: z.number().int().nonnegative().optional(),
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Tiêu đề bài giảng không được để trống')
+    .optional(),
   slides: z.array(z.record(z.string(), z.unknown())).optional(),
   theme: z.string().optional(),
   folderId: z.string().nullable().optional(),
   contextSummary: z.string().optional(),
-  sourceMaterial: z.string().optional(),
+  sourceMaterial: z
+    .string()
+    .max(10000, 'Tài liệu nguồn không được vượt quá 10.000 ký tự')
+    .optional(),
   aiChatHistory: z.array(z.record(z.string(), z.unknown())).optional()
 })
 
-export const aiEditSlideSchema = z.object({
-  slideId: z.string().min(1, 'Mã slide không được để trống'),
-  instruction: z
-    .string()
-    .min(2, 'Hướng dẫn chỉnh sửa phải có ít nhất 2 ký tự')
-    .max(2000, 'Hướng dẫn chỉnh sửa không được quá 2000 ký tự')
+export const autosaveLectureSchema = updateLectureSchema.extend({
+  revision: z
+    .number({
+      required_error:
+        'Thiếu phiên bản bài giảng. Vui lòng tải lại trước khi lưu.'
+    })
+    .int()
+    .nonnegative()
 })
 
 const aiChatSlideSnapshotSchema = z
@@ -88,11 +98,20 @@ const aiChatSlideSnapshotSchema = z
 export const aiChatSchema = z.object({
   message: z
     .string()
+    .trim()
     .min(1, 'Nội dung tin nhắn không được để trống')
     .max(3000, 'Nội dung tin nhắn không được quá 3000 ký tự'),
   slideId: z.string().optional(),
   currentSlide: aiChatSlideSnapshotSchema.optional(),
   selectedCompId: z.string().optional(),
+  textEdit: z
+    .object({
+      action: z.enum(['rewrite', 'shorten', 'expand']),
+      start: z.number().int().nonnegative(),
+      end: z.number().int().positive().max(10000)
+    })
+    .refine((range) => range.end > range.start, 'Đoạn văn bản không hợp lệ')
+    .optional(),
   sourceMaterial: z.string().max(10000).optional(),
   history: z
     .array(
@@ -104,30 +123,6 @@ export const aiChatSchema = z.object({
     .optional()
 })
 
-export const slideOperationSchema = z.discriminatedUnion('operation', [
-  z.object({
-    operation: z.literal('add'),
-    index: z.number().int('Chỉ số slide phải là số nguyên').min(0).optional()
-  }),
-  z.object({
-    operation: z.literal('delete'),
-    slideId: z.string().min(1, 'Mã slide không được để trống')
-  }),
-  z.object({
-    operation: z.literal('duplicate'),
-    slideId: z.string().min(1, 'Mã slide không được để trống')
-  }),
-  z.object({
-    operation: z.literal('move'),
-    slideId: z.string().min(1, 'Mã slide không được để trống'),
-    toIndex: z
-      .number()
-      .int('Vị trí chuyển đến phải là số nguyên')
-      .min(0, 'Vị trí chuyển đến không được âm')
-  }),
-  z.object({
-    operation: z.literal('update'),
-    slideId: z.string().min(1, 'Mã slide không được để trống'),
-    patch: z.record(z.string(), z.unknown())
-  })
-])
+export const uploadImageSchema = z.object({
+  dataUrl: z.string().min(1, 'Dữ liệu ảnh không được để trống')
+})

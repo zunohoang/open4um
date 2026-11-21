@@ -1,5 +1,11 @@
+import { useShallow } from 'zustand/react/shallow'
 import { useToast } from '@/components/ui/Toast'
-import type { ContentLayoutType, Outline, ShapeType } from '@/lib/types'
+import type {
+  ContentLayoutType,
+  Outline,
+  ShapeType,
+  SlideComponent
+} from '@/lib/types'
 import {
   AlignLeft,
   BarChart3,
@@ -8,6 +14,7 @@ import {
   Grid2X2,
   Heading1,
   Heading2,
+  Layers,
   LayoutGrid,
   LayoutTemplate,
   List,
@@ -20,9 +27,10 @@ import {
   Type,
   UploadCloud
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { THEME_PRESETS } from '../constants/theme-options'
 import { useEditorStore } from '../store/editor.store'
+import { IMAGE_ACCEPT, useImageUploader } from '../hooks/useImageUploader'
 
 interface LeftSidebarRailProps {
   onAddTextComponent: (type: 'title' | 'subtitle' | 'text' | 'bullets') => void
@@ -32,17 +40,18 @@ interface LeftSidebarRailProps {
   outline?: Outline | null
   currentThemeId?: string | null
   onThemeChange?: (themeId: string) => void
+  layers?: SlideComponent[]
 }
 
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
-const ALLOWED_IMAGE_TYPES = [
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/svg+xml'
-]
+const LAYER_LABELS: Record<SlideComponent['type'], string> = {
+  title: 'Tiêu đề',
+  subtitle: 'Tiêu đề phụ',
+  bullets: 'Danh sách ý',
+  text: 'Văn bản',
+  quote: 'Trích dẫn',
+  image: 'Hình ảnh',
+  shape: 'Hình khối'
+}
 
 const SHAPE_ITEMS: Array<{
   type: ShapeType
@@ -114,7 +123,8 @@ export const LeftSidebarRail = ({
   onAddShapeComponent,
   onApplyContentLayout,
   currentThemeId,
-  onThemeChange
+  onThemeChange,
+  layers = []
 }: LeftSidebarRailProps) => {
   const { showToast } = useToast()
   const {
@@ -123,74 +133,45 @@ export const LeftSidebarRail = ({
     isDrawerOpen,
     uploadedImages,
     addUploadedImage,
-    removeUploadedImage
-  } = useEditorStore()
+    removeUploadedImage,
+    selectedCompId,
+    setSelectedCompId
+  } = useEditorStore(
+    useShallow((state) => ({
+      leftRailTab: state.leftRailTab,
+      setLeftRailTab: state.setLeftRailTab,
+      isDrawerOpen: state.isDrawerOpen,
+      uploadedImages: state.uploadedImages,
+      addUploadedImage: state.addUploadedImage,
+      removeUploadedImage: state.removeUploadedImage,
+      selectedCompId: state.selectedCompId,
+      setSelectedCompId: state.setSelectedCompId
+    }))
+  )
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [isUploading, setIsUploading] = useState(false)
+  const { upload, isUploading, failedFile, retry, dismissFailure } =
+    useImageUploader((url, file) => {
+      addUploadedImage({ url, name: file.name, size: file.size })
+      onAddImageComponent(url)
+      showToast('Tải ảnh lên và chèn vào slide thành công!', 'success')
+    })
 
-  // Xử lý tải ảnh lên từ máy tính theo Use-case Quản lý hình ảnh
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
-
-    // 1. Kiểm tra định dạng hợp lệ
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase())) {
-      showToast(
-        'Định dạng tệp không được hỗ trợ. Vui lòng chọn ảnh JPG, PNG, WEBP, GIF hoặc SVG.',
-        'error'
-      )
-      if (fileInputRef.current) fileInputRef.current.value = ''
-      return
-    }
-
-    // 2. Kiểm tra dung lượng hợp lệ (<= 5MB)
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      showToast(
-        `Kích thước ảnh (${(file.size / (1024 * 1024)).toFixed(1)}MB) vượt quá giới hạn 5MB cho phép.`,
-        'error'
-      )
-      if (fileInputRef.current) fileInputRef.current.value = ''
-      return
-    }
-
-    // 3. Đọc dữ liệu ảnh và thêm vào thư viện + chèn vào slide
-    setIsUploading(true)
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      setIsUploading(false)
-      const dataUrl = reader.result as string
-
-      addUploadedImage({
-        url: dataUrl,
-        name: file.name,
-        size: file.size
-      })
-
-      onAddImageComponent(dataUrl)
-      showToast('Tải ảnh lên và chèn vào slide thành công!', 'success')
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-
-    reader.onerror = () => {
-      setIsUploading(false)
-      showToast('Có lỗi xảy ra khi đọc tệp ảnh. Vui lòng thử lại.', 'error')
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-
-    reader.readAsDataURL(file)
+    e.target.value = ''
+    if (file) void upload(file)
   }
 
   return (
     <div className='flex h-full select-none'>
       {/* 1. THANH ICON RAIL HẸP BÊN TRÁI (CANVA SLIM RAIL) */}
-      <nav className='flex w-18 shrink-0 flex-col items-center border-r border-emerald-900/60 bg-brand-ink py-3 text-stone-300'>
+      <nav className='flex w-14 lg:w-18 shrink-0 flex-col items-center border-r border-emerald-900/60 bg-brand-ink py-3 text-stone-300'>
         {/* Tab Văn bản */}
         <button
           type='button'
           onClick={() => setLeftRailTab('text')}
-          className={`group flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'text' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -205,7 +186,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('shapes')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'shapes' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -220,7 +201,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('uploads')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition ${
             leftRailTab === 'uploads' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -235,7 +216,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('templates')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'templates' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -250,7 +231,7 @@ export const LeftSidebarRail = ({
         <button
           type='button'
           onClick={() => setLeftRailTab('theme')}
-          className={`group mt-2 flex w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
             leftRailTab === 'theme' && isDrawerOpen
               ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
               : 'hover:bg-emerald-900/40 hover:text-white'
@@ -260,11 +241,26 @@ export const LeftSidebarRail = ({
           <Palette size={20} />
           <span className='mt-1 text-[10px] font-medium'>Giao diện</span>
         </button>
+
+        {/* Tab Lớp đối tượng (SRS UC012: chọn đối tượng trong danh sách layer) */}
+        <button
+          type='button'
+          onClick={() => setLeftRailTab('layers')}
+          className={`group mt-2 flex w-full lg:w-15 flex-col items-center justify-center rounded-lg py-2.5 transition cursor-pointer ${
+            leftRailTab === 'layers' && isDrawerOpen
+              ? 'border-l-2 border-brand-rust bg-emerald-900/80 font-bold text-brand-rust'
+              : 'hover:bg-emerald-900/40 hover:text-white'
+          }`}
+          title='Danh sách lớp đối tượng trên slide'
+        >
+          <Layers size={20} />
+          <span className='mt-1 text-[10px] font-medium'>Lớp</span>
+        </button>
       </nav>
 
       {/* 2. DRAWER MỞ RỘNG BÊN CẠNH RAIL (EXPANDABLE DRAWER) */}
       {isDrawerOpen && (
-        <aside className='flex w-72 shrink-0 flex-col border-r border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
+        <aside className='absolute inset-y-0 left-14 z-40 flex w-[min(18rem,calc(100%-3.5rem))] lg:static lg:w-72 shrink-0 flex-col border-r border-stone-200 bg-white font-sans text-stone-800 shadow-sm'>
           {/* TAB VĂN BẢN (TEXT) */}
           {leftRailTab === 'text' && (
             <div className='flex flex-1 flex-col overflow-y-auto p-4'>
@@ -280,7 +276,7 @@ export const LeftSidebarRail = ({
                 <button
                   type='button'
                   onClick={() => onAddTextComponent('title')}
-                  className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3.5 text-left font-serif text-lg font-bold text-stone-900 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
+                  className='flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-3.5 text-left font-sans text-base font-bold text-stone-900 transition hover:border-brand-rust hover:bg-brand-rust/5 hover:text-brand-rust shadow-2xs'
                 >
                   <div className='flex items-center gap-2.5'>
                     <Heading1 size={20} className='text-brand-rust' />
@@ -384,7 +380,7 @@ export const LeftSidebarRail = ({
               <input
                 ref={fileInputRef}
                 type='file'
-                accept='image/jpeg,image/png,image/webp,image/gif,image/svg+xml'
+                accept={IMAGE_ACCEPT}
                 onChange={handleFileChange}
                 className='hidden'
               />
@@ -403,8 +399,34 @@ export const LeftSidebarRail = ({
               </button>
 
               <span className='mt-2 block text-center text-[10px] text-stone-400'>
-                Hỗ trợ PNG, JPG, WEBP, GIF, SVG (Tối đa 5MB)
+                Hỗ trợ PNG, JPG, WEBP, GIF (Tối đa 5MB)
               </span>
+
+              {failedFile && (
+                <div
+                  role='alert'
+                  className='mt-3 rounded-lg border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-800'
+                >
+                  <p>Tải lên &quot;{failedFile.name}&quot; thất bại.</p>
+                  <div className='mt-1.5 flex gap-2'>
+                    <button
+                      type='button'
+                      onClick={retry}
+                      disabled={isUploading}
+                      className='font-bold underline disabled:opacity-50'
+                    >
+                      Thử lại
+                    </button>
+                    <button
+                      type='button'
+                      onClick={dismissFailure}
+                      className='text-red-600'
+                    >
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Thư viện hình ảnh đã tải lên */}
               <div className='mt-5 flex-1'>
@@ -625,6 +647,49 @@ export const LeftSidebarRail = ({
                   </span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* TAB LỚP (LAYERS): lớp trên cùng hiển thị đầu tiên */}
+          {leftRailTab === 'layers' && (
+            <div className='flex flex-1 flex-col overflow-y-auto p-4'>
+              <div className='mb-3'>
+                <h3 className='text-sm font-bold text-stone-900'>Lớp</h3>
+                <p className='text-xs text-stone-500'>
+                  Click để chọn đối tượng trên slide
+                </p>
+              </div>
+              {layers.length === 0 ? (
+                <p className='text-xs text-stone-400'>
+                  Slide chưa có đối tượng.
+                </p>
+              ) : (
+                <ul className='space-y-1'>
+                  {[...layers].reverse().map((comp) => (
+                    <li key={comp.id}>
+                      <button
+                        type='button'
+                        onClick={() => setSelectedCompId(comp.id)}
+                        aria-pressed={selectedCompId === comp.id}
+                        className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition ${
+                          selectedCompId === comp.id
+                            ? 'border-brand-rust bg-brand-rust/10 font-bold text-brand-rust'
+                            : 'border-stone-200 hover:bg-stone-50'
+                        }`}
+                      >
+                        <span className='shrink-0 font-semibold'>
+                          {LAYER_LABELS[comp.type]}
+                        </span>
+                        <span className='truncate text-stone-500'>
+                          {comp.type === 'image' || comp.type === 'shape'
+                            ? ''
+                            : comp.content}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

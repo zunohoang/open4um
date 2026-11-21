@@ -2,8 +2,11 @@ import { FormEvent, useEffect, useState } from 'react'
 import { authApi } from '@/features/auth/api/auth.api'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { BrandLogo, PasswordInput, useToast } from '@/components/ui'
+import { isAxiosError } from 'axios'
 
 const getErrorMessage = (error: unknown) => {
+  if (isAxiosError(error) && !error.response)
+    return 'Không thể kết nối mạng. Vui lòng kiểm tra kết nối và thử lại.'
   if (typeof error === 'object' && error && 'response' in error) {
     return (
       (error as { response?: { data?: { message?: string } } }).response?.data
@@ -20,11 +23,15 @@ const isEmailVerificationEnabled =
 
 export const AuthPage = () => {
   const setSession = useAuthStore((state) => state.setSession)
+  const sessionNotice = useAuthStore((state) => state.sessionNotice)
   const { showToast } = useToast()
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(sessionNotice || '')
+  useEffect(() => {
+    if (sessionNotice) setError(sessionNotice)
+  }, [sessionNotice])
 
   // Form states
   const [form, setForm] = useState({
@@ -74,6 +81,10 @@ export const AuthPage = () => {
       setError('Vui lòng điền đầy đủ họ tên, email và mật khẩu')
       return
     }
+    if (form.name.trim().length < 2) {
+      setError('Tên phải có ít nhất 2 ký tự')
+      return
+    }
     if (form.password.length < 6) {
       setError('Mật khẩu phải có ít nhất 6 ký tự')
       return
@@ -82,7 +93,10 @@ export const AuthPage = () => {
     resetErrors()
     setLoading(true)
     try {
-      const res = await authApi.sendRegisterOtp({ email: form.email })
+      const res = await authApi.sendRegisterOtp({
+        email: form.email,
+        name: form.name.trim()
+      })
       showToast(
         res.message || 'Mã OTP đã được gửi đến email của bạn',
         'success'
@@ -103,6 +117,10 @@ export const AuthPage = () => {
     if (!isEmailVerificationEnabled) {
       if (!form.email || !form.name || !form.password) {
         setError('Vui lòng điền đầy đủ họ tên, email và mật khẩu')
+        return
+      }
+      if (form.name.trim().length < 2) {
+        setError('Tên phải có ít nhất 2 ký tự')
         return
       }
       if (form.password.length < 6) {
@@ -438,13 +456,14 @@ export const AuthPage = () => {
                   <input
                     className='mt-2 w-full border border-stone-300 bg-stone-50 p-3 text-center font-mono text-2xl font-bold tracking-widest outline-orange-600'
                     type='text'
-                    maxLength={6}
+                    inputMode='numeric'
+                    autoComplete='one-time-code'
                     placeholder='••••••'
                     value={form.otp}
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        otp: e.target.value.replace(/\D/g, '')
+                        otp: e.target.value.replace(/\D/g, '').slice(0, 6)
                       })
                     }
                     required
@@ -564,12 +583,13 @@ export const AuthPage = () => {
                   <input
                     className='mt-2 w-full border border-stone-300 bg-stone-50 p-3 font-mono tracking-widest outline-orange-600'
                     type='text'
-                    maxLength={6}
+                    inputMode='numeric'
+                    autoComplete='one-time-code'
                     value={forgotForm.otp}
                     onChange={(e) =>
                       setForgotForm({
                         ...forgotForm,
-                        otp: e.target.value.replace(/\D/g, '')
+                        otp: e.target.value.replace(/\D/g, '').slice(0, 6)
                       })
                     }
                     placeholder='123456'

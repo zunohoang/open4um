@@ -3,8 +3,22 @@ import { AppError } from '@/utils/AppError'
 import { logger } from '@/lib/logger'
 
 export const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
+  if (res.headersSent) return _next(err)
   if (err instanceof AppError) {
     res.status(err.statusCode).json({ success: false, message: err.message })
+    return
+  }
+
+  if ((err as { type?: string }).type === 'entity.parse.failed') {
+    res
+      .status(400)
+      .json({ success: false, message: 'Nội dung JSON không hợp lệ' })
+    return
+  }
+  if ((err as { name?: string }).name === 'CastError') {
+    res
+      .status(400)
+      .json({ success: false, message: 'Mã định danh không hợp lệ' })
     return
   }
 
@@ -15,7 +29,8 @@ export const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
   ) {
     res.status(413).json({
       success: false,
-      message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+      message:
+        'Dữ liệu gửi lên vượt quá dung lượng cho phép. Vui lòng giảm kích thước bản lưu hoặc tệp tải lên.'
     })
     return
   }

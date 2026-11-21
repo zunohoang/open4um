@@ -1,23 +1,33 @@
 import { asyncHandler } from '@/utils/asyncHandler'
 import { ok, okPaginated } from '@/utils/response'
 import * as lectureService from '@/services/lecture.service'
+import { withAiRequest } from '@/utils/aiRequest'
 
 export const generateOutline = asyncHandler(async (req, res) => {
-  const result = await lectureService.generateOutline(
-    req.user.id,
-    req.body.prompt,
-    {
-      feedback: req.body.feedback,
-      currentOutline: req.body.currentOutline,
-      lectureId: req.body.lectureId
-    }
+  await withAiRequest(
+    req,
+    res,
+    req.body.feedback && req.body.currentOutline
+      ? 'outline-feedback'
+      : 'outline',
+    (signal) =>
+      lectureService.generateOutline(
+        req.user.id,
+        req.body.prompt,
+        {
+          feedback: req.body.feedback,
+          currentOutline: req.body.currentOutline,
+          lectureId: req.body.lectureId
+        },
+        signal
+      )
   )
-  ok(res, result)
 })
 
 export const createLecture = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.createLecture(req.user.id, req.body)
-  ok(res, lecture, 201)
+  await withAiRequest(req, res, 'lecture', (signal) =>
+    lectureService.createLecture(req.user.id, req.body, signal)
+  )
 })
 
 export const createBlankLecture = asyncHandler(async (req, res) => {
@@ -51,14 +61,22 @@ export const listLectures = asyncHandler(async (req, res) => {
     sortBy,
     sortOrder,
     page,
-    limit
+    limit,
+    summary: req.query.view === 'summary'
   })
   okPaginated(res, items, total, page, limit)
 })
 
 export const listTrash = asyncHandler(async (req, res) => {
-  const items = await lectureService.listTrash(req.user.id)
+  const items = await lectureService.listTrash(
+    req.user.id,
+    req.query.view === 'summary'
+  )
   ok(res, items)
+})
+
+export const getLectureCounts = asyncHandler(async (req, res) => {
+  ok(res, await lectureService.getLectureCounts(req.user.id))
 })
 
 export const getLecture = asyncHandler(async (req, res) => {
@@ -86,22 +104,18 @@ export const duplicateLecture = asyncHandler(async (req, res) => {
   ok(res, lecture, 201)
 })
 
-export const applySlideOperation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.applySlideOperation(
-    req.user.id,
-    String(req.params.id),
-    req.body
-  )
-  ok(res, lecture)
-})
-
 export const autosaveLecture = asyncHandler(async (req, res) => {
   const lecture = await lectureService.updateLecture(
     req.user.id,
     String(req.params.id),
     req.body
   )
-  ok(res, { lecture, savedAt: lecture.updatedAt })
+  ok(
+    res,
+    req.query.view === 'receipt'
+      ? { savedAt: lecture.updatedAt, revision: lecture.revision }
+      : { lecture, savedAt: lecture.updatedAt }
+  )
 })
 
 export const deleteLecture = asyncHandler(async (req, res) => {
@@ -128,49 +142,26 @@ export const hardDeleteLecture = asyncHandler(async (req, res) => {
   ok(res, result)
 })
 
-export const editSlideWithAi = asyncHandler(async (req, res) => {
-  const result = await lectureService.editSlideWithAi(
-    req.user.id,
-    String(req.params.id),
-    req.body.slideId,
-    req.body.instruction
-  )
-  ok(res, result)
-})
-
-export const getPresentation = asyncHandler(async (req, res) => {
-  const lecture = await lectureService.getLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, {
-    id: lecture._id,
-    title: lecture.title,
-    slides: lecture.slides,
-    updatedAt: lecture.updatedAt
-  })
-})
-
-export const exportLecture = asyncHandler(async (req, res) => {
-  const result = await lectureService.exportLecture(
-    req.user.id,
-    String(req.params.id)
-  )
-  ok(res, result)
-})
-
 export const aiChat = asyncHandler(async (req, res) => {
-  const result = await lectureService.aiChatInEditor(
-    req.user.id,
-    String(req.params.id),
-    {
-      message: req.body.message,
-      slideId: req.body.slideId,
-      currentSlide: req.body.currentSlide,
-      selectedCompId: req.body.selectedCompId,
-      sourceMaterial: req.body.sourceMaterial,
-      history: req.body.history
-    }
+  await withAiRequest(req, res, 'chat', (signal) =>
+    lectureService.aiChatInEditor(
+      req.user.id,
+      String(req.params.id),
+      {
+        message: req.body.message,
+        slideId: req.body.slideId,
+        currentSlide: req.body.currentSlide,
+        selectedCompId: req.body.selectedCompId,
+        textEdit: req.body.textEdit,
+        sourceMaterial: req.body.sourceMaterial,
+        history: req.body.history
+      },
+      signal
+    )
   )
-  ok(res, result)
+})
+
+export const uploadImage = asyncHandler(async (req, res) => {
+  const result = await lectureService.uploadImage(req.user.id, req.body.dataUrl)
+  ok(res, result, 201)
 })

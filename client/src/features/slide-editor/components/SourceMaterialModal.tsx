@@ -49,6 +49,7 @@ export const SourceMaterialModal = ({
           <textarea
             rows={8}
             value={content}
+            maxLength={10000}
             onChange={(e) => setContent(e.target.value)}
             placeholder='Ví dụ: Đề cương chi tiết, nội dung trích từ tài liệu giảng dạy...'
             className='w-full resize-none rounded-lg border border-stone-300 p-3 text-xs leading-relaxed outline-none transition focus:border-brand-rust focus:ring-1 focus:ring-brand-rust'
@@ -80,6 +81,7 @@ export const SourceMaterialModal = ({
           <button
             type='button'
             onClick={handleSave}
+            disabled={content.length > 10000}
             className='flex items-center gap-1.5 rounded-lg bg-brand-rust px-4 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-xs hover:bg-[#b04f35] transition cursor-pointer'
           >
             <Save size={13} />

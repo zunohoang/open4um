@@ -2,7 +2,7 @@ import type { Slide } from '@/lib/types'
 import { create } from 'zustand'
 
 export type LeftRailTab =
-  'text' | 'shapes' | 'uploads' | 'templates' | 'theme' | null
+  'text' | 'shapes' | 'uploads' | 'templates' | 'theme' | 'layers' | null
 
 export interface UploadedImage {
   id: string
@@ -40,7 +40,16 @@ export interface AiChatMessage {
   status?: 'pending' | 'accepted' | 'rejected'
 }
 
+interface HistoryEntry {
+  slides: Slide[]
+  activeIndex: number
+}
+
 interface EditorStoreState {
+  beforeLeave: ((keepDraftOnly?: boolean) => Promise<boolean>) | null
+  setBeforeLeave: (
+    handler: ((keepDraftOnly?: boolean) => Promise<boolean>) | null
+  ) => void
   // Navigation & Selection
   activeSlideIndex: number
   selectedCompId: string | null
@@ -50,8 +59,8 @@ interface EditorStoreState {
   isAiPanelOpen: boolean
 
   // Undo / Redo Stacks (Snapshots of Slide[])
-  undoStack: Slide[][]
-  redoStack: Slide[][]
+  undoStack: HistoryEntry[]
+  redoStack: HistoryEntry[]
 
   // Uploaded Media Gallery
   uploadedImages: UploadedImage[]
@@ -122,29 +131,33 @@ const saveUploadsToStorage = (images: UploadedImage[]) => {
   }
 }
 
+export const createWelcomeMessages = (): AiChatMessage[] => [
+  {
+    id: 'welcome-msg',
+    role: 'assistant',
+    text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
+    timestamp: new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+]
+
 export const useEditorStore = create<EditorStoreState>((set, get) => ({
+  beforeLeave: null,
+  setBeforeLeave: (beforeLeave) => set({ beforeLeave }),
   activeSlideIndex: 0,
   selectedCompId: null,
   leftRailTab: 'text',
-  isDrawerOpen: true,
+  isDrawerOpen: window.matchMedia('(min-width: 1024px)').matches,
   isFilmstripOpen: true,
-  isAiPanelOpen: true,
+  isAiPanelOpen: window.matchMedia('(min-width: 1024px)').matches,
 
   undoStack: [],
   redoStack: [],
 
   uploadedImages: loadInitialUploads(),
-  aiMessages: [
-    {
-      id: 'welcome-msg',
-      role: 'assistant',
-      text: 'Xin chào! Tôi là trợ lý slide AI nhận biết ngữ cảnh. Bạn có thể trò chuyện, xin gợi ý hoặc yêu cầu tôi chỉnh sửa/tạo slide trực tiếp.',
-      timestamp: new Date().toLocaleTimeString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    }
-  ],
+  aiMessages: createWelcomeMessages(),
   previewSlide: null,
   previewSlideAction: null,
   previewTargetSlideId: null,
@@ -173,7 +186,11 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       // Đang chọn đúng tab và đang mở -> đóng drawer
       set({ isDrawerOpen: false })
     } else {
-      set({ leftRailTab: tab, isDrawerOpen: true })
+      set({
+        leftRailTab: tab,
+        isDrawerOpen: true,
+        ...(window.innerWidth < 1024 ? { isAiPanelOpen: false } : {})
+      })
     }
   },
 
@@ -182,7 +199,10 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
   toggleFilmstrip: () =>
     set((state) => ({ isFilmstripOpen: !state.isFilmstripOpen })),
   toggleAiPanel: () =>
-    set((state) => ({ isAiPanelOpen: !state.isAiPanelOpen })),
+    set((state) => ({
+      isAiPanelOpen: !state.isAiPanelOpen,
+      ...(window.innerWidth < 1024 ? { isDrawerOpen: false } : {})
+    })),
 
   recordHistory: (slides: Slide[]) => {
     // Deep clone slides snapshot
@@ -192,12 +212,16 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
       // Tránh lưu snapshot trùng lặp nếu nội dung hoàn toàn không thay đổi
       if (
         lastSnapshot &&
-        JSON.stringify(lastSnapshot) === JSON.stringify(snapshot)
+        JSON.stringify(lastSnapshot.slides) === JSON.stringify(snapshot)
       ) {
-        return state
+        // Vẫn là một thay đổi mới sau Undo -> phải xóa Redo stack (SRS UC013 10a)
+        return { redoStack: [] }
       }
       return {
-        undoStack: [...state.undoStack.slice(-30), snapshot],
+        undoStack: [
+          ...state.undoStack.slice(-30),
+          { slides: snapshot, activeIndex: state.activeSlideIndex }
+        ],
         redoStack: []
       }
     })
@@ -207,12 +231,17 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const { undoStack, redoStack, selectedCompId, activeSlideIndex } = get()
     if (undoStack.length === 0) return null
 
-    const previous = undoStack[undoStack.length - 1]
+    const entry = undoStack[undoStack.length - 1]
+    const previous = entry.slides
     const nextUndoStack = undoStack.slice(0, undoStack.length - 1)
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
     // Kiểm tra xem selectedCompId có còn tồn tại trong slide sau khi hoàn tác không
-    const targetSlide = previous[activeSlideIndex]
+    const nextIndex = Math.max(
+      0,
+      Math.min(entry.activeIndex, previous.length - 1)
+    )
+    const targetSlide = previous[nextIndex]
     const compStillExists =
       targetSlide &&
       selectedCompId &&
@@ -220,7 +249,11 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
 
     set({
       undoStack: nextUndoStack,
-      redoStack: [...redoStack, currentSnapshot],
+      activeSlideIndex: nextIndex,
+      redoStack: [
+        ...redoStack,
+        { slides: currentSnapshot, activeIndex: activeSlideIndex }
+      ],
       selectedCompId: compStillExists ? selectedCompId : null
     })
 
@@ -231,19 +264,25 @@ export const useEditorStore = create<EditorStoreState>((set, get) => ({
     const { undoStack, redoStack, selectedCompId, activeSlideIndex } = get()
     if (redoStack.length === 0) return null
 
-    const next = redoStack[redoStack.length - 1]
+    const entry = redoStack[redoStack.length - 1]
+    const next = entry.slides
     const nextRedoStack = redoStack.slice(0, redoStack.length - 1)
     const currentSnapshot = JSON.parse(JSON.stringify(currentSlides)) as Slide[]
 
-    const targetSlide = next[activeSlideIndex]
+    const nextIndex = Math.max(0, Math.min(entry.activeIndex, next.length - 1))
+    const targetSlide = next[nextIndex]
     const compStillExists =
       targetSlide &&
       selectedCompId &&
       targetSlide.components?.some((c) => c.id === selectedCompId)
 
     set({
-      undoStack: [...undoStack, currentSnapshot],
+      undoStack: [
+        ...undoStack,
+        { slides: currentSnapshot, activeIndex: activeSlideIndex }
+      ],
       redoStack: nextRedoStack,
+      activeSlideIndex: nextIndex,
       selectedCompId: compStillExists ? selectedCompId : null
     })
 

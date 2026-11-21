@@ -7,7 +7,6 @@ import {
 describe('admin.validator - updateCreditConfigSchema', () => {
   it('chấp nhận các mức credit là số nguyên dương', () => {
     const result = updateCreditConfigSchema.safeParse({
-      pricePerLecture: 80,
       pricePerOutline: 3,
       pricePerSlide: 5,
       pricePerAiEdit: 2,

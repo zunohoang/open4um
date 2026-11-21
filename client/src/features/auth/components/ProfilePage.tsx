@@ -1,3 +1,4 @@
+import { mediaUrl } from '@/lib/mediaUrl'
 import {
   useState,
   useEffect,
@@ -8,6 +9,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/store/auth.store'
 import { authApi } from '@/features/auth/api/auth.api'
+import { isAxiosError } from 'axios'
+import { assertDecodableImage } from '@/lib/imageFile'
 
 // Định dạng ảnh hợp lệ và kích thước tối đa 2MB theo luồng 5a
 const ALLOWED_IMAGE_TYPES = [
@@ -58,6 +61,7 @@ export const ProfilePage = () => {
         const latest = await authApi.profile()
         if (isMounted) {
           updateUser(latest)
+          setCooldown(latest.profileCooldownSeconds ?? 0)
           setName(latest.name)
           setAvatarPreview(latest.avatar || null)
         }
@@ -81,7 +85,7 @@ export const ProfilePage = () => {
   }, [cooldown])
 
   // STT 3 & 5a: Xử lý chọn tệp ảnh đại diện mới và kiểm tra dung lượng / định dạng
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     setSelectedFileError(null)
     setErrorMessage(null)
     const file = e.target.files?.[0]
@@ -108,6 +112,15 @@ export const ProfilePage = () => {
     }
 
     // Đọc file thành data URL để hiển thị preview ngay lập tức
+    try {
+      await assertDecodableImage(file)
+    } catch {
+      const message = 'Nội dung tệp không phải ảnh hợp lệ hoặc ảnh đã bị hỏng'
+      setSelectedFileError(message)
+      setErrorMessage(message)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
     const reader = new FileReader()
     reader.onload = () => {
       setAvatarPreview(reader.result as string)
@@ -145,6 +158,10 @@ export const ProfilePage = () => {
       setErrorMessage('Họ tên không được để trống')
       return
     }
+    if (trimmedName.length < 2) {
+      setErrorMessage('Họ tên phải có ít nhất 2 ký tự')
+      return
+    }
 
     // STT 5a: Nếu đang có lỗi tệp tin chưa giải quyết
     if (selectedFileError) {
@@ -176,20 +193,20 @@ export const ProfilePage = () => {
       setAvatarPreview(updatedUser.avatar || null)
       setHasNewAvatar(false)
       setSuccessMessage('Cập nhật hồ sơ thành công')
-      setCooldown(60) // Cooldown 60s
+      setCooldown(updatedUser.profileCooldownSeconds ?? 60)
       setTimeout(() => setSuccessMessage(null), 4000)
     } catch (error: unknown) {
       const message =
-        (error as { response?: { data?: { message?: string } } })?.response
-          ?.data?.message ||
-        'Không thể cập nhật hồ sơ, vui lòng kiểm tra lại thông tin.'
+        isAxiosError(error) && !error.response
+          ? 'Không thể kết nối mạng. Vui lòng kiểm tra kết nối và thử lại.'
+          : (error as { response?: { data?: { message?: string } } })?.response
+              ?.data?.message ||
+            'Không thể cập nhật hồ sơ, vui lòng kiểm tra lại thông tin.'
       setErrorMessage(message)
 
       // Bắt bộ đếm nếu lỗi 429
-      const secMatch = message.match(/(\d+)\s*giây/)
-      if (secMatch) {
-        setCooldown(parseInt(secMatch[1], 10))
-      }
+      const wait = message.match(/(\d+)\s*(giây|phút)/)
+      if (wait) setCooldown(Number(wait[1]) * (wait[2] === 'phút' ? 60 : 1))
     } finally {
       setIsSaving(false)
     }
@@ -232,7 +249,7 @@ export const ProfilePage = () => {
               <div className='relative h-16 w-16 shrink-0 overflow-hidden border border-stone-300 bg-orange-700 text-2xl font-bold text-white shadow-xs flex items-center justify-center'>
                 {user?.avatar ? (
                   <img
-                    src={user.avatar}
+                    src={mediaUrl(user.avatar)}
                     alt={user.name}
                     className='h-full w-full object-cover'
                   />
@@ -337,7 +354,7 @@ export const ProfilePage = () => {
                       <div className='relative h-20 w-20 shrink-0 overflow-hidden border-2 border-dashed border-stone-300 bg-stone-100 flex items-center justify-center text-2xl font-bold text-stone-600 shadow-xs'>
                         {avatarPreview ? (
                           <img
-                            src={avatarPreview}
+                            src={mediaUrl(avatarPreview)}
                             alt='Xem trước ảnh đại diện'
                             className='h-full w-full object-cover'
                           />

@@ -8,11 +8,17 @@ import {
   logout,
   forgotPassword,
   updateProfile,
-  resetPassword
+  resetPassword,
+  changePassword
 } from '@/services/auth.service'
 import * as emailService from '@/services/email.service'
 
 // Mock bcrypt để tăng tốc độ test và tránh tốn CPU hashing
+jest.mock('@/lib/minio', () => ({
+  BUCKET_MEDIA: 'media',
+  minioClient: { putObject: jest.fn().mockResolvedValue({}) }
+}))
+
 jest.mock('bcrypt', () => ({
   compare: jest.fn(),
   hash: jest.fn()
@@ -21,6 +27,7 @@ jest.mock('bcrypt', () => ({
 const mockUserFindOne = jest.fn()
 const mockUserFindById = jest.fn()
 const mockUserCreate = jest.fn()
+const mockAttempts = jest.fn().mockResolvedValue(1)
 const mockRedisGet = jest.fn()
 const mockRedisSet = jest.fn()
 const mockRedisDel = jest.fn()
@@ -38,6 +45,7 @@ jest.mock('@/models/user.model', () => ({
 
 jest.mock('@/lib/redis', () => ({
   redis: {
+    eval: (...args: unknown[]) => mockAttempts(...args),
     get: (...args: any[]) => mockRedisGet(...args),
     set: (...args: any[]) => mockRedisSet(...args),
     del: (...args: any[]) => mockRedisDel(...args),
@@ -61,6 +69,21 @@ jest.mock('@/services/email.service', () => ({
 describe('auth.service unit tests', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockRedisGet.mockReset().mockResolvedValue(null)
+  })
+
+  it('từ chối thêm lượt đăng nhập và OTP khi đã hết số lần trong cửa sổ', async () => {
+    mockAttempts.mockResolvedValueOnce(8)
+    await expect(login('test@example.com', 'password')).rejects.toMatchObject({
+      statusCode: 429
+    })
+    expect(bcrypt.compare).not.toHaveBeenCalled()
+    mockUserFindOne.mockResolvedValue(null)
+    mockAttempts.mockResolvedValueOnce(6)
+    await expect(
+      register('Giáo viên', 'test@example.com', 'password', '123456')
+    ).rejects.toMatchObject({ statusCode: 429 })
+    expect(mockUserCreate).not.toHaveBeenCalled()
   })
 
   describe('sendRegisterOtp', () => {
@@ -327,6 +350,64 @@ describe('auth.service unit tests', () => {
     })
   })
 
+  // SRS UC005 (Bảng 2.6)
+  describe('changePassword', () => {
+    it('5a - ném lỗi 400 "Mật khẩu hiện tại không đúng" khi mật khẩu cũ sai', async () => {
+      const mockSave = jest.fn()
+      mockUserFindById.mockResolvedValue({
+        passwordHash: 'old_hash',
+        save: mockSave
+      })
+      ;(bcrypt.compare as jest.Mock).mockResolvedValue(false)
+
+      await expect(
+        changePassword('user-1', 'wrong_old', 'newpass123')
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Mật khẩu hiện tại không đúng'
+      })
+      expect(mockSave).not.toHaveBeenCalled()
+    })
+
+    it('đổi thành công -> băm mật khẩu mới, lưu và trả "Đổi mật khẩu thành công"', async () => {
+      const user = {
+        _id: 'user-1',
+        role: 'user',
+        tokenVersion: 3,
+        passwordHash: 'old_hash',
+        save: jest.fn()
+      }
+      mockUserFindById.mockResolvedValue(user)
+      ;(bcrypt.compare as jest.Mock).mockResolvedValue(true)
+      ;(bcrypt.hash as jest.Mock).mockResolvedValue('new_hash')
+
+      const result = await changePassword('user-1', 'old', 'newpass123')
+
+      expect(user.passwordHash).toBe('new_hash')
+      expect(user.save).toHaveBeenCalled()
+      expect(result.message).toBe('Đổi mật khẩu thành công')
+      expect(user.tokenVersion).toBe(4)
+      const accessPayload = jwt.verify(
+        result.accessToken,
+        process.env.JWT_SECRET!
+      ) as jwt.JwtPayload
+      expect(accessPayload).toMatchObject({
+        id: 'user-1',
+        role: 'user',
+        type: 'access',
+        tokenVersion: 4,
+        sessionId: expect.any(String)
+      })
+      expect(
+        jwt.verify(result.refreshToken, process.env.JWT_SECRET!)
+      ).toMatchObject({
+        type: 'refresh',
+        tokenVersion: 4,
+        jti: accessPayload.sessionId
+      })
+    })
+  })
+
   describe('login', () => {
     it('ném lỗi 401 khi không tìm thấy email', async () => {
       mockUserFindOne.mockResolvedValue(null)
@@ -335,7 +416,7 @@ describe('auth.service unit tests', () => {
         login('notfound@example.com', 'password123')
       ).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Email hoặc mật khẩu không đúng'
+        message: 'Email hoặc mật khẩu không chính xác'
       })
     })
 
@@ -351,7 +432,7 @@ describe('auth.service unit tests', () => {
         login('user@example.com', 'wrong_password')
       ).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Email hoặc mật khẩu không đúng'
+        message: 'Email hoặc mật khẩu không chính xác'
       })
       expect(bcrypt.compare).toHaveBeenCalledWith(
         'wrong_password',
@@ -457,7 +538,7 @@ describe('auth.service unit tests', () => {
 
       await expect(refresh(token)).rejects.toMatchObject({
         statusCode: 401,
-        message: 'Tài khoản không tồn tại'
+        message: 'Phiên làm việc đã bị thu hồi. Vui lòng đăng nhập lại.'
       })
     })
 
@@ -662,11 +743,11 @@ describe('auth.service unit tests', () => {
 
       await expect(updateProfile('u1', { name: '   ' })).rejects.toMatchObject({
         statusCode: 400,
-        message: 'Họ tên không được để trống'
+        message: 'Họ tên phải có ít nhất 2 ký tự'
       })
     })
 
-    it('ném lỗi 400 khi ảnh đại diện sai định dạng hoặc vượt quá dung lượng (Luồng 5a)', async () => {
+    it('ném lỗi 422 khi ảnh đại diện có định dạng không được hỗ trợ (Luồng 5a)', async () => {
       mockUserFindById.mockResolvedValue({
         _id: 'u1',
         name: 'Old Name',
@@ -681,8 +762,8 @@ describe('auth.service unit tests', () => {
           avatar: 'data:application/pdf;base64,JVBERi0xLjQK...'
         })
       ).rejects.toMatchObject({
-        statusCode: 400,
-        message: 'Ảnh vượt quá dung lượng cho phép hoặc sai định dạng tệp tin'
+        statusCode: 422,
+        message: 'Định dạng ảnh không hợp lệ (chỉ PNG, JPG, WEBP, GIF)'
       })
     })
 
@@ -711,8 +792,10 @@ describe('auth.service unit tests', () => {
       })
 
       expect(mockUser.name).toBe('New Name')
-      expect(mockUser.avatar).toBe(validAvatar)
-      expect(result.avatar).toBe(validAvatar)
+      expect(mockUser.avatar).toMatch(
+        /^\/api\/v1\/media\/images\/u1\/[0-9a-f-]+\.png$/
+      )
+      expect(result.avatar).toBe(mockUser.avatar)
     })
   })
 })

@@ -1,5 +1,4 @@
 import bcrypt from 'bcrypt'
-import { Types } from 'mongoose'
 import { AppError } from '@/utils/AppError'
 import { escapeRegExp } from '@/utils/aiSlideMerge'
 import { UserModel } from '@/models/user.model'
@@ -110,6 +109,7 @@ export const lockUser = async (id: string) => {
 
   const now = new Date()
   user.status = 'locked'
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1
   user.lockedAt = now
   user.scheduledDeleteAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
   await user.save()
@@ -142,8 +142,8 @@ export const deleteUser = async (id: string) => {
   await Promise.all([
     UserModel.findByIdAndDelete(id),
     LectureModel.deleteMany({ userId: id }),
-    FolderModel.deleteMany({ userId: id }),
-    AiUsageLogModel.deleteMany({ userId: id })
+    FolderModel.deleteMany({ userId: id })
+    // Giữ AiUsageLog để báo cáo AI Usage toàn hệ thống (UC031) không bị hụt; UI hiện "Ẩn danh"
   ])
 
   return { id, message: 'Đã xóa người dùng thành công' }
@@ -190,7 +190,6 @@ const parseDate = (value: string, fieldName: string) => {
 export const listAiUsage = async (
   page: number,
   limit: number,
-  userId?: string,
   from?: string,
   to?: string
 ) => {
@@ -201,18 +200,14 @@ export const listAiUsage = async (
   }
 
   const filter: Record<string, unknown> = {}
-  if (userId) {
-    if (!Types.ObjectId.isValid(userId)) {
-      throw new AppError('Người dùng không hợp lệ', 422)
-    }
-    filter.userId = new Types.ObjectId(userId)
-  }
   if (fromDate || toDate) {
     const toExclusive = toDate
-      ? new Date(toDate.getTime() + 24 * 60 * 60 * 1000)
+      ? new Date(toDate.getTime() + DAY_MS - STATS_UTC_OFFSET_MS)
       : undefined
     filter.createdAt = {
-      ...(fromDate ? { $gte: fromDate } : {}),
+      ...(fromDate
+        ? { $gte: new Date(fromDate.getTime() - STATS_UTC_OFFSET_MS) }
+        : {}),
       ...(toExclusive ? { $lt: toExclusive } : {})
     }
   }
@@ -360,7 +355,6 @@ export const getCreditConfig = async () => {
 }
 
 export const updateCreditConfig = async (data: {
-  pricePerLecture?: number
   pricePerSlide?: number
   pricePerAiEdit?: number
   pricePerOutline?: number

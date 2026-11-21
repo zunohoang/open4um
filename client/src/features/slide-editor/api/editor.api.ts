@@ -1,11 +1,17 @@
 import { apiClient } from '@/lib/api'
 import type { Lecture, Slide } from '@/lib/types'
+import { buildAutosavePayload } from '../utils/autosave'
 
 export interface AiChatPayload {
   message: string
   slideId?: string
   currentSlide?: Slide
   selectedCompId?: string
+  textEdit?: {
+    action: 'rewrite' | 'shorten' | 'expand'
+    start: number
+    end: number
+  }
   sourceMaterial?: string
   history?: Array<{ role: 'user' | 'assistant'; text: string }>
 }
@@ -21,6 +27,7 @@ export interface AiSlideProposalData {
 
 export interface AiChatResponseData {
   reply: string
+  replacement?: string
   action:
     | 'UPDATE_CURRENT_SLIDE'
     | 'UPDATE_SLIDE'
@@ -38,40 +45,46 @@ export interface AiChatResponseData {
 }
 
 export const editorApi = {
-  get: async (id: string) =>
-    (await apiClient.get<{ data: Lecture }>(`/lectures/${id}`)).data.data,
+  // Trả URL ảnh do server phục vụ (SRS UC011 bước 5)
+  uploadImage: async (dataUrl: string, signal?: AbortSignal) => {
+    const { key } = (
+      await apiClient.post<{ data: { key: string } }>(
+        '/lectures/images',
+        {
+          dataUrl
+        },
+        { signal }
+      )
+    ).data.data
+    return `${import.meta.env.VITE_API_BASE_URL}/media/${key}`
+  },
 
-  autosave: async (lecture: Lecture) =>
+  get: async (id: string, signal?: AbortSignal) =>
+    (await apiClient.get<{ data: Lecture }>(`/lectures/${id}`, { signal })).data
+      .data,
+
+  autosave: async (lecture: Lecture, previous?: Lecture) =>
     (
-      await apiClient.patch<{ data: { lecture: Lecture } }>(
+      await apiClient.patch<{ data: { savedAt: string; revision: number } }>(
         `/lectures/${lecture._id}/autosave`,
         {
-          title: lecture.title,
-          slides: lecture.slides,
-          theme: lecture.theme,
-          contextSummary: lecture.contextSummary,
-          sourceMaterial: lecture.sourceMaterial,
-          aiChatHistory: lecture.aiChatHistory
-        }
+          ...buildAutosavePayload(lecture, previous),
+          revision: previous?.revision ?? lecture.revision ?? 0
+        },
+        { params: { view: 'receipt' } }
       )
     ).data.data,
 
-  aiEdit: async (id: string, slide: Slide, instruction: string) =>
-    (
-      await apiClient.post<{ data: { lecture: Lecture } }>(
-        `/lectures/${id}/ai-edit`,
-        { slideId: slide.id, instruction }
-      )
-    ).data.data.lecture,
-
   aiChat: async (
     id: string,
-    payload: AiChatPayload
+    payload: AiChatPayload,
+    signal?: AbortSignal
   ): Promise<AiChatResponseData> =>
     (
       await apiClient.post<{ data: AiChatResponseData }>(
         `/lectures/${id}/ai-chat`,
-        payload
+        payload,
+        { signal }
       )
     ).data.data
 }

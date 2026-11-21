@@ -14,7 +14,8 @@ import { BrandLogo } from '@/components/ui'
 import { UserAccountMenu } from '@/components/layout/UserAccountMenu'
 import { useEditorStore } from '../store/editor.store'
 
-export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline_saved'
+export type SaveStatus =
+  'saved' | 'saving' | 'unsaved' | 'offline_saved' | 'error'
 
 interface EditorHeaderProps {
   title: string
@@ -47,13 +48,13 @@ export const EditorHeader = ({
   isAutoSave,
   onToggleAutoSave
 }: EditorHeaderProps) => {
-  const { undoStack, redoStack, isAiPanelOpen, toggleAiPanel } =
-    useEditorStore()
-  const canUndo = undoStack.length > 0
-  const canRedo = redoStack.length > 0
+  const canUndo = useEditorStore((state) => state.undoStack.length > 0)
+  const canRedo = useEditorStore((state) => state.redoStack.length > 0)
+  const isAiPanelOpen = useEditorStore((state) => state.isAiPanelOpen)
+  const toggleAiPanel = useEditorStore((state) => state.toggleAiPanel)
 
   return (
-    <header className='relative flex h-14 w-full items-center justify-between border-b border-emerald-900/80 bg-brand-ink px-4 text-white shadow-xs select-none'>
+    <header className='max-sm:[&_[data-account-name]]:hidden relative z-40 grid w-full shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-1 py-1 lg:flex lg:h-14 lg:justify-between border-b border-emerald-900/80 bg-brand-ink px-2 lg:px-4 text-white shadow-xs select-none'>
       {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Autosave Toggle, Save Status */}
       <div className='relative z-10 flex shrink-0 items-center gap-2'>
         <button
@@ -73,7 +74,7 @@ export const EditorHeader = ({
           </span>
         </button>
 
-        <span className='text-emerald-800'>|</span>
+        <span className='hidden lg:block text-emerald-800'>|</span>
 
         {/* Nút Undo */}
         <button
@@ -105,7 +106,7 @@ export const EditorHeader = ({
           <Redo2 size={16} />
         </button>
 
-        <span className='text-emerald-800'>|</span>
+        <span className='hidden lg:block text-emerald-800'>|</span>
 
         {/* Công tắc Bật / Tắt Tự động lưu (Autosave) */}
         <div
@@ -137,7 +138,7 @@ export const EditorHeader = ({
         </div>
 
         {/* Trạng thái lưu (Cố định chiều rộng w-[116px] để chống giật / xô lệch layout) */}
-        <div className='flex w-29 shrink-0 items-center justify-start'>
+        <div className='flex lg:w-29 shrink-0 items-center justify-start'>
           {saveStatus === 'saving' ? (
             <div className='flex items-center gap-1.5 px-1 py-1 text-xs text-amber-300'>
               <Loader2
@@ -167,10 +168,10 @@ export const EditorHeader = ({
             >
               <CloudOff size={14} className='text-orange-400 shrink-0' />
               <span className='text-[11px] font-bold truncate'>
-                Đã lưu offline
+                Đang lưu offline
               </span>
             </button>
-          ) : saveStatus === 'unsaved' ? (
+          ) : saveStatus === 'unsaved' || saveStatus === 'error' ? (
             <button
               type='button'
               onClick={onManualSave}
@@ -192,7 +193,7 @@ export const EditorHeader = ({
                 <Check size={11} className='-ml-1' />
               </div>
               <span className='hidden text-[11px] font-medium sm:inline truncate'>
-                Đã lưu
+                Đã lưu...
               </span>
             </div>
           )}
@@ -200,7 +201,7 @@ export const EditorHeader = ({
       </div>
 
       {/* KHU VỰC GIỮA: Tên bài giảng căn giữa tuyệt đối (Absolute Centering) */}
-      <div className='pointer-events-none absolute left-1/2 top-1/2 flex w-full max-w-50 -translate-x-1/2 -translate-y-1/2 items-center justify-center px-2 sm:max-w-xs md:max-w-sm lg:max-w-md'>
+      <div className='flex min-w-0 flex-1 items-center justify-center px-2 lg:max-w-md'>
         <input
           type='text'
           value={title}
@@ -212,7 +213,7 @@ export const EditorHeader = ({
       </div>
 
       {/* KHU VỰC PHẢI: Nút Dàn ý, AI Copilot, Xuất bản, Trình chiếu */}
-      <div className='relative z-10 flex shrink-0 items-center gap-2'>
+      <div className='relative z-10 col-span-2 flex shrink-0 items-center justify-end gap-1 lg:gap-2'>
         {/* Nút xem lại Dàn ý */}
         {onOpenOutline && (
           <button
@@ -246,10 +247,10 @@ export const EditorHeader = ({
           type='button'
           onClick={onOpenExport}
           className='flex items-center gap-1.5 rounded-md border border-emerald-800 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-stone-200 shadow-2xs transition hover:bg-emerald-800 hover:text-white active:scale-95 cursor-pointer'
-          title='Xuất bài giảng (PNG, PDF...)'
+          title='Xuất bài giảng (ảnh PNG hoặc PDF)'
         >
           <FileDown size={14} />
-          <span className='hidden sm:inline'>Xuất</span>
+          <span className='hidden sm:inline'>Xuất file</span>
         </button>
 
         {/* Nút Trình chiếu theo chuẩn màu Brand Rust (#c45b3f) */}
@@ -257,7 +258,7 @@ export const EditorHeader = ({
           type='button'
           onClick={onPresent}
           className='flex items-center gap-1.5 rounded-md bg-brand-rust px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#b04f35] active:scale-95 cursor-pointer'
-          title='Trình chiếu toàn màn hình (F5/Present)'
+          title='Trình chiếu toàn màn hình'
         >
           <Play size={14} />
           <span>Trình chiếu</span>
