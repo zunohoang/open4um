@@ -1,8 +1,10 @@
-import type { Slide, SlideComponent } from '@/lib/types'
+import { SlideImage } from '@/features/slide-editor/components/SlideImage'
+import { slideLength } from '@/features/slide-editor/utils/slide'
+import type { Slide, SlideComponent, TextSelection } from '@/lib/types'
 import { Check, Copy, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FONT_MAP, getThemeById } from '../constants/theme-options'
-import { cropClipPath, getSlideComponents } from '../utils/slide'
+import { getSlideComponents } from '../utils/slide'
 import { createFrameScheduler } from '../utils/frameScheduler'
 import { SlideText } from './SlideText'
 
@@ -22,23 +24,13 @@ interface SlideCanvasProps {
   ) => boolean | void
   onDuplicateComponent: (comp: SlideComponent) => void
   onDeleteComponent: (id: string, recordHistory?: boolean) => void
+  selection: TextSelection | null
+  onTextSelection: (selection: TextSelection | null) => void
   onAiQuickAction: (action: 'rewrite' | 'shorten' | 'expand') => void
   isAiLoading?: boolean
   isPreview?: boolean
   onAcceptPreview?: () => void
   onExitPreview?: () => void
-}
-
-/**
- * Chuyển đổi fontSize px sang đơn vị cqw (Container Query Width) để font chữ
- * luôn co giãn tỷ lệ thuận 100% với kích thước khung hình Canvas 16:9.
- * Chuẩn cơ sở: 960px chiều rộng (chuẩn slide 16:9 960x540).
- * Ví dụ: 32px trên canvas 960px = 3.333cqw.
- * Khi thu nhỏ canvas do mở sidebar AI, chữ tự thu nhỏ tương ứng để không bao giờ đè lên nhau.
- */
-const getResponsiveFontSize = (fontSize: number = 20): string => {
-  const cqw = (fontSize / 9.6).toFixed(3)
-  return `clamp(8px, ${cqw}cqw, ${fontSize * 1.6}px)`
 }
 
 const SNAP_THRESHOLD = 1.5
@@ -67,6 +59,8 @@ export const SlideCanvas = ({
   onUpdateComponent,
   onDuplicateComponent,
   onDeleteComponent,
+  selection,
+  onTextSelection,
   onAiQuickAction,
   isAiLoading = false,
   isPreview = false,
@@ -181,7 +175,10 @@ export const SlideCanvas = ({
 
     if (canvasRef.current && compEl) {
       const canvasRect = canvasRef.current.getBoundingClientRect()
-      const compRect = compEl.getBoundingClientRect()
+      const compRect = {
+        width: compEl.offsetWidth,
+        height: compEl.offsetHeight
+      }
       if (canvasRect.width > 0 && canvasRect.height > 0) {
         if (!initW) {
           initW = Math.round((compRect.width / canvasRect.width) * 100)
@@ -343,157 +340,68 @@ export const SlideCanvas = ({
         )
         updateComponent({ x: snapX.value, y: snapY.value })
       } else if (dragState.type === 'resize' && dragState.handle) {
-        const minW = 5
-        const minH = 3
-        const x0 = dragState.initialX
-        const y0 = dragState.initialY
-        const w0 = Math.max(1, dragState.initialWidth)
-        const h0 = Math.max(1, dragState.initialHeight)
-        const R0 = x0 + w0
-        const B0 = y0 + h0
-        const dx = deltaPercentX
-        const dy = deltaPercentY
-
-        let nextX = x0
-        let nextY = y0
-        let nextW = w0
-        let nextH = h0
-        let nextFontSize: number | undefined
-
-        const isCorner =
-          dragState.handle === 'nw' ||
-          dragState.handle === 'ne' ||
-          dragState.handle === 'se' ||
-          dragState.handle === 'sw'
-
-        if (dragState.isText && isCorner) {
-          // Với block text: Kéo 4 góc sẽ scale đồng thời cả kích thước khung và font-size
-          let s = 1
-
-          switch (dragState.handle) {
-            case 'se': {
-              const sx = (w0 + dx) / w0
-              const sy = (h0 + dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(100 - x0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
-              nextX = x0
-              nextY = y0
-              break
-            }
-            case 'sw': {
-              const sx = (w0 - dx) / w0
-              const sy = (h0 + dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(R0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 * s))
-              nextX = R0 - nextW
-              nextY = y0
-              break
-            }
-            case 'ne': {
-              const sx = (w0 + dx) / w0
-              const sy = (h0 - dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(100 - x0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(B0, h0 * s))
-              nextX = x0
-              nextY = B0 - nextH
-              break
-            }
-            case 'nw': {
-              const sx = (w0 - dx) / w0
-              const sy = (h0 - dy) / h0
-              s = Math.abs(dx / w0) >= Math.abs(dy / h0) ? sx : sy
-              s = Math.max(minW / w0, s)
-              nextW = Math.min(R0, w0 * s)
-              s = nextW / w0
-              nextH = Math.max(minH, Math.min(B0, h0 * s))
-              nextX = R0 - nextW
-              nextY = B0 - nextH
-              break
-            }
-          }
-
-          nextFontSize = Math.round(
-            Math.max(8, Math.min(120, dragState.initialFontSize * s))
+        const radians = (dragState.initialRotation * Math.PI) / 180
+        const cos = Math.cos(radians),
+          sin = Math.sin(radians)
+        const dx = ((cos * deltaX + sin * deltaY) * 100) / rect.width
+        const dy = ((-sin * deltaX + cos * deltaY) * 100) / rect.height
+        const edge = dragState.handle
+        const horizontal = edge.includes('e') ? 1 : edge.includes('w') ? -1 : 0
+        const vertical = edge.includes('s') ? 1 : edge.includes('n') ? -1 : 0
+        const {
+          initialWidth: w,
+          initialHeight: h,
+          initialX: x,
+          initialY: y
+        } = dragState
+        const scaleText = !!(dragState.isText && horizontal && vertical)
+        let width = Math.max(5, w + horizontal * dx)
+        let height = Math.max(3, h + vertical * dy)
+        if (scaleText) {
+          const scale = Math.max(
+            5 / w,
+            3 / h,
+            Math.abs(dx / w) >= Math.abs(dy / h) ? width / w : height / h
           )
-        } else {
-          // Các đối tượng hình khối, ảnh hoặc kéo các chốt cạnh (e, w, n, s) của text
-          switch (dragState.handle) {
-            case 'se':
-              nextX = x0
-              nextY = y0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'sw':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = y0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'ne':
-              nextX = x0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-
-            case 'nw':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-
-            case 'e':
-              nextX = x0
-              nextY = y0
-              nextW = Math.max(minW, Math.min(100 - x0, w0 + dx))
-              nextH = h0
-              break
-
-            case 'w':
-              nextX = Math.max(0, Math.min(R0 - minW, x0 + dx))
-              nextW = R0 - nextX
-              nextY = y0
-              nextH = h0
-              break
-
-            case 's':
-              nextX = x0
-              nextY = y0
-              nextW = w0
-              nextH = Math.max(minH, Math.min(100 - y0, h0 + dy))
-              break
-
-            case 'n':
-              nextX = x0
-              nextW = w0
-              nextY = Math.max(0, Math.min(B0 - minH, y0 + dy))
-              nextH = B0 - nextY
-              break
-          }
+          width = w * scale
+          height = h * scale
         }
-
+        // Keep the opposite handle stationary in screen coordinates.
+        const dw = width - w,
+          dh = height - h
+        const shiftX =
+          (horizontal * dw * cos -
+            (vertical * dh * sin * rect.height) / rect.width -
+            dw) /
+          2
+        const shiftY =
+          ((horizontal * dw * sin * rect.width) / rect.height +
+            vertical * dh * cos -
+            dh) /
+          2
+        let fraction = 1
+        const limit = (margin: number, movement: number) => {
+          if (movement > 0)
+            fraction = Math.min(fraction, Math.max(0, margin) / movement)
+        }
+        limit(x, -shiftX)
+        limit(y, -shiftY)
+        limit(100 - x - w, shiftX + dw)
+        limit(100 - y - h, shiftY + dh)
         const patch: Partial<SlideComponent> = {
-          x: Math.round(nextX),
-          y: Math.round(nextY),
-          width: Math.round(nextW),
-          height: Math.round(nextH)
+          x: x + shiftX * fraction,
+          y: y + shiftY * fraction,
+          width: w + dw * fraction,
+          height: h + dh * fraction
         }
-        if (nextFontSize !== undefined) {
-          patch.fontSize = nextFontSize
-        }
+        if (scaleText)
+          patch.fontSize = Math.max(
+            8,
+            Math.min(
+              120,
+              Math.round(dragState.initialFontSize * (1 + (dw * fraction) / w))
+            )
+          )
 
         updateComponent(patch)
       }
@@ -552,7 +460,10 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
               borderRadius: '9999px'
             }}
           />
@@ -592,7 +503,7 @@ export const SlideCanvas = ({
           <div
             className='w-full'
             style={{
-              height: `${Math.max(2, strokeW || 2)}px`,
+              height: slideLength(Math.max(2, strokeW || 2)),
               backgroundColor: stroke || fill
             }}
           />
@@ -603,8 +514,11 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius || 16}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius || 16)
             }}
           />
         )
@@ -616,8 +530,11 @@ export const SlideCanvas = ({
             className='h-full w-full'
             style={{
               backgroundColor: fill,
-              border: strokeW > 0 ? `${strokeW}px solid ${stroke}` : 'none',
-              borderRadius: `${radius}px`
+              border:
+                strokeW > 0
+                  ? `${slideLength(strokeW)} solid ${stroke}`
+                  : 'none',
+              borderRadius: slideLength(radius)
             }}
           />
         )
@@ -626,7 +543,7 @@ export const SlideCanvas = ({
 
   return (
     <div
-      className='relative flex flex-1 items-center justify-center p-6 overflow-hidden'
+      className='relative flex flex-1 items-center justify-center p-2 sm:p-4 lg:p-6 overflow-hidden'
       onClick={() => {
         onSelectComponent(null)
         setEditingTextId(null)
@@ -893,6 +810,7 @@ export const SlideCanvas = ({
 
                   {/* MINI-ACTION PILL NỔI TRÊN ĐẦU ĐỐI TƯỢNG (GIỮ NGUYÊN CHIỀU NGANG THẲNG ĐỨNG KHI XOAY PHẦN TỬ) */}
                   <div
+                    data-selection-tools
                     onMouseDown={(e) => e.stopPropagation()}
                     className={`absolute left-1/2 flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 shadow-lg backdrop-blur-xs select-none whitespace-nowrap z-40 ${
                       comp.y < 8 ? 'top-full mt-3.5' : 'bottom-full mb-3.5'
@@ -902,7 +820,7 @@ export const SlideCanvas = ({
                       transformOrigin: 'center center'
                     }}
                   >
-                    {isText && (
+                    {isText && selection?.componentId === comp.id && (
                       <>
                         <button
                           type='button'
@@ -968,22 +886,27 @@ export const SlideCanvas = ({
                 </div>
               ) : comp.type === 'image' ? (
                 <div className='h-full w-full overflow-hidden rounded-sm pointer-events-none'>
-                  <img
-                    src={comp.imageUrl || comp.content}
-                    alt='Slide graphic'
-                    style={{ clipPath: cropClipPath(comp.crop) }}
-                    className={
-                      comp.height
-                        ? 'h-full w-full object-contain'
-                        : 'h-auto w-full max-h-[70vh] object-contain'
-                    }
-                  />
+                  <SlideImage component={comp} />
                 </div>
               ) : editingTextId === comp.id ? (
                 /* Chế độ sửa văn bản trực tiếp khi double-click */
                 <textarea
                   ref={textareaRef}
                   data-slide-canvas-text='true'
+                  onSelect={(e) => {
+                    const { selectionStart: start, selectionEnd: end } =
+                      e.currentTarget
+                    onTextSelection(
+                      slide && end > start
+                        ? {
+                            slideId: slide.id,
+                            componentId: comp.id,
+                            start,
+                            end
+                          }
+                        : null
+                    )
+                  }}
                   autoFocus
                   value={comp.content}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -1041,10 +964,12 @@ export const SlideCanvas = ({
                     }
                   }}
                   style={{
-                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
+                    fontSize: slideLength(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
-                    textDecoration: comp.textDecoration ?? 'none',
+                    textDecoration: comp.textFormats?.length
+                      ? 'none'
+                      : (comp.textDecoration ?? 'none'),
                     textAlign: comp.textAlign ?? 'left',
                     color: getRenderTextColor(comp),
                     fontFamily:
@@ -1063,10 +988,12 @@ export const SlideCanvas = ({
                 /* Hiển thị văn bản bình thường */
                 <div
                   style={{
-                    fontSize: getResponsiveFontSize(comp.fontSize ?? 20),
+                    fontSize: slideLength(comp.fontSize ?? 20),
                     fontWeight: comp.fontWeight ?? 'normal',
                     fontStyle: comp.fontStyle ?? 'normal',
-                    textDecoration: comp.textDecoration ?? 'none',
+                    textDecoration: comp.textFormats?.length
+                      ? 'none'
+                      : (comp.textDecoration ?? 'none'),
                     textAlign: comp.textAlign ?? 'left',
                     color: getRenderTextColor(comp),
                     fontFamily:
@@ -1081,7 +1008,12 @@ export const SlideCanvas = ({
                   }}
                   className='w-full select-none break-words'
                 >
-                  <SlideText component={comp} />
+                  <SlideText
+                    component={comp}
+                    selection={
+                      selection?.componentId === comp.id ? selection : null
+                    }
+                  />
                 </div>
               )}
             </div>
