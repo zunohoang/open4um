@@ -2,6 +2,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides.sbltcup.dev slides-cup.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 100m;
 
@@ -22,6 +23,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides-api.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     gzip on;
     gzip_vary on;
@@ -48,6 +50,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name slides-media.sbltcup.dev;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 100m;
 
