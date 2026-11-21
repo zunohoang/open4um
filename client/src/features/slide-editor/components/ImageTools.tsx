@@ -1,3 +1,4 @@
+import { mediaUrl } from '@/lib/mediaUrl'
 import { useRef, useState } from 'react'
 import { ArrowDownToLine, ArrowUpToLine, Crop, ImageUp } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
@@ -70,7 +71,7 @@ export const ImageCropButton = ({
   onApply: (crop: ImageCrop | undefined) => void
 }) => {
   const [draft, setDraft] = useState<ImageCrop | null>(null)
-  const src = component.imageUrl || component.content
+  const src = mediaUrl(component.imageUrl || component.content)
 
   const apply = () => {
     if (!draft) return

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { isAxiosError } from 'axios'
+import { requestError } from '@/lib/requestError'
 import { ArrowUp, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { generationApi } from '@/features/lecture-generation/api/generation.api'
 import { useToast } from '@/components/ui/Toast'
@@ -33,9 +33,7 @@ const fontName = (key: string) =>
   FONT_OPTIONS.find((f) => f.key === key)?.name ?? key
 
 const errorMessage = (err: unknown, fallback: string) =>
-  (isAxiosError(err) &&
-    (err.response?.data as { message?: string })?.message) ||
-  fallback
+  requestError(err, fallback, true)
 
 // SRS UC006 (dàn ý qua chat) -> UC007 (chọn pattern) -> UC008 (sinh slide)
 export const AiGenerationWizard = ({

@@ -24,7 +24,7 @@ export interface AiReadableSlideContext {
 }
 
 const CHAT_ONLY_REQUEST_PATTERN =
-  /(?:^|[\s,;:.!?])(chỉ\s+(?:cần\s+)?(?:trả\s+lời|phản\s+hồi|giải\s+đáp)|không\s+(?:được\s+)?(?:sửa|chỉnh\s+sửa|thay\s+đổi|cập\s+nhật|tạo|thêm)(?:\s+(?:nội\s+dung|bất\s+kỳ))?\s+(?:slide|slides|trang|bài\s+giảng))(?:$|[\s,;:.!?])/iu
+  /(?:^|[\s,;:.!?])(chỉ\s+(?:cần\s+)?(?:trả\s+lời|phản\s+hồi|giải\s+đáp)|không\s+(?:được\s+)?(?:sửa|chỉnh\s+sửa|thay\s+đổi|cập\s+nhật|tạo|thêm)(?:\s+(?:nội\s+dung|bất\s+kỳ))?\s+(?:slide|slides|trang|bài\s+giảng)(?!\s+(?:(?:nào|nội\s+dung)\s+)?(?:khác|còn\s+lại)(?=$|[\s,;:.!?])))(?:$|[\s,;:.!?])/iu
 
 const TEXT_COMPONENT_TYPES = new Set([
   'title',

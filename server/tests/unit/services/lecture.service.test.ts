@@ -1,3 +1,7 @@
+import { EventEmitter } from 'node:events'
+import type { Request, Response } from 'express'
+import { requestContext } from '@/middlewares/requestContext.middleware'
+import { withAiRequest } from '@/utils/aiRequest'
 // Mock dependencies
 const mockUserFindById = jest.fn()
 const mockUserFindOne = jest.fn()
@@ -8,11 +12,18 @@ const mockLectureExists = jest.fn()
 const mockLectureFind = jest.fn()
 const mockLectureDeleteOne = jest.fn()
 const mockLectureFindOneAndUpdate = jest.fn()
+const mockUpdateOne = jest.fn()
+const mockUsageDelete = jest.fn()
+const mockAuditSet = jest.fn()
+jest.mock('@/lib/redis', () => ({
+  redis: { set: (...args: unknown[]) => mockAuditSet(...args) }
+}))
 const mockAiUsageLogCreate = jest.fn()
 const mockAiGenerateOutlineFromPrompt = jest.fn()
 const mockAiRefineOutlineWithFeedback = jest.fn()
 const mockAiGenerateSlidesFromOutline = jest.fn()
 const mockAiBuildSlidesFromOutline = jest.fn()
+const mockEditSelectedText = jest.fn()
 const mockAiChatAndProposeSlideEdit = jest.fn()
 const mockDebitCredits = jest.fn(async (_userId: string, amount: number) => {
   const user = await mockUserFindById()
@@ -44,6 +55,7 @@ jest.mock('@/models/lecture.model', () => ({
     findOne: (...args: any[]) => mockLectureFindOne(...args),
     exists: (...args: unknown[]) => mockLectureExists(...args),
     find: (...args: any[]) => mockLectureFind(...args),
+    updateOne: (...args: unknown[]) => mockUpdateOne(...args),
     deleteOne: (...args: any[]) => mockLectureDeleteOne(...args),
     findOneAndUpdate: (...args: any[]) => mockLectureFindOneAndUpdate(...args)
   }
@@ -51,11 +63,13 @@ jest.mock('@/models/lecture.model', () => ({
 
 jest.mock('@/models/aiUsageLog.model', () => ({
   AiUsageLogModel: {
+    deleteOne: (...args: unknown[]) => mockUsageDelete(...args),
     create: (...args: any[]) => mockAiUsageLogCreate(...args)
   }
 }))
 
 jest.mock('@/services/ai.service', () => ({
+  editSelectedText: (...args: unknown[]) => mockEditSelectedText(...args),
   generateOutlineFromPrompt: (...args: any[]) =>
     mockAiGenerateOutlineFromPrompt(...args),
   refineOutlineWithFeedback: (...args: any[]) =>
@@ -196,7 +210,7 @@ describe('lecture.service unit tests', () => {
       expect(mockAiUsageLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'user-rich',
-          slideCount: 2,
+          slideCount: 0,
           creditSpent: 4
         })
       )
@@ -562,6 +576,48 @@ describe('lecture.service unit tests', () => {
   })
 
   describe('aiChatInEditor', () => {
+    it('chỉ gửi đoạn được chọn tới AI và trả văn bản thay thế, giữ nguyên bố cục', async () => {
+      const slide = {
+        id: 's',
+        components: [
+          { id: 'p', type: 'text', content: 'Mở đầu. Câu dài. Kết.' },
+          { id: 'h', type: 'shape', content: '' }
+        ]
+      }
+      const doc = {
+        _id: LECTURE_ID,
+        deletedAt: null,
+        title: 'Mẫu',
+        slides: [slide],
+        get: (key: string) => (key === 'aiChatHistory' ? [] : '')
+      }
+      mockLectureFindOne.mockResolvedValue(doc)
+      mockLectureFindOneAndUpdate.mockResolvedValue(doc)
+      mockUserFindById.mockResolvedValue({ creditBalance: 10 })
+      mockEditSelectedText.mockResolvedValue({
+        action: 'UPDATE_CURRENT_SLIDE',
+        replacement: 'Gọn.',
+        reply: 'Gọn.'
+      })
+      const before = structuredClone(slide)
+      const result = await aiChatInEditor('user-1', LECTURE_ID, {
+        message: 'Rút gọn',
+        slideId: 's',
+        currentSlide: slide,
+        selectedCompId: 'p',
+        textEdit: { action: 'shorten', start: 8, end: 16 }
+      })
+      expect(mockEditSelectedText).toHaveBeenCalledWith(
+        'shorten',
+        'Câu dài.',
+        undefined
+      )
+      expect(mockAiChatAndProposeSlideEdit).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ replacement: 'Gọn.', creditSpent: 1 })
+      expect(result.proposedSlide).toBeUndefined()
+      expect(slide).toEqual(before)
+    })
+
     it('dùng snapshot canvas mới nhất làm context thay cho slide cũ trong database', async () => {
       const persistedSlide = {
         id: 'slide-1',
@@ -818,7 +874,14 @@ describe('lecture.service unit tests', () => {
         expect.any(String)
       )
       expect(mockLectureFindOneAndUpdate).toHaveBeenCalledWith(
-        { _id: LECTURE_ID, userId: 'user-1', deletedAt: null },
+        {
+          _id: LECTURE_ID,
+          userId: 'user-1',
+          deletedAt: null,
+          updatedAt: undefined,
+          'aiChatHistory.0': { $exists: false },
+          $or: [{ revision: 0 }, { revision: { $exists: false } }]
+        },
         expect.objectContaining({
           $set: expect.objectContaining({
             aiChatHistory: expect.arrayContaining([
@@ -834,4 +897,160 @@ describe('lecture.service unit tests', () => {
       )
     })
   })
+})
+
+describe('huỷ sau khi Mongo đã ghi dữ liệu AI', () => {
+  const userId = '1'.repeat(24)
+  const outline = {
+    title: 'Dàn ý',
+    sections: [{ heading: 'Chương 1', bullets: ['Ý 1'] }]
+  }
+  it.each([
+    'outline-new',
+    'outline-delivery-new',
+    'outline-existing',
+    'lecture-new',
+    'lecture-existing',
+    'chat'
+  ] as const)(
+    '%s hoàn tác nội dung, credit và usage, ghi kết quả theo request ID',
+    async (scenario) => {
+      jest.clearAllMocks()
+      const kind = scenario.startsWith('outline')
+        ? 'outline'
+        : scenario.startsWith('lecture')
+          ? 'lecture'
+          : 'chat'
+      const created = scenario.endsWith('-new')
+      const user = { creditBalance: 40 }
+      const oldFields: Record<string, unknown> = {
+        prompt: 'cũ',
+        title: 'Cũ',
+        outline: null,
+        theme: 'old',
+        slides: [{ id: 'slide-1' }],
+        folderId: null,
+        aiChatHistory: [],
+        sourceMaterial: 'cũ',
+        contextSummary: 'cũ'
+      }
+      const original = {
+        ...oldFields,
+        _id: LECTURE_ID,
+        userId,
+        revision: 3,
+        updatedAt: new Date(0),
+        deletedAt: null,
+        get: (key: string) => oldFields[key]
+      }
+      const written = {
+        ...original,
+        updatedAt: new Date(1),
+        revision: created ? 0 : kind === 'chat' ? 3 : 4
+      }
+      mockUserFindById.mockResolvedValue(user)
+      mockLectureFindOne.mockResolvedValue(original)
+      mockLectureCreate.mockResolvedValue(written)
+      mockLectureFindOneAndUpdate.mockResolvedValue(written)
+      mockLectureDeleteOne.mockResolvedValue({ deletedCount: 1 })
+      mockUpdateOne.mockResolvedValue({ matchedCount: 1 })
+      mockAiGenerateOutlineFromPrompt.mockResolvedValue(outline)
+      mockAiGenerateSlidesFromOutline.mockResolvedValue([
+        { id: 's', title: 'Mới', bullets: [] }
+      ])
+      mockAiChatAndProposeSlideEdit.mockResolvedValue({
+        reply: 'Đã sửa',
+        action: 'UPDATE_CURRENT_SLIDE',
+        updatedSummary: 'mới'
+      })
+      mockUsageDelete.mockResolvedValue({ deletedCount: 1 })
+      mockAuditSet.mockResolvedValue('OK')
+      const req = Object.assign(new EventEmitter(), {
+        user: { id: userId }
+      }) as Request
+      const res = Object.assign(new EventEmitter(), {
+        setHeader: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: () => res.emit('close')
+      }) as unknown as Response
+      mockAiUsageLogCreate.mockImplementation(async () => {
+        if (scenario !== 'outline-delivery-new') res.emit('close')
+        return { _id: 'log' }
+      })
+      await expect(
+        requestContext.run({ requestId: 'cancel-123', userId }, () =>
+          withAiRequest<unknown>(req, res, kind, (signal) => {
+            if (kind === 'outline')
+              return generateOutline(
+                userId,
+                'Chủ đề mới',
+                created ? undefined : { lectureId: LECTURE_ID },
+                signal
+              )
+            if (kind === 'lecture')
+              return createLecture(
+                userId,
+                {
+                  title: 'Mới',
+                  outline,
+                  lectureId: created ? undefined : LECTURE_ID
+                },
+                signal
+              )
+            return aiChatInEditor(
+              userId,
+              LECTURE_ID,
+              { message: 'Sửa', sourceMaterial: 'mới' },
+              signal
+            )
+          })
+        )
+      ).rejects.toMatchObject({ statusCode: 499 })
+      expect(user.creditBalance).toBe(40)
+      expect(mockUsageDelete).toHaveBeenCalledWith({ _id: 'log' })
+      if (created) {
+        expect(mockLectureDeleteOne).toHaveBeenCalledWith({
+          _id: LECTURE_ID,
+          userId,
+          deletedAt: null,
+          updatedAt: written.updatedAt,
+          'aiChatHistory.0': { $exists: false },
+          $or: [{ revision: 0 }, { revision: { $exists: false } }]
+        })
+      } else {
+        const fields =
+          kind === 'outline'
+            ? ['prompt', 'outline']
+            : kind === 'lecture'
+              ? ['title', 'prompt', 'outline', 'slides', 'theme', 'folderId']
+              : ['sourceMaterial', 'contextSummary', 'aiChatHistory']
+        expect(mockUpdateOne).toHaveBeenCalledWith(
+          expect.objectContaining({
+            revision: written.revision,
+            updatedAt: written.updatedAt
+          }),
+          {
+            $set: {
+              ...Object.fromEntries(fields.map((k) => [k, oldFields[k]])),
+              revision: 3,
+              updatedAt: original.updatedAt
+            }
+          },
+          { timestamps: false }
+        )
+      }
+      const task = JSON.parse(mockAuditSet.mock.calls.at(-1)![1])
+      expect(task).toMatchObject({
+        requestId: 'cancel-123',
+        kind,
+        status: 'cancelled',
+        httpStatus: 499,
+        lectureRestored: true,
+        usageLogId: null,
+        lectureId: LECTURE_ID
+      })
+      expect(task.creditDebited).toBeGreaterThan(0)
+      expect(task.creditRefunded).toBe(task.creditDebited)
+    }
+  )
 })

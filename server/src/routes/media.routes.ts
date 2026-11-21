@@ -1,3 +1,5 @@
+import { env } from '@/config/env'
+import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import { asyncHandler } from '@/utils/asyncHandler'
 import { getImage } from '@/services/lecture.service'
@@ -12,8 +14,11 @@ mediaRouter.get(
     )
     res.setHeader('Content-Type', image.contentType)
     res.setHeader('Content-Length', String(image.size))
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    res.setHeader(
+      'Cache-Control',
+      env.QA_FAULTS_ENABLED ? 'no-store' : 'public, max-age=31536000, immutable'
+    )
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    image.stream.pipe(res)
+    await pipeline(image.stream, res)
   })
 )

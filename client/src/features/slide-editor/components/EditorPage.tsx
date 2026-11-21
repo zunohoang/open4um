@@ -1,3 +1,13 @@
+import type { TextSelection } from '@/lib/types'
+import {
+  applyFormat,
+  editedText,
+  inlineKeys,
+  replaceText,
+  segments
+} from '../utils/textFormat'
+import { shouldFail } from '@/lib/qaFaults'
+import { requestError } from '@/lib/requestError'
 import { useShallow } from 'zustand/react/shallow'
 import { ExportModal } from '@/features/export/components/ExportModal'
 import { useToast } from '@/components/ui/Toast'
@@ -81,6 +91,32 @@ export const EditorPage = ({
   onPresent
 }: EditorPageProps) => {
   const { showToast } = useToast()
+  const [selection, setSelection] = useState<TextSelection | null>(null)
+  useEffect(() => {
+    const clear = (event: PointerEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest('[data-selection-tools],[data-slide-canvas-text]')
+      )
+        setSelection(null)
+    }
+    document.addEventListener('pointerdown', clear, true)
+    return () => document.removeEventListener('pointerdown', clear, true)
+  }, [])
+  const [slideFailure, setSlideFailure] = useState<{
+    kind: 'add' | 'duplicate'
+    retry: () => void
+  } | null>(null)
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 1023px)')
+    const closePanels = () => {
+      if (narrow.matches)
+        useEditorStore.setState({ isDrawerOpen: false, isAiPanelOpen: false })
+    }
+    closePanels()
+    narrow.addEventListener('change', closePanels)
+    return () => narrow.removeEventListener('change', closePanels)
+  }, [])
   const aiRequestRef = useRef<AbortController | null>(null)
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
@@ -189,6 +225,20 @@ export const EditorPage = ({
   )
   const lectureRef = useRef(lecture)
   const [autosaver] = useState(() => createSerialAutosaver(editorApi.autosave))
+  // Each candidate points back to the slide order and history before the operation.
+  const listChanges = useRef(
+    new WeakMap<
+      Slide[],
+      {
+        previous: Slide[]
+        undo: ReturnType<typeof useEditorStore.getState>['undoStack']
+        redo: ReturnType<typeof useEditorStore.getState>['redoStack']
+        selectedIndex: number
+        selectedComp: string | null
+        message: string
+      }
+    >()
+  )
   const pendingSavesRef = useRef(0)
   useEffect(() => {
     lectureRef.current = lecture
@@ -256,6 +306,7 @@ export const EditorPage = ({
       pendingSavesRef.current += 1
       try {
         const receipt = await autosaver.save(payload)
+        listChanges.current.delete(payload.slides)
         networkFailureNotifiedRef.current = false
         lastValidTitleRef.current = payload.title
         setSaveError(null)
@@ -288,10 +339,34 @@ export const EditorPage = ({
         return true
       } catch (err: unknown) {
         console.warn('Lỗi lưu server, chuyển sang lưu offline:', err)
-        const latestLecture =
+        let latestLecture =
           lectureRef.current?._id === payload._id ? lectureRef.current : payload
-        const draftSaved = saveOfflineDraft(latestLecture)
         const status = isAxiosError(err) ? err.response?.status : undefined
+        let operationError: string | undefined
+        if (
+          status &&
+          latestLecture.slides === payload.slides &&
+          lectureRef.current?._id === payload._id
+        ) {
+          let checkpoint = listChanges.current.get(payload.slides)
+          while (checkpoint) {
+            listChanges.current.delete(latestLecture.slides)
+            operationError ??= checkpoint.message
+            latestLecture = { ...latestLecture, slides: checkpoint.previous }
+            useEditorStore.setState({
+              undoStack: checkpoint.undo,
+              redoStack: checkpoint.redo,
+              activeSlideIndex: checkpoint.selectedIndex,
+              selectedCompId: checkpoint.selectedComp
+            })
+            checkpoint = listChanges.current.get(checkpoint.previous)
+          }
+          if (operationError) {
+            lectureRef.current = latestLecture
+            setLecture(latestLecture)
+          }
+        }
+        const draftSaved = saveOfflineDraft(latestLecture)
         if (status) {
           if ([403, 404, 409].includes(status)) saveBlockedRef.current = true
           const serverMessage =
@@ -302,7 +377,7 @@ export const EditorPage = ({
             : `${serverMessage} Trình duyệt cũng không lưu được bản nháp. Vui lòng giữ trang này để tránh mất chỉnh sửa.`
           setSaveError(message)
           setSaveStatus('error')
-          showToast(message, 'error')
+          showToast(operationError ?? message, 'error')
         } else {
           const message = draftSaved
             ? 'Không thể kết nối máy chủ. Thay đổi đã được lưu tạm offline vào trình duyệt.'
@@ -691,13 +766,16 @@ export const EditorPage = ({
     (
       compId: string,
       patch: Partial<SlideComponent>,
-      shouldRecordHistory = true
+      shouldRecordHistory = true,
+      slideId?: string
     ) => {
       const currentLecture = lectureRef.current
-      if (!currentLecture || !currentLecture.slides[activeSlideIndex])
-        return false
+      const targetIndex = slideId
+        ? (currentLecture?.slides.findIndex((s) => s.id === slideId) ?? -1)
+        : useEditorStore.getState().activeSlideIndex
+      if (!currentLecture || !currentLecture.slides[targetIndex]) return false
 
-      const sourceSlide = currentLecture.slides[activeSlideIndex]
+      const sourceSlide = currentLecture.slides[targetIndex]
       const comps = getSlideComponents(sourceSlide, currentLecture.theme)
       const target = comps.find((component) => component.id === compId)
       if (
@@ -707,6 +785,36 @@ export const EditorPage = ({
         )
       )
         return false
+      if (
+        patch.content !== undefined &&
+        target.textFormats?.length &&
+        !patch.textFormats
+      )
+        patch = { ...patch, ...editedText(target, patch.content) }
+      if (
+        patch.width !== undefined &&
+        patch.fontSize &&
+        target.textFormats?.length
+      ) {
+        const scale = patch.fontSize / (target.fontSize ?? 20)
+        patch = {
+          ...patch,
+          textFormats: target.textFormats.map((run) =>
+            run.style.fontSize
+              ? {
+                  ...run,
+                  style: {
+                    ...run.style,
+                    fontSize: Math.max(
+                      8,
+                      Math.min(120, run.style.fontSize * scale)
+                    )
+                  }
+                }
+              : run
+          )
+        }
+      }
       const updatedComps = comps.map((c) =>
         c.id === compId ? { ...c, ...patch } : c
       )
@@ -727,7 +835,7 @@ export const EditorPage = ({
       }
 
       const nextSlides = currentLecture.slides.map((s, idx) =>
-        idx === activeSlideIndex ? updatedSlide : s
+        idx === targetIndex ? updatedSlide : s
       )
       mutateLecture(
         { ...currentLecture, slides: nextSlides },
@@ -735,9 +843,53 @@ export const EditorPage = ({
       )
       return true
     },
-    [activeSlideIndex, mutateLecture]
+    [mutateLecture]
   )
 
+  const textRange =
+    selection?.slideId === currentSlide?.id &&
+    selection?.componentId === selectedCompId
+      ? selection
+      : null
+  const formatSelection = useCallback(
+    (component: SlideComponent, patch: Partial<SlideComponent>) => {
+      if (!inlineKeys.some((key) => key in patch))
+        return handleUpdateComponent(component.id, patch)
+      if (textRange) {
+        if (
+          document.activeElement instanceof HTMLTextAreaElement &&
+          document.activeElement.hasAttribute('data-slide-canvas-text')
+        )
+          document.activeElement.blur()
+        return handleUpdateComponent(component.id, {
+          textFormats: applyFormat(
+            component,
+            textRange.start,
+            textRange.end,
+            patch
+          )
+        })
+      }
+      // A block-wide choice also updates older explicit styles on that attribute.
+      if (component.textFormats?.length) {
+        const textFormats = component.textFormats
+          .map((run) => ({
+            ...run,
+            style: Object.fromEntries(
+              Object.entries(run.style).filter(([key]) => !(key in patch))
+            )
+          }))
+          .filter((run) => Object.keys(run.style).length)
+        return handleUpdateComponent(component.id, { ...patch, textFormats })
+      }
+      return handleUpdateComponent(component.id, patch)
+    },
+    [handleUpdateComponent, textRange]
+  )
+  const selectionStyle =
+    selectedComponent && textRange
+      ? segments(selectedComponent, textRange.start, textRange.end)[0]?.style
+      : undefined
   useEffect(() => {
     const handleFormatShortcut = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return
@@ -764,28 +916,35 @@ export const EditorPage = ({
         key === 'b'
           ? {
               fontWeight:
-                selectedComponent.fontWeight === 'bold' ? 'normal' : 'bold'
+                (selectionStyle?.fontWeight ?? selectedComponent.fontWeight) ===
+                'bold'
+                  ? 'normal'
+                  : 'bold'
             }
           : key === 'i'
             ? {
                 fontStyle:
-                  selectedComponent.fontStyle === 'italic' ? 'normal' : 'italic'
+                  (selectionStyle?.fontStyle ?? selectedComponent.fontStyle) ===
+                  'italic'
+                    ? 'normal'
+                    : 'italic'
               }
             : key === 'u'
               ? {
                   textDecoration:
-                    selectedComponent.textDecoration === 'underline'
+                    (selectionStyle?.textDecoration ??
+                      selectedComponent.textDecoration) === 'underline'
                       ? 'none'
                       : 'underline'
                 }
               : undefined
       if (!patch) return
       event.preventDefault()
-      handleUpdateComponent(selectedComponent.id, patch)
+      formatSelection(selectedComponent, patch)
     }
     window.addEventListener('keydown', handleFormatShortcut)
     return () => window.removeEventListener('keydown', handleFormatShortcut)
-  }, [selectedComponent, handleUpdateComponent])
+  }, [selectedComponent, formatSelection, selectionStyle])
 
   const handleAddTextComponent = (
     type: 'title' | 'subtitle' | 'text' | 'bullets'
@@ -1085,102 +1244,145 @@ export const EditorPage = ({
     showToast(`Đã áp dụng bố cục: ${layout}`, 'success')
   }
 
-  const handleAddSlide = (atIndex?: number) => {
-    if (!lecture) return
-    const targetIndex = atIndex ?? lecture.slides.length
-    const rawSlide: Slide = {
-      id: `slide-${crypto.randomUUID()}`,
-      title: 'Tiêu đề slide',
-      bullets: []
-    }
-    let newSlide: Slide
+  function handleAddSlide(atIndex?: number) {
+    const current = lectureRef.current
+    if (!current) return
+    const index = Math.min(
+      atIndex ?? activeSlideIndex + 1,
+      current.slides.length
+    )
     try {
-      newSlide = {
-        ...rawSlide,
-        components: getSlideComponents(rawSlide, lecture.theme)
+      if (shouldFail('addSlide')) throw new Error('addSlide')
+      const slide: Slide = {
+        id: `slide-${crypto.randomUUID()}`,
+        title: 'Tiêu đề slide',
+        bullets: []
       }
+      slide.components = getSlideComponents(slide, current.theme)
+      const slides = [...current.slides]
+      slides.splice(index, 0, slide)
+      mutateLecture({ ...current, slides })
+      setActiveSlideIndex(index)
+      setSlideFailure(null)
     } catch {
-      // SRS UC014 4a: không khởi tạo được slide -> giữ nguyên bài giảng
-      showToast('Không thể tạo slide mới. Vui lòng thử lại.', 'error')
-      return
+      setSlideFailure({ kind: 'add', retry: () => handleAddSlide(index) })
     }
-
-    const nextSlides = [...lecture.slides]
-    nextSlides.splice(targetIndex, 0, newSlide)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-    setActiveSlideIndex(targetIndex)
   }
 
-  const handleDeleteSlide = (slideId: string) => {
-    if (!lecture) return
-    if (lecture.slides.length <= 1) {
+  function handleDuplicateSlide(slideId: string) {
+    const current = lectureRef.current
+    if (!current) return
+    try {
+      if (shouldFail('duplicateSlide')) throw new Error('duplicateSlide')
+      const sourceIndex = current.slides.findIndex(
+        (slide) => slide.id === slideId
+      )
+      if (sourceIndex < 0) {
+        setSlideFailure(null)
+        return
+      }
+      const copy = structuredClone(current.slides[sourceIndex])
+      copy.components = getSlideComponents(copy, current.theme).map((comp) => ({
+        ...comp,
+        id: `comp-${crypto.randomUUID()}`
+      }))
+      copy.id = `slide-${crypto.randomUUID()}`
+      const slides = [...current.slides]
+      slides.splice(sourceIndex + 1, 0, copy)
+      mutateLecture({ ...current, slides })
+      setActiveSlideIndex(sourceIndex + 1)
+      setSlideFailure(null)
+    } catch {
+      setSlideFailure({
+        kind: 'duplicate',
+        retry: () => handleDuplicateSlide(slideId)
+      })
+    }
+  }
+
+  function changeSlideList(
+    current: Lecture,
+    slides: Slide[],
+    selectedIndex: number,
+    message: string
+  ) {
+    const { undoStack, redoStack, activeSlideIndex, selectedCompId } =
+      useEditorStore.getState()
+    listChanges.current.set(slides, {
+      previous: current.slides,
+      undo: undoStack,
+      redo: redoStack,
+      selectedIndex: activeSlideIndex,
+      selectedComp: selectedCompId,
+      message
+    })
+    mutateLecture({ ...current, slides })
+    setActiveSlideIndex(selectedIndex)
+  }
+
+  function handleDeleteSlide(slideId: string) {
+    const current = lectureRef.current
+    if (!current) return
+    if (current.slides.length <= 1) {
       showToast('Bài giảng phải có ít nhất một slide', 'error')
       return
     }
-
-    const targetIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (targetIndex === -1) return
-
-    const nextSlides = lecture.slides.filter((s) => s.id !== slideId)
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-
-    if (targetIndex < activeSlideIndex) {
-      setActiveSlideIndex(activeSlideIndex - 1)
-    } else if (targetIndex === activeSlideIndex) {
-      setActiveSlideIndex(Math.min(activeSlideIndex, nextSlides.length - 1))
-    }
-  }
-
-  const handleDuplicateSlide = (slideId: string) => {
-    if (!lecture) return
-    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (sourceIndex === -1) return
-
-    let clonedSlide: Slide
     try {
-      // Bản sao độc lập hoàn toàn (SRS UC016): không dùng chung mảng với slide gốc
-      const sourceSlide = structuredClone(lecture.slides[sourceIndex])
-      clonedSlide = {
-        ...sourceSlide,
-        id: `slide-${crypto.randomUUID()}`,
-        components: getSlideComponents(sourceSlide, lecture.theme).map(
-          (comp) => ({ ...comp, id: `comp-${crypto.randomUUID()}` })
-        )
-      }
+      if (shouldFail('deleteSlide')) throw new Error('deleteSlide')
+      const index = current.slides.findIndex((slide) => slide.id === slideId)
+      if (index < 0) return
+      const slides = current.slides.filter((slide) => slide.id !== slideId)
+      changeSlideList(
+        current,
+        slides,
+        index < activeSlideIndex
+          ? activeSlideIndex - 1
+          : Math.min(activeSlideIndex, slides.length - 1),
+        'Không thể xóa slide. Danh sách slide được giữ nguyên.'
+      )
     } catch {
-      // SRS UC016 3a: không sao chép được -> không tạo slide mới
-      showToast('Không thể nhân bản slide. Vui lòng thử lại.', 'error')
-      return
+      showToast(
+        'Không thể xóa slide. Danh sách slide được giữ nguyên.',
+        'error'
+      )
     }
-
-    const nextSlides = [...lecture.slides]
-    nextSlides.splice(sourceIndex + 1, 0, clonedSlide)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-    setSelectedCompId(null)
-    setActiveSlideIndex(sourceIndex + 1)
   }
 
-  const handleMoveSlide = (slideId: string, toIndex: number) => {
-    if (!lecture) return
-    const sourceIndex = lecture.slides.findIndex((s) => s.id === slideId)
-    if (sourceIndex === -1 || sourceIndex === toIndex) return
-
-    const nextSlides = [...lecture.slides]
-    const [moved] = nextSlides.splice(sourceIndex, 1)
-    nextSlides.splice(toIndex, 0, moved)
-
-    mutateLecture({ ...lecture, slides: nextSlides })
-    // SRS UC017 bước 8: slide vừa di chuyển giữ trạng thái được chọn
-    setSelectedCompId(null)
-    setActiveSlideIndex(toIndex)
+  function handleMoveSlide(slideId: string, toIndex: number) {
+    const current = lectureRef.current
+    if (!current) return
+    try {
+      if (shouldFail('moveSlide')) throw new Error('moveSlide')
+      const index = current.slides.findIndex((slide) => slide.id === slideId)
+      if (
+        index < 0 ||
+        index === toIndex ||
+        toIndex < 0 ||
+        toIndex >= current.slides.length
+      )
+        return
+      const slides = [...current.slides]
+      const [moved] = slides.splice(index, 1)
+      slides.splice(toIndex, 0, moved)
+      changeSlideList(
+        current,
+        slides,
+        toIndex,
+        'Không thể cập nhật thứ tự slide. Đã khôi phục thứ tự trước đó.'
+      )
+    } catch {
+      showToast(
+        'Không thể cập nhật thứ tự slide. Đã khôi phục thứ tự trước đó.',
+        'error'
+      )
+    }
   }
 
   // Gọi AI chat / chỉnh sửa slide với context đầy đủ
-  const handleApplyAiPrompt = async (instruction: string) => {
+  const handleApplyAiPrompt = async (
+    instruction: string,
+    edit?: { action: 'shorten' | 'expand' | 'rewrite'; range: TextSelection }
+  ) => {
     if (!lecture || !currentSlide || !instruction.trim() || isAiLoading)
       return false
     if (lectureRef.current?._id !== lecture._id) return false
@@ -1212,6 +1414,13 @@ export const EditorPage = ({
           slideId: currentSlide.id,
           currentSlide: currentSlideSnapshot,
           selectedCompId: selectedCompId || undefined,
+          textEdit: edit
+            ? {
+                action: edit.action,
+                start: edit.range.start,
+                end: edit.range.end
+              }
+            : undefined,
           sourceMaterial: sourceMaterial,
           history: historyPayload
         },
@@ -1221,6 +1430,51 @@ export const EditorPage = ({
         return false
 
       updateUser({ creditBalance: response.creditBalance })
+
+      if (edit) {
+        const latest = lectureRef.current
+        const slide = latest.slides.find((s) => s.id === edit.range.slideId)
+        const component =
+          slide &&
+          getSlideComponents(slide, latest.theme).find(
+            (c) => c.id === edit.range.componentId
+          )
+        const before = currentSlideSnapshot.components?.find(
+          (c) => c.id === edit.range.componentId
+        )
+        if (response.aiChatHistory) {
+          setAiMessages(response.aiChatHistory as unknown as AiChatMessage[])
+          lectureRef.current = {
+            ...latest,
+            aiChatHistory: response.aiChatHistory
+          }
+          setLecture(lectureRef.current)
+        }
+        if (
+          !component ||
+          component.content !== before?.content ||
+          !response.replacement
+        ) {
+          showToast(
+            'Đoạn gốc đã thay đổi. Kết quả AI được giữ trong cuộc trò chuyện.',
+            'info'
+          )
+          return true
+        }
+        handleUpdateComponent(
+          component.id,
+          replaceText(
+            component,
+            edit.range.start,
+            edit.range.end,
+            response.replacement
+          ),
+          true,
+          slide!.id
+        )
+        setSelection(null)
+        return true
+      }
 
       const targetIndex =
         typeof response.targetSlideIndex === 'number' &&
@@ -1413,10 +1667,7 @@ export const EditorPage = ({
       return true
     } catch (err) {
       if (controller.signal.aborted) return false
-      const msg = isAxiosError(err)
-        ? (err.response?.data as { message?: string })?.message ||
-          'Không thể thực hiện yêu cầu AI'
-        : 'Không thể thực hiện yêu cầu AI'
+      const msg = requestError(err, 'Không thể thực hiện yêu cầu AI', true)
       addAiMessage('assistant', `⚠️ Không thể xử lý yêu cầu: ${msg}`)
       showToast(msg, 'error')
       return false
@@ -1653,26 +1904,16 @@ export const EditorPage = ({
 
   // AI Quick Actions (Viết lại / Rút gọn / Mở rộng) từ mini-action pill
   const handleAiQuickAction = (action: 'rewrite' | 'shorten' | 'expand') => {
-    const promptMap = {
-      rewrite:
-        'Hãy viết lại các ý trong slide này cho mạch lạc, thu hút và sắc nét hơn',
-      shorten:
-        'Rút gọn nội dung slide này thành 3 ý chính súc tích, ngắn gọn, dễ nhớ',
-      expand:
-        'Mở rộng và bổ sung thêm các luận điểm thực tế, minh họa chi tiết cho slide này'
+    if (!textRange || !selectedComponent) return
+    const actionLabels = {
+      rewrite: 'Viết lại',
+      shorten: 'Rút gọn',
+      expand: 'Mở rộng'
     }
-    // SRS UC008 3a: nếu người dùng bôi đen một đoạn thì AI chỉ xử lý đoạn đó
-    const selectedText = window.getSelection()?.toString().trim()
-    const selectionPromptMap = {
-      rewrite: 'Viết lại cho mạch lạc, sắc nét hơn',
-      shorten: 'Rút gọn cho súc tích',
-      expand: 'Mở rộng chi tiết hơn'
-    }
-    void handleApplyAiPrompt(
-      selectedText
-        ? `${selectionPromptMap[action]} đúng đoạn văn bản sau trong slide, giữ nguyên các phần còn lại: "${selectedText}"`
-        : promptMap[action]
-    )
+    void handleApplyAiPrompt(actionLabels[action] + ' đoạn văn bản đã chọn', {
+      action,
+      range: textRange
+    })
   }
 
   const handleBack = async () => {
@@ -1756,10 +1997,10 @@ export const EditorPage = ({
       }
     } catch (error) {
       if (controller.signal.aborted) return
-      const message = isAxiosError(error)
-        ? error.response?.data?.message
-        : undefined
-      showToast(message || 'Không thể tạo lại dàn ý lúc này', 'error')
+      showToast(
+        requestError(error, 'Không thể tạo lại dàn ý lúc này', true),
+        'error'
+      )
     } finally {
       setIsOutlineLoading(false)
     }
@@ -1834,6 +2075,23 @@ export const EditorPage = ({
   return (
     <div className='flex h-screen flex-col overflow-hidden bg-brand-paper'>
       <ConfirmDialog
+        open={!!slideFailure}
+        title={
+          slideFailure?.kind === 'add'
+            ? 'Không thể thêm slide'
+            : 'Không thể nhân bản slide'
+        }
+        message={
+          slideFailure?.kind === 'add'
+            ? 'Không khởi tạo được slide mới. Bài giảng được giữ nguyên.'
+            : 'Không sao chép được dữ liệu slide. Không có slide mới nào được tạo.'
+        }
+        confirmLabel='Thử lại'
+        cancelLabel='Hủy'
+        onConfirm={() => slideFailure?.retry()}
+        onCancel={() => setSlideFailure(null)}
+      />
+      <ConfirmDialog
         open={blocker.state === 'blocked'}
         title='Bài giảng có thay đổi chưa lưu'
         message='Bài giảng chưa lưu lên máy chủ. Bạn có thể lưu trước khi rời trang, hoặc giữ bản nháp trong trình duyệt để khôi phục sau.'
@@ -1900,7 +2158,7 @@ export const EditorPage = ({
       )}
 
       {/* 2. KHÔNG GIAN LÀM VIỆC CHÍNH (CANVA 3 KHU VỰC) */}
-      <div className='flex flex-1 overflow-hidden'>
+      <div className='relative flex min-h-0 flex-1 overflow-hidden'>
         {/* CỘT TRÁI: Icon Rail hẹp + Drawer chọn Văn bản / Hình khối / Upload ảnh / Mẫu slide / Giao diện */}
         <LeftSidebarRail
           key={lectureId}
@@ -1921,13 +2179,19 @@ export const EditorPage = ({
           {/* Thanh công cụ định dạng ngữ cảnh nổi (Canva Floating Pill Toolbar) - Chỉ hiện khi focus vào element */}
           {selectedComponent && (
             <div className='absolute top-2 left-3 right-3 z-30 flex justify-center pointer-events-none transition-all'>
-              <div className='pointer-events-auto max-w-full overflow-x-auto no-scrollbar'>
+              <div
+                data-selection-tools
+                className='pointer-events-auto max-w-full overflow-x-auto no-scrollbar'
+              >
                 <FloatingContextualToolbar
-                  selectedComponent={selectedComponent}
-                  onUpdateComponent={(patch) => {
-                    if (selectedCompId)
-                      handleUpdateComponent(selectedCompId, patch)
-                  }}
+                  selectedComponent={
+                    selectionStyle
+                      ? { ...selectedComponent, ...selectionStyle }
+                      : selectedComponent
+                  }
+                  onUpdateComponent={(patch) =>
+                    formatSelection(selectedComponent, patch)
+                  }
                   onDuplicateComponent={handleDuplicateComponent}
                   onDeleteComponent={handleDeleteComponent}
                   onChangeLayer={(direction) => {
@@ -1956,6 +2220,8 @@ export const EditorPage = ({
             onUpdateComponent={handleUpdateComponent}
             onDuplicateComponent={handleDuplicateComponent}
             onDeleteComponent={handleDeleteComponent}
+            selection={textRange}
+            onTextSelection={setSelection}
             onAiQuickAction={handleAiQuickAction}
             isAiLoading={isAiLoading}
             isPreview={isPreviewVisible}
@@ -1973,6 +2239,12 @@ export const EditorPage = ({
             onDuplicateSlide={handleDuplicateSlide}
             onDeleteSlide={handleDeleteSlide}
             onMoveSlide={handleMoveSlide}
+            onInvalidDrop={() =>
+              showToast(
+                'Vị trí thả không hợp lệ. Thứ tự slide được giữ nguyên.',
+                'error'
+              )
+            }
           />
         </main>
 

@@ -12,7 +12,7 @@ export const authApi = {
   login: async (data: { email: string; password: string }) =>
     (await apiClient.post<{ data: AuthSession }>('/auth/login', data)).data
       .data,
-  sendRegisterOtp: async (data: { email: string }) =>
+  sendRegisterOtp: async (data: { email: string; name: string }) =>
     (await apiClient.post<{ message: string }>('/auth/send-register-otp', data))
       .data,
   register: async (data: {

@@ -3,7 +3,7 @@ import {
   FONT_MAP,
   getThemeById
 } from '@/features/slide-editor/constants/theme-options'
-import { cropClipPath } from '@/features/slide-editor/utils/slide'
+import { SlideImage } from '@/features/slide-editor/components/SlideImage'
 import { SlideText } from '@/features/slide-editor/components/SlideText'
 import React, { memo } from 'react'
 
@@ -41,9 +41,7 @@ const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
 }) => {
   const theme = getThemeById(slide?.theme || lectureTheme)
   const background = slide?.backgroundColor || theme.background
-  const hasComponents = Boolean(
-    slide?.components && slide.components.length > 0
-  )
+  const hasComponents = Array.isArray(slide?.components)
   const hasContent = Boolean(
     hasComponents ||
     slide?.title ||
@@ -265,21 +263,20 @@ const SlidePreviewContent: React.FC<SlidePreviewProps> = ({
             const cx = x + w / 2
             const cy = y + imgH / 2
             return (
-              <image
+              <foreignObject
                 key={comp.id}
-                href={comp.imageUrl || comp.content}
-                style={{ clipPath: cropClipPath(comp.crop) }}
                 x={x}
                 y={y}
                 width={w}
                 height={imgH}
-                preserveAspectRatio='xMidYMid meet'
                 transform={
                   comp.rotation
                     ? `rotate(${comp.rotation} ${cx} ${cy})`
                     : undefined
                 }
-              />
+              >
+                <SlideImage component={comp} frameRatio={w / imgH} />
+              </foreignObject>
             )
           }
 

@@ -531,18 +531,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         </div>
 
         {/* Lớp overlay chứa Badge trạng thái (góc trái) & Nút Kebab ba chấm (góc phải) */}
-        <div className='absolute inset-x-0 top-0 flex items-center justify-between p-2.5 pointer-events-none'>
-          {/* Badge góc trái */}
-          {activeViewMode === 'trash' ? (
-            <span className='rounded-xs border border-red-300 bg-red-50/95 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 shadow-2xs backdrop-blur-xs'>
-              ⏳ Còn {getDaysRemaining(lecture.deletedAt)} ngày
-            </span>
-          ) : (
-            <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
-              {lecture.slideCount} SLIDES
-            </span>
-          )}
-
+        <div className='absolute right-0 top-0 flex items-center p-2.5 pointer-events-none'>
           {/* Nút menu ba chấm (...) rõ ràng ở góc thẻ bài giảng để nhấp chuột trái */}
           <button
             type='button'
@@ -557,6 +546,18 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
         </div>
       </div>
 
+      <div className='mt-2'>
+        {/* Badge góc trái */}
+        {activeViewMode === 'trash' ? (
+          <span className='rounded-xs border border-red-300 bg-red-50/95 px-2 py-0.5 font-mono text-[10px] font-bold text-red-700 shadow-2xs backdrop-blur-xs'>
+            ⏳ Còn {getDaysRemaining(lecture.deletedAt)} ngày
+          </span>
+        ) : (
+          <span className='rounded-xs border border-stone-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-stone-700 uppercase shadow-2xs backdrop-blur-xs'>
+            {lecture.slideCount} SLIDES
+          </span>
+        )}
+      </div>
       {/* Tiêu đề bài giảng & Metadata bên dưới */}
       <div className='flex items-start justify-between gap-3 pt-3.5'>
         <div className='min-w-0 flex-1'>
