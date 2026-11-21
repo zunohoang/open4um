@@ -151,3 +151,38 @@ describe('production admin environment', () => {
     expect(result.ADMIN_CREDIT_BALANCE).toBe(1000)
   })
 })
+
+describe('môi trường mô phỏng QA', () => {
+  const valid = {
+    ...baseEnv,
+    ADMIN_EMAIL: 'owner@example.com',
+    ADMIN_PASSWORD: 'Strong!Password123'
+  }
+  it('mặc định tắt và chỉ bật trên develop', () => {
+    expect(parseEnv(valid).QA_FAULTS_ENABLED).toBe(false)
+    expect(() => parseEnv({ ...valid, QA_FAULTS_ENABLED: 'true' })).toThrow()
+    expect(
+      parseEnv({
+        ...valid,
+        RELEASE_ENVIRONMENT: 'develop',
+        QA_FAULTS_ENABLED: 'true'
+      }).QA_FAULTS_ENABLED
+    ).toBe(true)
+  })
+  it('giữ ít nhất 15 giây dự phòng trước gateway', () => {
+    expect(() =>
+      parseEnv({
+        ...valid,
+        GATEWAY_READ_TIMEOUT_SEC: 90,
+        AI_REQUEST_TIMEOUT_MS: 75001
+      })
+    ).toThrow()
+    expect(
+      parseEnv({
+        ...valid,
+        GATEWAY_READ_TIMEOUT_SEC: 90,
+        AI_REQUEST_TIMEOUT_MS: 75000
+      }).AI_REQUEST_TIMEOUT_MS
+    ).toBe(75000)
+  })
+})

@@ -3,6 +3,8 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { env } from '@/config/env'
 import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
+import { getFault } from '@/services/qa.service'
+import { requestContext } from '@/middlewares/requestContext.middleware'
 import { AppError } from '@/utils/AppError'
 import {
   extractRequestedHintLabel,
@@ -16,7 +18,17 @@ import {
 
 const DEFAULT_AI_MODEL = env.GEMINI_MODEL || 'gemini-2.0-flash'
 /** Giới hạn từng lượt gọi; thời hạn toàn yêu cầu do withAiRequest kiểm soát. */
-const AI_CALL_TIMEOUT_MS = 60_000
+export const AI_CALL_TIMEOUT_MS =
+  env.AI_REQUEST_TIMEOUT_MS >= 65_000
+    ? 60_000
+    : Math.max(
+        250,
+        Math.floor(
+          (env.AI_REQUEST_TIMEOUT_MS -
+            Math.min(1500, env.AI_REQUEST_TIMEOUT_MS / 4)) /
+            2
+        )
+      )
 
 const getAiClient = (): GoogleGenAI => {
   const apiKey = env.GEMINI_API_KEY
@@ -55,7 +67,10 @@ type GenerateContentParams = Parameters<
 const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504])
 /** Số lần gọi tối đa cho mỗi model (lần đầu + thử lại). */
 export const AI_ATTEMPTS_PER_MODEL = 2
-const AI_RETRY_DELAY_MS = 1500
+const AI_RETRY_DELAY_MS = Math.min(
+  1500,
+  Math.floor(env.AI_REQUEST_TIMEOUT_MS / 4)
+)
 
 export const AI_BUSY_MESSAGE =
   'Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút.'
@@ -80,7 +95,8 @@ const describeAiResponse = (response: any) => {
 }
 
 const isRetryableAiError = (err: unknown): boolean => {
-  if (err instanceof EmptyAiResponseError) return true
+  if (err instanceof EmptyAiResponseError || err instanceof SyntaxError)
+    return true
   const status = (err as { status?: unknown })?.status
   if (typeof status === 'number') return RETRYABLE_AI_STATUS.has(status)
   const code = (err as { code?: unknown })?.code
@@ -120,6 +136,13 @@ export const generateTextWithRetry = async (
 ): Promise<string> => {
   const signal = params.config?.abortSignal
   signal?.throwIfAborted()
+  const context = requestContext.getStore()
+  if (context?.aiDelayMs) {
+    const delay = context.aiDelayMs
+    context.aiDelayMs = undefined
+    await sleep(delay, undefined, { signal })
+  }
+  const userId = context?.userId
   const models = [params.model, env.GEMINI_FALLBACK_MODEL].filter(
     (m, i, all): m is string => Boolean(m) && all.indexOf(m) === i
   )
@@ -128,10 +151,20 @@ export const generateTextWithRetry = async (
     for (let attempt = 1; attempt <= AI_ATTEMPTS_PER_MODEL; attempt++) {
       try {
         signal?.throwIfAborted()
+        const fault = await getFault('ai_error', userId)
+        signal?.throwIfAborted()
+        if (fault)
+          throw Object.assign(new Error('Simulated provider error'), {
+            status: fault.status
+          })
         const response = await ai.models.generateContent({ ...params, model })
         signal?.throwIfAborted()
         const text = response.text
-        if (text && text.trim()) return text
+        if (text && text.trim()) {
+          if (params.config?.responseMimeType === 'application/json')
+            safeParseAiJson(text)
+          return text
+        }
         logger.warn(
           { model, attempt, ...describeAiResponse(response) },
           `${label}: AI trả về rỗng`
@@ -255,16 +288,8 @@ export const safeParseAiJson = <T>(rawText: string): T => {
       .replace(/,\s*([}\]])/g, '$1')
     return JSON.parse(fixedKeys) as T
   } catch {
-    try {
-      const evalFn = new Function(`return (${sanitized})`)
-      return evalFn() as T
-    } catch (finalErr) {
-      logger.error(
-        { err: finalErr, snippet: text.substring(0, 300) },
-        'safeParseAiJson failed to parse'
-      )
-      throw finalErr
-    }
+    // Provider output is data. Retry a malformed response with the same request budget.
+    throw new SyntaxError('Phản hồi AI không phải JSON hợp lệ')
   }
 }
 
@@ -399,24 +424,20 @@ export const refineOutlineWithFeedback = async (
       `Ý kiến / Yêu cầu điều chỉnh của người dùng:\n"${feedback}"\n\n` +
       'Hãy cập nhật và tinh chỉnh lại dàn ý theo đúng ý kiến đóng góp của người dùng.'
 
-    const response = await ai.models.generateContent({
-      model: DEFAULT_AI_MODEL,
-      contents: userContent,
-      config: {
-        abortSignal: signal,
-        systemInstruction,
-        temperature: 0.7,
-        responseMimeType: 'application/json'
-      }
-    })
-
-    const rawText = response.text
-    if (!rawText) {
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
+    const rawText = await generateTextWithRetry(
+      ai,
+      {
+        model: DEFAULT_AI_MODEL,
+        contents: userContent,
+        config: {
+          abortSignal: signal,
+          systemInstruction,
+          temperature: 0.7,
+          responseMimeType: 'application/json'
+        }
+      },
+      'ai.refineOutline'
+    )
 
     const parsed = safeParseAiJson<GeneratedOutline>(rawText)
 
@@ -528,82 +549,74 @@ export const generateSlidesFromOutline = async (
       'Hãy phát triển thành một bộ slide trực quan, sinh động với các bố cục đặc sắc đa dạng (hero highlight, metrics, quad grid, horizontal rows, cards, steps).\n' +
       'LƯU Ý ĐẶC BIỆT: Tất cả các slide nội dung đều phải được viết đầy đủ nội dung chi tiết vào mảng contentItems và bullets, tuyệt đối không để mảng rỗng!'
 
-    const response = await ai.models.generateContent({
-      model: DEFAULT_AI_MODEL,
-      contents: userContent,
-      config: {
-        abortSignal: signal,
-        systemInstruction,
-        temperature: 0.7,
-        maxOutputTokens: 8192,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            slides: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  header: { type: 'STRING' },
-                  title: { type: 'STRING' },
-                  subtitle: { type: 'STRING' },
-                  footer: { type: 'STRING' },
-                  layout: {
-                    type: 'STRING',
-                    enum: [
-                      'split-highlight',
-                      'metrics-grid',
-                      'quad-grid',
-                      'horizontal-rows',
-                      'two-column',
-                      'steps',
-                      'cards',
-                      'headline'
-                    ]
+    const rawText = await generateTextWithRetry(
+      ai,
+      {
+        model: DEFAULT_AI_MODEL,
+        contents: userContent,
+        config: {
+          abortSignal: signal,
+          systemInstruction,
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              slides: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    header: { type: 'STRING' },
+                    title: { type: 'STRING' },
+                    subtitle: { type: 'STRING' },
+                    footer: { type: 'STRING' },
+                    layout: {
+                      type: 'STRING',
+                      enum: [
+                        'split-highlight',
+                        'metrics-grid',
+                        'quad-grid',
+                        'horizontal-rows',
+                        'two-column',
+                        'steps',
+                        'cards',
+                        'headline'
+                      ]
+                    },
+                    contentItems: {
+                      type: 'ARRAY',
+                      items: {
+                        type: 'OBJECT',
+                        properties: {
+                          title: { type: 'STRING' },
+                          description: { type: 'STRING' },
+                          stat: { type: 'STRING' },
+                          tag: { type: 'STRING' }
+                        },
+                        required: ['title', 'description']
+                      }
+                    },
+                    bullets: {
+                      type: 'ARRAY',
+                      items: { type: 'STRING' }
+                    },
+                    titleAlign: { type: 'STRING' },
+                    titleSize: { type: 'STRING' },
+                    bulletStyle: { type: 'STRING' },
+                    speakerNotes: { type: 'STRING' }
                   },
-                  contentItems: {
-                    type: 'ARRAY',
-                    items: {
-                      type: 'OBJECT',
-                      properties: {
-                        title: { type: 'STRING' },
-                        description: { type: 'STRING' },
-                        stat: { type: 'STRING' },
-                        tag: { type: 'STRING' }
-                      },
-                      required: ['title', 'description']
-                    }
-                  },
-                  bullets: {
-                    type: 'ARRAY',
-                    items: { type: 'STRING' }
-                  },
-                  titleAlign: { type: 'STRING' },
-                  titleSize: { type: 'STRING' },
-                  bulletStyle: { type: 'STRING' },
-                  speakerNotes: { type: 'STRING' }
-                },
-                required: ['title', 'layout', 'contentItems', 'bullets']
+                  required: ['title', 'layout', 'contentItems', 'bullets']
+                }
               }
-            }
-          },
-          required: ['slides']
+            },
+            required: ['slides']
+          }
         }
-      }
-    })
-
-    const rawText = response.text
-    if (!rawText) {
-      logger.error(
-        { err: 'Không nhận được nội dung từ AI' },
-        'ai.generateSlides failed'
-      )
-      throw new AppError(
-        'Dịch vụ này tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
+      },
+      'ai.generateSlides'
+    )
 
     const parsed = safeParseAiJson<
       Record<string, unknown> | GeneratedSlideData[]
@@ -662,6 +675,45 @@ export const generateSlidesFromOutline = async (
   }
 }
 
+export async function editSelectedText(
+  action: 'rewrite' | 'shorten' | 'expand',
+  content: string,
+  signal?: AbortSignal
+): Promise<AiChatResponse> {
+  const instruction = {
+    rewrite: 'Viết lại cho mạch lạc',
+    shorten: 'Rút gọn cho súc tích',
+    expand: 'Mở rộng chi tiết'
+  }[action]
+  try {
+    const replacement = (
+      await generateTextWithRetry(
+        getAiClient(),
+        {
+          model: DEFAULT_AI_MODEL,
+          contents: content,
+          config: {
+            abortSignal: signal,
+            systemInstruction:
+              instruction +
+              '. Chỉ trả về văn bản thay thế cho đoạn được cung cấp, giữ nguyên ngôn ngữ.',
+            temperature: 0.5
+          }
+        },
+        'ai.editSelectedText'
+      )
+    ).trim()
+    return { action: 'UPDATE_CURRENT_SLIDE', replacement, reply: replacement }
+  } catch (error) {
+    signal?.throwIfAborted()
+    if (error instanceof AppError) throw error
+    throw new AppError(
+      'Không thể thực hiện yêu cầu AI lúc này. Vui lòng thử lại.',
+      502
+    )
+  }
+}
+
 export interface AiChatSlideSummary {
   slideNumber: number
   id: string
@@ -715,6 +767,7 @@ export interface AiSlideProposal {
 }
 
 export interface AiChatResponse {
+  replacement?: string
   thought?: string
   reply: string
   action: AiSlideAction
@@ -1136,29 +1189,21 @@ export const chatAndProposeSlideEdit = async (
       (forcedTargetInstructions || '') +
       `\n${executionDirectives.length + 1}. Trả về đúng 1 JSON object hợp lệ.`
 
-    const response = await ai.models.generateContent({
-      model: DEFAULT_AI_MODEL,
-      contents: userPromptContent,
-      config: {
-        abortSignal: signal,
-        systemInstruction,
-        temperature: 0.5,
-        maxOutputTokens: 8192,
-        responseMimeType: 'application/json'
-      }
-    })
-
-    const rawText = response.text
-    if (!rawText) {
-      logger.error(
-        { err: 'Không nhận được nội dung từ AI' },
-        'ai.chatAndProposeSlideEdit failed'
-      )
-      throw new AppError(
-        'Dịch vụ AI tạm thời bị gián đoạn. Vui lòng thử lại sau.',
-        502
-      )
-    }
+    const rawText = await generateTextWithRetry(
+      ai,
+      {
+        model: DEFAULT_AI_MODEL,
+        contents: userPromptContent,
+        config: {
+          abortSignal: signal,
+          systemInstruction,
+          temperature: 0.5,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json'
+        }
+      },
+      'ai.chatAndProposeSlideEdit'
+    )
 
     const parsed = safeParseAiJson<{
       thought?: string

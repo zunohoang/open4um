@@ -2,7 +2,7 @@ import Redis from 'ioredis'
 import { env } from '@/config/env'
 import { logger } from '@/lib/logger'
 
-export const redis = new Redis(env.REDIS_URL)
+export const redis = new Redis(env.REDIS_URL, { lazyConnect: true })
 
 export const connectRedis = async () => {
   try {

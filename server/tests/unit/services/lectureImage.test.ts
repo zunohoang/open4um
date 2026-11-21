@@ -75,7 +75,9 @@ describe('SRS UC011 - upload ảnh lên server', () => {
   })
 
   it('getImage trả 404 khi ảnh không tồn tại trong MinIO', async () => {
-    mockStatObject.mockRejectedValue(new Error('NotFound'))
+    mockStatObject.mockRejectedValue(
+      Object.assign(new Error('missing'), { code: 'NotFound' })
+    )
     await expect(
       getImage(
         `images/${USER_ID}/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}.png`
