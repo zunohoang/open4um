@@ -4,6 +4,11 @@ import { env } from '@/config/env'
 import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { getFault } from '@/services/qa.service'
+import {
+  generateWithClaude,
+  isClaudeConnectionError,
+  isClaudeModel
+} from '@/services/claude.client'
 import { requestContext } from '@/middlewares/requestContext.middleware'
 import { AppError } from '@/utils/AppError'
 import {
@@ -67,7 +72,8 @@ type GenerateContentParams = Parameters<
 >[0]
 
 /** Mã HTTP tạm thời từ nhà cung cấp AI, đáng thử lại. */
-const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504])
+// 529: Claude báo quá tải.
+const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504, 529])
 /** Số lần gọi tối đa cho mỗi model (lần đầu + thử lại). */
 export const AI_ATTEMPTS_PER_MODEL = 2
 const AI_RETRY_DELAY_MS = Math.min(
@@ -126,7 +132,11 @@ const describeAiResponse = (response: any) => {
 }
 
 const isRetryableAiError = (err: unknown): boolean => {
-  if (err instanceof EmptyAiResponseError || err instanceof SyntaxError)
+  if (
+    err instanceof EmptyAiResponseError ||
+    err instanceof SyntaxError ||
+    isClaudeConnectionError(err)
+  )
     return true
   const status = (err as { status?: unknown })?.status
   if (typeof status === 'number') return RETRYABLE_AI_STATUS.has(status)
@@ -191,7 +201,9 @@ export const generateTextWithRetry = async (
           throw Object.assign(new Error('Simulated provider error'), {
             status: fault.status
           })
-        const response = await ai.models.generateContent({ ...params, model })
+        const response = isClaudeModel(model)
+          ? await generateWithClaude({ ...params, model }, AI_CALL_TIMEOUT_MS)
+          : await ai.models.generateContent({ ...params, model })
         signal?.throwIfAborted()
         const invalidFault = await getFault('ai_invalid_output', userId)
         const text = invalidFault
