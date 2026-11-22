@@ -182,13 +182,16 @@ export const AiGenerationWizard = ({
 
   return (
     <div className='fixed inset-0 z-50 flex flex-col bg-white font-sans'>
-      <div className='flex items-center justify-between border-b border-stone-300 px-8 py-4'>
-        <div>
+      <div className='flex items-center justify-between gap-4 border-b border-stone-300 px-4 py-4 sm:px-8'>
+        <div className='min-w-0'>
           <span className='text-xs font-bold tracking-widest text-orange-700 uppercase'>
             Tạo bài giảng bằng AI ·{' '}
             {step === 'outline' ? 'Bước 1/2: Dàn ý' : 'Bước 2/2: Thiết kế'}
           </span>
-          <h2 className='mt-0.5 text-2xl font-medium text-emerald-950 font-display'>
+          <h2
+            className='mt-0.5 truncate text-2xl font-medium text-emerald-950 font-display'
+            title={lecture.title}
+          >
             {lecture.title}
           </h2>
         </div>
@@ -196,7 +199,7 @@ export const AiGenerationWizard = ({
           type='button'
           disabled={busyChat || busyCreate}
           onClick={onSkip}
-          className='border border-stone-300 px-4 py-2 text-xs font-semibold text-stone-700 transition hover:bg-stone-100 disabled:opacity-50'
+          className='shrink-0 border border-stone-300 px-4 py-2 text-xs font-semibold text-stone-700 transition hover:bg-stone-100 disabled:opacity-50'
         >
           Bỏ qua, dùng canvas trống
         </button>

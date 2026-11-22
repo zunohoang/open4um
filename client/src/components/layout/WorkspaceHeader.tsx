@@ -16,7 +16,7 @@ export const WorkspaceHeader = ({ children }: WorkspaceHeaderProps) => {
   const [showHelpToast, setShowHelpToast] = useState(false)
 
   return (
-    <header className='fixed top-0 left-0 right-0 z-30 flex h-16 items-center justify-between border-b border-stone-300 bg-brand-paper px-5 sm:px-12'>
+    <header className='max-sm:[&_[data-account-name]]:hidden fixed top-0 left-0 right-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-stone-300 bg-brand-paper px-4 sm:px-12'>
       {/* Logo & Nhãn vai trò */}
       <div className='flex items-center gap-3'>
         <BrandLogo
