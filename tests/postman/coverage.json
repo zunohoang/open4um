@@ -1,0 +1,2722 @@
+[
+  {
+    "id": "API-001",
+    "name": "GET /health",
+    "method": "GET",
+    "route": "/health",
+    "status": 200,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-002",
+    "name": "GET /health/live",
+    "method": "GET",
+    "route": "/health/live",
+    "status": 200,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-003",
+    "name": "GET /health/ready",
+    "method": "GET",
+    "route": "/health/ready",
+    "status": 200,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-004",
+    "name": "Develop release",
+    "method": "GET",
+    "route": "/version",
+    "status": 200,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-005",
+    "name": "Authentication required /auth/me",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-006",
+    "name": "Authentication required /admin/users",
+    "method": "GET",
+    "route": "/admin/users",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-007",
+    "name": "Authentication required /admin/credit-config",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-008",
+    "name": "Authentication required /admin/ai-usage",
+    "method": "GET",
+    "route": "/admin/ai-usage",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-009",
+    "name": "Authentication required /admin/dashboard",
+    "method": "GET",
+    "route": "/admin/dashboard",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-010",
+    "name": "Authentication required /lectures",
+    "method": "GET",
+    "route": "/lectures",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-011",
+    "name": "Authentication required /folders",
+    "method": "GET",
+    "route": "/folders",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-012",
+    "name": "Invalid access token",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 401,
+    "group": "Public smoke"
+  },
+  {
+    "id": "API-013",
+    "name": "Verify develop release",
+    "method": "GET",
+    "route": "/version",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-014",
+    "name": "Ready dependencies",
+    "method": "GET",
+    "route": "/health/ready",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-015",
+    "name": "Login QA Admin",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-016",
+    "name": "Snapshot original Credit configuration",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-017",
+    "name": "Create disposable user A",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-018",
+    "name": "Login A",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-019",
+    "name": "Create disposable user B",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-020",
+    "name": "Login B",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-021",
+    "name": "Create disposable user C",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-022",
+    "name": "Login C",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-023",
+    "name": "Read profile",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-024",
+    "name": "Refresh access token",
+    "method": "POST",
+    "route": "/auth/refresh",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-025",
+    "name": "Bad login credentials",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 401,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-026",
+    "name": "Invalid email format",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-027",
+    "name": "Duplicate registration",
+    "method": "POST",
+    "route": "/auth/register",
+    "status": 409,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-028",
+    "name": "Invalid email /auth/send-register-otp",
+    "method": "POST",
+    "route": "/auth/send-register-otp",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-029",
+    "name": "Invalid email /auth/forgot-password",
+    "method": "POST",
+    "route": "/auth/forgot-password",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-030",
+    "name": "Registration validation",
+    "method": "POST",
+    "route": "/auth/register",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-031",
+    "name": "Reset validation",
+    "method": "POST",
+    "route": "/auth/reset-password",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-032",
+    "name": "Invalid OTP without sending email",
+    "method": "POST",
+    "route": "/auth/reset-password",
+    "status": 400,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-033",
+    "name": "Empty profile name",
+    "method": "PATCH",
+    "route": "/auth/profile",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-034",
+    "name": "Reject PDF avatar",
+    "method": "PATCH",
+    "route": "/auth/profile",
+    "status": 400,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-035",
+    "name": "Update name and avatar",
+    "method": "PATCH",
+    "route": "/auth/profile",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-036",
+    "name": "Profile changes persist",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-037",
+    "name": "Profile cooldown",
+    "method": "PATCH",
+    "route": "/auth/profile",
+    "status": 429,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-038",
+    "name": "Mismatched password confirmation",
+    "method": "PATCH",
+    "route": "/auth/change-password",
+    "status": 422,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-039",
+    "name": "Incorrect old password",
+    "method": "PATCH",
+    "route": "/auth/change-password",
+    "status": 400,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-040",
+    "name": "Change disposable user password",
+    "method": "PATCH",
+    "route": "/auth/change-password",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-041",
+    "name": "Login A",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 401,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-042",
+    "name": "Login A",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-043",
+    "name": "Restore disposable password",
+    "method": "PATCH",
+    "route": "/auth/change-password",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-044",
+    "name": "Login A",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Authentication and profile"
+  },
+  {
+    "id": "API-045",
+    "name": "User denied /admin/users",
+    "method": "GET",
+    "route": "/admin/users",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-046",
+    "name": "User denied /admin/credit-config",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-047",
+    "name": "User denied /admin/ai-usage",
+    "method": "GET",
+    "route": "/admin/ai-usage",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-048",
+    "name": "User denied /admin/dashboard",
+    "method": "GET",
+    "route": "/admin/dashboard",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-049",
+    "name": "User cannot update Credit",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-050",
+    "name": "Anonymous cannot update Credit",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 401,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-051",
+    "name": "Admin cannot act as normal user /lectures",
+    "method": "GET",
+    "route": "/lectures",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-052",
+    "name": "Admin cannot act as normal user /folders",
+    "method": "GET",
+    "route": "/folders",
+    "status": 403,
+    "group": "Role authorization"
+  },
+  {
+    "id": "API-053",
+    "name": "Create folder",
+    "method": "POST",
+    "route": "/folders",
+    "status": 201,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-054",
+    "name": "Reject blank folder",
+    "method": "POST",
+    "route": "/folders",
+    "status": 422,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-055",
+    "name": "List owned folders",
+    "method": "GET",
+    "route": "/folders",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-056",
+    "name": "Rename folder",
+    "method": "PATCH",
+    "route": "/folders/{{folderId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-057",
+    "name": "Reject blank folder rename",
+    "method": "PATCH",
+    "route": "/folders/{{folderId}}",
+    "status": 422,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-058",
+    "name": "Other user cannot rename folder",
+    "method": "PATCH",
+    "route": "/folders/{{folderId}}",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-059",
+    "name": "Other user cannot delete folder",
+    "method": "DELETE",
+    "route": "/folders/{{folderId}}",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-060",
+    "name": "Create blank lecture without AI",
+    "method": "POST",
+    "route": "/lectures/blank",
+    "status": 201,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-061",
+    "name": "Reject blank lecture title",
+    "method": "POST",
+    "route": "/lectures/blank",
+    "status": 422,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-062",
+    "name": "Read exact lecture",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-063",
+    "name": "Search and filter lectures",
+    "method": "GET",
+    "route": "/lectures?search={{runId}}&folderId={{folderId}}&page=1&limit=1&sortBy=title&sortOrder=asc",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-064",
+    "name": "Empty search",
+    "method": "GET",
+    "route": "/lectures?search=no-match-{{runId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-065",
+    "name": "Rename lecture",
+    "method": "PATCH",
+    "route": "/lectures/{{lectureId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-066",
+    "name": "Autosave lecture",
+    "method": "PATCH",
+    "route": "/lectures/{{lectureId}}/autosave",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-067",
+    "name": "Verify autosave persisted",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-068",
+    "name": "Reject empty lecture rename",
+    "method": "PATCH",
+    "route": "/lectures/{{lectureId}}",
+    "status": 422,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-069",
+    "name": "Missing lecture",
+    "method": "GET",
+    "route": "/lectures/000000000000000000000001",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-070",
+    "name": "Ownership GET /lectures/{{lectureId}}",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-071",
+    "name": "Ownership PATCH /lectures/{{lectureId}}",
+    "method": "PATCH",
+    "route": "/lectures/{{lectureId}}",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-072",
+    "name": "Ownership PATCH /lectures/{{lectureId}}/autosave",
+    "method": "PATCH",
+    "route": "/lectures/{{lectureId}}/autosave",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-073",
+    "name": "Ownership GET /lectures/{{lectureId}}/presentation",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}/presentation",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-074",
+    "name": "Ownership POST /lectures/{{lectureId}}/duplicate",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/duplicate",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-075",
+    "name": "Ownership DELETE /lectures/{{lectureId}}",
+    "method": "DELETE",
+    "route": "/lectures/{{lectureId}}",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-076",
+    "name": "Ownership DELETE /lectures/{{lectureId}}/permanent",
+    "method": "DELETE",
+    "route": "/lectures/{{lectureId}}/permanent",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-077",
+    "name": "Ownership POST /lectures/{{lectureId}}/restore",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/restore",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-078",
+    "name": "Ownership POST /lectures/{{lectureId}}/export",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/export",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-079",
+    "name": "Ownership POST /lectures/{{lectureId}}/slides",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-080",
+    "name": "Ownership POST /lectures/{{lectureId}}/ai-edit",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/ai-edit",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-081",
+    "name": "Ownership POST /lectures/{{lectureId}}/ai-chat",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/ai-chat",
+    "status": 404,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-082",
+    "name": "Other user listing stays private",
+    "method": "GET",
+    "route": "/lectures?search={{runId}}",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-083",
+    "name": "Other user folders stay private",
+    "method": "GET",
+    "route": "/folders",
+    "status": 200,
+    "group": "Folders and lectures"
+  },
+  {
+    "id": "API-084",
+    "name": "Add slide",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-085",
+    "name": "Update slide content",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-086",
+    "name": "Duplicate slide",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-087",
+    "name": "Move slide to start",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-088",
+    "name": "Delete moved slide",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-089",
+    "name": "Invalid slide operation",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/slides",
+    "status": 422,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-090",
+    "name": "Read presentation",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}/presentation",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-091",
+    "name": "Export JSON bundle",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/export",
+    "status": 200,
+    "group": "Slide operations and presentation"
+  },
+  {
+    "id": "API-092",
+    "name": "Duplicate lecture",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/duplicate",
+    "status": 201,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-093",
+    "name": "Rename duplicate independently",
+    "method": "PATCH",
+    "route": "/lectures/{{duplicateId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-094",
+    "name": "Original title unchanged",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-095",
+    "name": "Soft delete clone",
+    "method": "DELETE",
+    "route": "/lectures/{{duplicateId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-096",
+    "name": "Deleted clone is inaccessible",
+    "method": "GET",
+    "route": "/lectures/{{duplicateId}}",
+    "status": 404,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-097",
+    "name": "Clone appears in trash",
+    "method": "GET",
+    "route": "/lectures/trash",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-098",
+    "name": "Restore clone",
+    "method": "POST",
+    "route": "/lectures/{{duplicateId}}/restore",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-099",
+    "name": "Read restored clone",
+    "method": "GET",
+    "route": "/lectures/{{duplicateId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-100",
+    "name": "Permanently delete fixture clone",
+    "method": "DELETE",
+    "route": "/lectures/{{duplicateId}}/permanent",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-101",
+    "name": "Permanent deletion persists",
+    "method": "GET",
+    "route": "/lectures/{{duplicateId}}",
+    "status": 404,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-102",
+    "name": "Delete folder",
+    "method": "DELETE",
+    "route": "/folders/{{folderId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-103",
+    "name": "Folder deletion preserves lecture",
+    "method": "GET",
+    "route": "/lectures/{{lectureId}}",
+    "status": 200,
+    "group": "Lecture lifecycle"
+  },
+  {
+    "id": "API-104",
+    "name": "AI validation /lectures/generate-outline",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 422,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-105",
+    "name": "AI validation /lectures",
+    "method": "POST",
+    "route": "/lectures",
+    "status": 422,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-106",
+    "name": "AI validation /lectures/{{lectureId}}/ai-edit",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/ai-edit",
+    "status": 422,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-107",
+    "name": "AI validation /lectures/{{lectureId}}/ai-chat",
+    "method": "POST",
+    "route": "/lectures/{{lectureId}}/ai-chat",
+    "status": 422,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-108",
+    "name": "Create zero-credit user lecture",
+    "method": "POST",
+    "route": "/lectures/blank",
+    "status": 201,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-109",
+    "name": "Insufficient Credit /lectures/generate-outline",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 402,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-110",
+    "name": "Insufficient Credit /lectures",
+    "method": "POST",
+    "route": "/lectures",
+    "status": 402,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-111",
+    "name": "Insufficient Credit /lectures/{{zeroLectureId}}/ai-edit",
+    "method": "POST",
+    "route": "/lectures/{{zeroLectureId}}/ai-edit",
+    "status": 402,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-112",
+    "name": "Insufficient Credit /lectures/{{zeroLectureId}}/ai-chat",
+    "method": "POST",
+    "route": "/lectures/{{zeroLectureId}}/ai-chat",
+    "status": 402,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-113",
+    "name": "Rejected AI calls did not charge",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-114",
+    "name": "Rejected AI calls created no usage",
+    "method": "GET",
+    "route": "/admin/ai-usage?userId={{userCId}}",
+    "status": 200,
+    "group": "AI validation without provider calls"
+  },
+  {
+    "id": "API-115",
+    "name": "Find exact QA user",
+    "method": "GET",
+    "route": "/admin/users?search={{userCEmail}}&limit=1&page=1",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-116",
+    "name": "Reject negative balance",
+    "method": "PATCH",
+    "route": "/admin/users/{{userCId}}",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-117",
+    "name": "Update fixture name and balance",
+    "method": "PATCH",
+    "route": "/admin/users/{{userCId}}",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-118",
+    "name": "Reject duplicate user email",
+    "method": "PATCH",
+    "route": "/admin/users/{{userCId}}",
+    "status": 409,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-119",
+    "name": "Protect Admin update",
+    "method": "PATCH",
+    "route": "/admin/users/{{adminId}}",
+    "status": 403,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-120",
+    "name": "Protect Admin lock",
+    "method": "PATCH",
+    "route": "/admin/users/{{adminId}}/lock",
+    "status": 403,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-121",
+    "name": "Protect Admin deletion",
+    "method": "DELETE",
+    "route": "/admin/users/{{adminId}}",
+    "status": 403,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-122",
+    "name": "Lock fixture user",
+    "method": "PATCH",
+    "route": "/admin/users/{{userCId}}/lock",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-123",
+    "name": "Login C",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 403,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-124",
+    "name": "Locked user cannot refresh",
+    "method": "POST",
+    "route": "/auth/refresh",
+    "status": 403,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-125",
+    "name": "Restore fixture user",
+    "method": "PATCH",
+    "route": "/admin/users/{{userCId}}/restore",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-126",
+    "name": "Login C",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-127",
+    "name": "Usage empty date range",
+    "method": "GET",
+    "route": "/admin/ai-usage?from=2000-01-01&to=2000-01-01",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-128",
+    "name": "Reject reversed dates /admin/ai-usage",
+    "method": "GET",
+    "route": "/admin/ai-usage?from=2026-10-28&to=2026-10-01",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-129",
+    "name": "Reject invalid date /admin/ai-usage",
+    "method": "GET",
+    "route": "/admin/ai-usage?from=2026-02-30",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-130",
+    "name": "Reject reversed dates /admin/dashboard",
+    "method": "GET",
+    "route": "/admin/dashboard?from=2026-10-28&to=2026-10-01",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-131",
+    "name": "Reject invalid date /admin/dashboard",
+    "method": "GET",
+    "route": "/admin/dashboard?from=2026-02-30",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-132",
+    "name": "Dashboard one-day structure and totals",
+    "method": "GET",
+    "route": "/admin/dashboard?from=2000-01-01&to=2000-01-01",
+    "status": 200,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-133",
+    "name": "Dashboard rejects excessive range",
+    "method": "GET",
+    "route": "/admin/dashboard?from=2000-01-01&to=2026-01-01",
+    "status": 422,
+    "group": "Admin users and reporting"
+  },
+  {
+    "id": "API-134",
+    "name": "Establish five-field baseline",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-135",
+    "name": "Partial update pricePerSlide=7",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-136",
+    "name": "Read back pricePerSlide",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-137",
+    "name": "Partial update pricePerAiEdit=3",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-138",
+    "name": "Read back pricePerAiEdit",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-139",
+    "name": "Partial update pricePerLecture=81",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-140",
+    "name": "Read back pricePerLecture",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-141",
+    "name": "Partial update pricePerOutline=6",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-142",
+    "name": "Read back pricePerOutline",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-143",
+    "name": "Partial update pricePerSlide=1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-144",
+    "name": "Read back pricePerSlide",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-145",
+    "name": "Partial update signupBonus=101",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-146",
+    "name": "Read back signupBonus",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-147",
+    "name": "Reset baseline before invalid cases",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-148",
+    "name": "Reject pricePerLecture=0",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-149",
+    "name": "Verify rejection pricePerLecture=0",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-150",
+    "name": "Reject pricePerLecture=-1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-151",
+    "name": "Verify rejection pricePerLecture=-1",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-152",
+    "name": "Reject pricePerLecture=1.5",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-153",
+    "name": "Verify rejection pricePerLecture=1.5",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-154",
+    "name": "Reject pricePerLecture=\"abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-155",
+    "name": "Verify rejection pricePerLecture=\"abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-156",
+    "name": "Reject pricePerLecture=\"5abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-157",
+    "name": "Verify rejection pricePerLecture=\"5abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-158",
+    "name": "Reject pricePerLecture=\"\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-159",
+    "name": "Verify rejection pricePerLecture=\"\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-160",
+    "name": "Reject pricePerLecture=\"   \"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-161",
+    "name": "Verify rejection pricePerLecture=\"   \"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-162",
+    "name": "Reject pricePerLecture=null",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-163",
+    "name": "Verify rejection pricePerLecture=null",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-164",
+    "name": "Reject pricePerLecture=false",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-165",
+    "name": "Verify rejection pricePerLecture=false",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-166",
+    "name": "Reject pricePerLecture=\"5\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-167",
+    "name": "Verify rejection pricePerLecture=\"5\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-168",
+    "name": "Reject pricePerLecture=[]",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-169",
+    "name": "Verify rejection pricePerLecture=[]",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-170",
+    "name": "Reject pricePerLecture={}",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-171",
+    "name": "Verify rejection pricePerLecture={}",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-172",
+    "name": "Reject pricePerSlide=0",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-173",
+    "name": "Verify rejection pricePerSlide=0",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-174",
+    "name": "Reject pricePerSlide=-1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-175",
+    "name": "Verify rejection pricePerSlide=-1",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-176",
+    "name": "Reject pricePerSlide=1.5",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-177",
+    "name": "Verify rejection pricePerSlide=1.5",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-178",
+    "name": "Reject pricePerSlide=\"abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-179",
+    "name": "Verify rejection pricePerSlide=\"abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-180",
+    "name": "Reject pricePerSlide=\"5abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-181",
+    "name": "Verify rejection pricePerSlide=\"5abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-182",
+    "name": "Reject pricePerSlide=\"\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-183",
+    "name": "Verify rejection pricePerSlide=\"\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-184",
+    "name": "Reject pricePerSlide=\"   \"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-185",
+    "name": "Verify rejection pricePerSlide=\"   \"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-186",
+    "name": "Reject pricePerSlide=null",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-187",
+    "name": "Verify rejection pricePerSlide=null",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-188",
+    "name": "Reject pricePerSlide=false",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-189",
+    "name": "Verify rejection pricePerSlide=false",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-190",
+    "name": "Reject pricePerSlide=\"5\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-191",
+    "name": "Verify rejection pricePerSlide=\"5\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-192",
+    "name": "Reject pricePerSlide=[]",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-193",
+    "name": "Verify rejection pricePerSlide=[]",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-194",
+    "name": "Reject pricePerSlide={}",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-195",
+    "name": "Verify rejection pricePerSlide={}",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-196",
+    "name": "Reject pricePerAiEdit=0",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-197",
+    "name": "Verify rejection pricePerAiEdit=0",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-198",
+    "name": "Reject pricePerAiEdit=-1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-199",
+    "name": "Verify rejection pricePerAiEdit=-1",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-200",
+    "name": "Reject pricePerAiEdit=1.5",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-201",
+    "name": "Verify rejection pricePerAiEdit=1.5",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-202",
+    "name": "Reject pricePerAiEdit=\"abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-203",
+    "name": "Verify rejection pricePerAiEdit=\"abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-204",
+    "name": "Reject pricePerAiEdit=\"5abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-205",
+    "name": "Verify rejection pricePerAiEdit=\"5abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-206",
+    "name": "Reject pricePerAiEdit=\"\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-207",
+    "name": "Verify rejection pricePerAiEdit=\"\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-208",
+    "name": "Reject pricePerAiEdit=\"   \"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-209",
+    "name": "Verify rejection pricePerAiEdit=\"   \"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-210",
+    "name": "Reject pricePerAiEdit=null",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-211",
+    "name": "Verify rejection pricePerAiEdit=null",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-212",
+    "name": "Reject pricePerAiEdit=false",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-213",
+    "name": "Verify rejection pricePerAiEdit=false",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-214",
+    "name": "Reject pricePerAiEdit=\"5\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-215",
+    "name": "Verify rejection pricePerAiEdit=\"5\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-216",
+    "name": "Reject pricePerAiEdit=[]",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-217",
+    "name": "Verify rejection pricePerAiEdit=[]",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-218",
+    "name": "Reject pricePerAiEdit={}",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-219",
+    "name": "Verify rejection pricePerAiEdit={}",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-220",
+    "name": "Reject pricePerOutline=0",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-221",
+    "name": "Verify rejection pricePerOutline=0",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-222",
+    "name": "Reject pricePerOutline=-1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-223",
+    "name": "Verify rejection pricePerOutline=-1",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-224",
+    "name": "Reject pricePerOutline=1.5",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-225",
+    "name": "Verify rejection pricePerOutline=1.5",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-226",
+    "name": "Reject pricePerOutline=\"abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-227",
+    "name": "Verify rejection pricePerOutline=\"abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-228",
+    "name": "Reject pricePerOutline=\"5abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-229",
+    "name": "Verify rejection pricePerOutline=\"5abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-230",
+    "name": "Reject pricePerOutline=\"\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-231",
+    "name": "Verify rejection pricePerOutline=\"\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-232",
+    "name": "Reject pricePerOutline=\"   \"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-233",
+    "name": "Verify rejection pricePerOutline=\"   \"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-234",
+    "name": "Reject pricePerOutline=null",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-235",
+    "name": "Verify rejection pricePerOutline=null",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-236",
+    "name": "Reject pricePerOutline=false",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-237",
+    "name": "Verify rejection pricePerOutline=false",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-238",
+    "name": "Reject pricePerOutline=\"5\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-239",
+    "name": "Verify rejection pricePerOutline=\"5\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-240",
+    "name": "Reject pricePerOutline=[]",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-241",
+    "name": "Verify rejection pricePerOutline=[]",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-242",
+    "name": "Reject pricePerOutline={}",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-243",
+    "name": "Verify rejection pricePerOutline={}",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-244",
+    "name": "Reject signupBonus=0",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-245",
+    "name": "Verify rejection signupBonus=0",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-246",
+    "name": "Reject signupBonus=-1",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-247",
+    "name": "Verify rejection signupBonus=-1",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-248",
+    "name": "Reject signupBonus=1.5",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-249",
+    "name": "Verify rejection signupBonus=1.5",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-250",
+    "name": "Reject signupBonus=\"abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-251",
+    "name": "Verify rejection signupBonus=\"abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-252",
+    "name": "Reject signupBonus=\"5abc\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-253",
+    "name": "Verify rejection signupBonus=\"5abc\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-254",
+    "name": "Reject signupBonus=\"\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-255",
+    "name": "Verify rejection signupBonus=\"\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-256",
+    "name": "Reject signupBonus=\"   \"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-257",
+    "name": "Verify rejection signupBonus=\"   \"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-258",
+    "name": "Reject signupBonus=null",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-259",
+    "name": "Verify rejection signupBonus=null",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-260",
+    "name": "Reject signupBonus=false",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-261",
+    "name": "Verify rejection signupBonus=false",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-262",
+    "name": "Reject signupBonus=\"5\"",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-263",
+    "name": "Verify rejection signupBonus=\"5\"",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-264",
+    "name": "Reject signupBonus=[]",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-265",
+    "name": "Verify rejection signupBonus=[]",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-266",
+    "name": "Reject signupBonus={}",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-267",
+    "name": "Verify rejection signupBonus={}",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-268",
+    "name": "Reject empty, unknown or mixed payload",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-269",
+    "name": "No partial write after rejection",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-270",
+    "name": "Reject empty, unknown or mixed payload",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-271",
+    "name": "No partial write after rejection",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-272",
+    "name": "Reject empty, unknown or mixed payload",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 422,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-273",
+    "name": "No partial write after rejection",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-274",
+    "name": "Correct both fields",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Credit configuration"
+  },
+  {
+    "id": "API-275",
+    "name": "Logout user A",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Logout semantics"
+  },
+  {
+    "id": "API-276",
+    "name": "Logged-out refresh token rejected",
+    "method": "POST",
+    "route": "/auth/refresh",
+    "status": 401,
+    "group": "Logout semantics"
+  },
+  {
+    "id": "API-277",
+    "name": "Restore original Credit configuration",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-278",
+    "name": "Verify restored Credit configuration",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-279",
+    "name": "Delete only disposable user A",
+    "method": "DELETE",
+    "route": "/admin/users/{{userAId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-280",
+    "name": "Confirm disposable user A removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userAEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-281",
+    "name": "Revoke disposable user A refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-282",
+    "name": "Delete only disposable user B",
+    "method": "DELETE",
+    "route": "/admin/users/{{userBId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-283",
+    "name": "Confirm disposable user B removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userBEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-284",
+    "name": "Revoke disposable user B refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-285",
+    "name": "Delete only disposable user C",
+    "method": "DELETE",
+    "route": "/admin/users/{{userCId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-286",
+    "name": "Confirm disposable user C removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userCEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-287",
+    "name": "Revoke disposable user C refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-288",
+    "name": "Logout QA Admin",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-289",
+    "name": "Verify develop release",
+    "method": "GET",
+    "route": "/version",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-290",
+    "name": "Ready dependencies",
+    "method": "GET",
+    "route": "/health/ready",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-291",
+    "name": "Login QA Admin",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-292",
+    "name": "Snapshot original Credit configuration",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-293",
+    "name": "Create disposable user A",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-294",
+    "name": "Login A",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-295",
+    "name": "Create disposable user B",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-296",
+    "name": "Login B",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-297",
+    "name": "Create disposable user C",
+    "method": "POST",
+    "route": "/admin/users",
+    "status": 201,
+    "group": "Setup"
+  },
+  {
+    "id": "API-298",
+    "name": "Login C",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Setup"
+  },
+  {
+    "id": "API-299",
+    "name": "Balance immediately before AI operation",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-300",
+    "name": "Generate real outline",
+    "method": "POST",
+    "route": "/lectures/generate-outline",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-301",
+    "name": "Persisted balance after AI",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-302",
+    "name": "Matching usage charge",
+    "method": "GET",
+    "route": "/admin/ai-usage?userId={{userAId}}&limit=1",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-303",
+    "name": "Balance immediately before AI operation",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-304",
+    "name": "Generate real lecture",
+    "method": "POST",
+    "route": "/lectures",
+    "status": 201,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-305",
+    "name": "Persisted balance after AI",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-306",
+    "name": "Matching usage charge",
+    "method": "GET",
+    "route": "/admin/ai-usage?userId={{userAId}}&limit=1",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-307",
+    "name": "Balance immediately before AI operation",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-308",
+    "name": "Edit one slide with AI",
+    "method": "POST",
+    "route": "/lectures/{{aiLectureId}}/ai-edit",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-309",
+    "name": "Persisted balance after AI",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-310",
+    "name": "Matching usage charge",
+    "method": "GET",
+    "route": "/admin/ai-usage?userId={{userAId}}&limit=1",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-311",
+    "name": "Balance immediately before AI operation",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-312",
+    "name": "Chat to update current slide",
+    "method": "POST",
+    "route": "/lectures/{{aiLectureId}}/ai-chat",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-313",
+    "name": "Persisted balance after AI",
+    "method": "GET",
+    "route": "/auth/me",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-314",
+    "name": "Matching usage charge",
+    "method": "GET",
+    "route": "/admin/ai-usage?userId={{userAId}}&limit=1",
+    "status": 200,
+    "group": "Four real AI operations"
+  },
+  {
+    "id": "API-315",
+    "name": "Restore original Credit configuration",
+    "method": "PATCH",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-316",
+    "name": "Verify restored Credit configuration",
+    "method": "GET",
+    "route": "/admin/credit-config",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-317",
+    "name": "Delete only disposable user A",
+    "method": "DELETE",
+    "route": "/admin/users/{{userAId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-318",
+    "name": "Confirm disposable user A removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userAEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-319",
+    "name": "Revoke disposable user A refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-320",
+    "name": "Delete only disposable user B",
+    "method": "DELETE",
+    "route": "/admin/users/{{userBId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-321",
+    "name": "Confirm disposable user B removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userBEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-322",
+    "name": "Revoke disposable user B refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-323",
+    "name": "Delete only disposable user C",
+    "method": "DELETE",
+    "route": "/admin/users/{{userCId}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-324",
+    "name": "Confirm disposable user C removed",
+    "method": "GET",
+    "route": "/admin/users?search={{userCEmail}}",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-325",
+    "name": "Revoke disposable user C refresh token",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-326",
+    "name": "Logout QA Admin",
+    "method": "POST",
+    "route": "/auth/logout",
+    "status": 200,
+    "group": "Cleanup"
+  },
+  {
+    "id": "API-327",
+    "name": "Start controlled mailbox run",
+    "method": "GET",
+    "route": "/version",
+    "status": 200,
+    "group": "Email 1 - Request registration OTP"
+  },
+  {
+    "id": "API-328",
+    "name": "Login QA Admin",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Email 1 - Request registration OTP"
+  },
+  {
+    "id": "API-329",
+    "name": "Mailbox must not belong to an existing user",
+    "method": "GET",
+    "route": "/admin/users?search={{mailbox}}",
+    "status": 200,
+    "group": "Email 1 - Request registration OTP"
+  },
+  {
+    "id": "API-330",
+    "name": "Send registration OTP",
+    "method": "POST",
+    "route": "/auth/send-register-otp",
+    "status": 200,
+    "group": "Email 1 - Request registration OTP"
+  },
+  {
+    "id": "API-331",
+    "name": "OTP resend cooldown",
+    "method": "POST",
+    "route": "/auth/send-register-otp",
+    "status": 429,
+    "group": "Email 1 - Request registration OTP"
+  },
+  {
+    "id": "API-332",
+    "name": "Register controlled mailbox",
+    "method": "POST",
+    "route": "/auth/register",
+    "status": 201,
+    "group": "Email 2 - Register with received OTP"
+  },
+  {
+    "id": "API-333",
+    "name": "Send reset OTP",
+    "method": "POST",
+    "route": "/auth/forgot-password",
+    "status": 200,
+    "group": "Email 3 - Request password reset"
+  },
+  {
+    "id": "API-334",
+    "name": "Reset resend cooldown",
+    "method": "POST",
+    "route": "/auth/forgot-password",
+    "status": 429,
+    "group": "Email 3 - Request password reset"
+  },
+  {
+    "id": "API-335",
+    "name": "Reset using received OTP",
+    "method": "POST",
+    "route": "/auth/reset-password",
+    "status": 200,
+    "group": "Email 4 - Reset password and cleanup"
+  },
+  {
+    "id": "API-336",
+    "name": "Old password no longer works",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 401,
+    "group": "Email 4 - Reset password and cleanup"
+  },
+  {
+    "id": "API-337",
+    "name": "New password works",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Email 4 - Reset password and cleanup"
+  },
+  {
+    "id": "API-338",
+    "name": "Login QA Admin",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 200,
+    "group": "Email 4 - Reset password and cleanup"
+  },
+  {
+    "id": "API-339",
+    "name": "Delete only registered mailbox fixture",
+    "method": "DELETE",
+    "route": "/admin/users/{{mailUserId}}",
+    "status": 200,
+    "group": "Email 4 - Reset password and cleanup"
+  },
+  {
+    "id": "API-340",
+    "name": "Mailbox fixture absent",
+    "method": "GET",
+    "route": "/admin/users?search={{mailbox}}",
+    "status": 200,
+    "group": "Email 4 - Reset password and cleanup"
+  }
+]
