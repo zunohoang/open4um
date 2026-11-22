@@ -225,11 +225,32 @@ export const PresentationPage = ({
     )
   }
 
+  // SRS UC019: nút điều hướng trên màn hình, hiện khi rê chuột
+  const navButton = (label: string, onPress: () => void, disabled = false) => (
+    <button
+      type='button'
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation()
+        onPress()
+      }}
+      // Space/Enter trên nút đã kích hoạt click; chặn để phím tắt toàn trang không chuyển slide lần nữa.
+      onKeyDown={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') e.stopPropagation()
+      }}
+      className='flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-2xl text-white opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/80 disabled:invisible [@media(hover:none)]:opacity-70'
+    >
+      {label === 'Slide trước' ? '‹' : '›'}
+    </button>
+  )
+
   return (
     <main
       onClick={() => void handleScreenClick()}
       onContextMenu={handleContextMenu}
-      className='flex min-h-screen w-screen cursor-default items-center justify-center overflow-hidden bg-black select-none'
+      className='group relative flex min-h-screen w-screen cursor-default items-center justify-center overflow-hidden bg-black select-none'
     >
       {/* Khung Slide chuẩn tỷ lệ 16:9 tối đa kích thước màn hình */}
       <SlideView
@@ -240,6 +261,19 @@ export const PresentationPage = ({
           height: 'min(96vh, calc(96vw * 9 / 16))'
         }}
       />
+      {/* Chặn click lọt ra nền (nền click = slide sau), kể cả khi nút đang bị khóa */}
+      <div
+        className='absolute bottom-4 left-4'
+        onClick={(e) => e.stopPropagation()}
+      >
+        {navButton('Slide trước', goPrev, index === 0)}
+      </div>
+      <div
+        className='absolute bottom-4 right-4'
+        onClick={(e) => e.stopPropagation()}
+      >
+        {navButton('Slide sau', goNext)}
+      </div>
     </main>
   )
 }

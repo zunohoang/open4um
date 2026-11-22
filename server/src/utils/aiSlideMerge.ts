@@ -1,3 +1,5 @@
+import { getThemeById, withSlideColors } from '@/constants/theme-options'
+
 const SHORT_HINT_REQUEST_PATTERN =
   /(bổ sung|thêm|chèn).*?(gợi ý|hint)|(gợi ý|hint).*?(ngắn gọn|ngắn)/i
 const REQUESTED_HINT_LABEL_PATTERN =
@@ -222,4 +224,65 @@ export const mergeShortHintIntoSlide = (
         : hintLine,
     ...(components ? { components } : {})
   }
+}
+
+// Không dùng \b vì \b của JS chỉ hiểu chữ ASCII; (?<!\p{L}) chặn khớp giữa từ ("sáng tạo").
+const NEW_SLIDE_PATTERN =
+  /(?<!\p{L})(slide|trang)\s+mới|(?<!\p{L})(tạo|thêm|chèn|bổ sung|viết thêm)\s+(?:\d+\s+|một\s+|các\s+|nhiều\s+)?(slide|trang)(?!\p{L})/iu
+const CURRENT_SLIDE_PATTERN =
+  /(?<!\p{L})(slide|trang)\s+(hiện tại|này|đang mở|đang chọn)|(?<!\p{L})vào\s+(?:(?:cuối|đầu)\s+)?(?:slide|trang)(?!\p{L})(?!\s*\d)/iu
+const COLOR_PATTERN = /(?<!\p{L})(màu|colou?r)(?!\p{L})/iu
+const KEEP_TEXT_PATTERN =
+  /(không|đừng)\s+(đổi|sửa|thay(\s+đổi)?)\s+(nội dung|chữ|câu chữ|văn bản)|giữ\s+nguyên\s+(nội dung|chữ|câu chữ|văn bản)/iu
+const CONTENT_EDIT_PATTERN =
+  /(?<!\p{L})(viết|rút gọn|thêm|bổ sung|mở rộng|tóm tắt|layout|bố cục|sắp xếp|nội dung)(?!\p{L})/iu
+
+export const asksForNewSlide = (message: string) =>
+  NEW_SLIDE_PATTERN.test(message)
+
+/** "Thêm X vào slide hiện tại" hoặc đang chọn một đối tượng: sửa slide đang mở, không tạo slide mới (SRS UC008 bước 4-5). */
+export const targetsCurrentSlide = (message: string, hasSelection: boolean) =>
+  !asksForNewSlide(message) &&
+  (CURRENT_SLIDE_PATTERN.test(message) ||
+    // Đang chọn đối tượng và không nhắc slide nào khác.
+    (hasSelection && !/(?<!\p{L})(slide|trang)(?!\p{L})/iu.test(message)))
+
+/** Chỉ đổi màu: có nhắc màu và (cấm đổi chữ, hoặc không đòi sửa nội dung). */
+export const isStyleOnlyRequest = (message: string) =>
+  COLOR_PATTERN.test(message) &&
+  (KEEP_TEXT_PATTERN.test(message) || !CONTENT_EDIT_PATTERN.test(message))
+
+const HEX_COLOR = /^#[0-9a-f]{3,8}$/i
+const COLOR_FIELDS = ['backgroundColor', 'accentColor', 'textColor'] as const
+
+/** Áp màu AI đề xuất lên slide cũ, giữ nguyên mọi đối tượng và câu chữ. */
+export const applySlideColorPatch = (
+  originalSlide: Record<string, unknown>,
+  proposedSlide: Record<string, unknown>,
+  themeId?: string
+): Record<string, unknown> => {
+  const patch: Partial<Record<(typeof COLOR_FIELDS)[number], string>> = {}
+  for (const field of COLOR_FIELDS) {
+    const value = proposedSlide[field]
+    if (typeof value === 'string' && HEX_COLOR.test(value)) patch[field] = value
+  }
+  const oldAccent = withSlideColors(
+    getThemeById(themeId),
+    originalSlide
+  ).accentColor.toLowerCase()
+  const components = Array.isArray(originalSlide.components)
+    ? (originalSlide.components as Array<Record<string, unknown>>).map(
+        (component) => {
+          const next = { ...component }
+          if (patch.textColor && component.type === 'title')
+            next.color = patch.textColor
+          if (patch.accentColor)
+            for (const key of ['color', 'fillColor', 'borderColor'])
+              if (String(next[key] ?? '').toLowerCase() === oldAccent)
+                next[key] = patch.accentColor
+          return next
+        }
+      )
+    : originalSlide.components
+  return { ...originalSlide, ...patch, components }
 }

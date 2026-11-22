@@ -4,12 +4,20 @@ import { env } from '@/config/env'
 import { buildSlideComponents } from '@/constants/theme-options'
 import { logger } from '@/lib/logger'
 import { getFault } from '@/services/qa.service'
+import {
+  generateWithClaude,
+  isClaudeConnectionError,
+  isClaudeModel
+} from '@/services/claude.client'
 import { requestContext } from '@/middlewares/requestContext.middleware'
 import { AppError } from '@/utils/AppError'
 import {
+  applySlideColorPatch,
   extractRequestedHintLabel,
   isShortHintAdditionRequest,
-  mergeShortHintIntoSlide
+  isStyleOnlyRequest,
+  mergeShortHintIntoSlide,
+  targetsCurrentSlide
 } from '@/utils/aiSlideMerge'
 import {
   getAiReadableSlideContext,
@@ -64,7 +72,8 @@ type GenerateContentParams = Parameters<
 >[0]
 
 /** Mã HTTP tạm thời từ nhà cung cấp AI, đáng thử lại. */
-const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504])
+// 529: Claude báo quá tải.
+const RETRYABLE_AI_STATUS = new Set([408, 429, 500, 502, 503, 504, 529])
 /** Số lần gọi tối đa cho mỗi model (lần đầu + thử lại). */
 export const AI_ATTEMPTS_PER_MODEL = 2
 const AI_RETRY_DELAY_MS = Math.min(
@@ -74,6 +83,8 @@ const AI_RETRY_DELAY_MS = Math.min(
 
 export const AI_BUSY_MESSAGE =
   'Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút.'
+export const AI_INVALID_OUTPUT_MESSAGE =
+  'AI trả về nội dung không hợp lệ. Vui lòng thử lại; yêu cầu này không bị tính credit.'
 
 class EmptyAiResponseError extends Error {
   constructor() {
@@ -81,6 +92,32 @@ class EmptyAiResponseError extends Error {
     this.name = 'EmptyAiResponseError'
   }
 }
+
+/** Nội dung AI sai cấu trúc; được thử lại như JSON hỏng, message là thông báo cho người dùng. */
+export class InvalidAiOutputError extends SyntaxError {
+  constructor(message = AI_INVALID_OUTPUT_MESSAGE) {
+    super(message)
+    this.name = 'InvalidAiOutputError'
+  }
+}
+
+/** Nội dung giả cho fault QA ai_invalid_output (TC-1607), theo từng tác vụ. */
+const MISSING_FIELDS_SAMPLE: Record<string, string> = {
+  'ai.generateOutline': '{"title":"X"}',
+  'ai.refineOutline': '{"title":"X"}',
+  'ai.generateSlides': '{}',
+  'ai.chatAndProposeSlideEdit': '{"reply":"ok"}',
+  'ai.editSelectedText': '{"reply":"ok"}'
+}
+const invalidOutputSample = (
+  kind: 'bad_json' | 'missing_fields' | 'empty',
+  label: string
+) =>
+  kind === 'empty'
+    ? ''
+    : kind === 'bad_json'
+      ? '{"title": "Bài giảng", "sections": ['
+      : (MISSING_FIELDS_SAMPLE[label] ?? '{}')
 
 const describeAiResponse = (response: any) => {
   const candidate = response?.candidates?.[0]
@@ -95,7 +132,11 @@ const describeAiResponse = (response: any) => {
 }
 
 const isRetryableAiError = (err: unknown): boolean => {
-  if (err instanceof EmptyAiResponseError || err instanceof SyntaxError)
+  if (
+    err instanceof EmptyAiResponseError ||
+    err instanceof SyntaxError ||
+    isClaudeConnectionError(err)
+  )
     return true
   const status = (err as { status?: unknown })?.status
   if (typeof status === 'number') return RETRYABLE_AI_STATUS.has(status)
@@ -126,13 +167,15 @@ const isRetryableAiError = (err: unknown): boolean => {
  * - Thử lại khi AI trả rỗng hoặc lỗi tạm thời (408/429/5xx, mất kết nối).
  * - Hết lượt ở model chính thì chuyển sang GEMINI_FALLBACK_MODEL (nếu có).
  * - Lỗi không tạm thời (vd 400, 401) được ném ra ngay.
- * - Hết mọi lượt: ném AppError 503 với thông báo quá tải.
+ * - `validate` ném InvalidAiOutputError khi nội dung sai cấu trúc -> thử lại như JSON hỏng.
+ * - Hết mọi lượt: ném AppError 502 nếu lỗi cuối là nội dung không hợp lệ, ngược lại 503 quá tải.
  */
 export const generateTextWithRetry = async (
   ai: GoogleGenAI,
   params: GenerateContentParams,
   label: string,
-  delayMs: number = AI_RETRY_DELAY_MS
+  delayMs: number = AI_RETRY_DELAY_MS,
+  validate?: (text: string) => void
 ): Promise<string> => {
   const signal = params.config?.abortSignal
   signal?.throwIfAborted()
@@ -147,6 +190,7 @@ export const generateTextWithRetry = async (
     (m, i, all): m is string => Boolean(m) && all.indexOf(m) === i
   )
 
+  let invalidMessage: string | undefined
   for (const model of models) {
     for (let attempt = 1; attempt <= AI_ATTEMPTS_PER_MODEL; attempt++) {
       try {
@@ -157,12 +201,18 @@ export const generateTextWithRetry = async (
           throw Object.assign(new Error('Simulated provider error'), {
             status: fault.status
           })
-        const response = await ai.models.generateContent({ ...params, model })
+        const response = isClaudeModel(model)
+          ? await generateWithClaude({ ...params, model }, AI_CALL_TIMEOUT_MS)
+          : await ai.models.generateContent({ ...params, model })
         signal?.throwIfAborted()
-        const text = response.text
+        const invalidFault = await getFault('ai_invalid_output', userId)
+        const text = invalidFault
+          ? invalidOutputSample(invalidFault.kind, label)
+          : response.text
         if (text && text.trim()) {
           if (params.config?.responseMimeType === 'application/json')
             safeParseAiJson(text)
+          validate?.(text)
           return text
         }
         logger.warn(
@@ -173,6 +223,12 @@ export const generateTextWithRetry = async (
       } catch (err) {
         signal?.throwIfAborted()
         if (!isRetryableAiError(err)) throw err
+        invalidMessage =
+          err instanceof InvalidAiOutputError
+            ? err.message
+            : err instanceof SyntaxError
+              ? AI_INVALID_OUTPUT_MESSAGE
+              : undefined
         if (!(err instanceof EmptyAiResponseError)) {
           logger.warn(
             {
@@ -194,6 +250,7 @@ export const generateTextWithRetry = async (
   }
 
   logger.error({ models }, `${label} failed: hết lượt thử AI`)
+  if (invalidMessage) throw new AppError(invalidMessage, 502)
   throw new AppError(AI_BUSY_MESSAGE, 503)
 }
 
@@ -303,6 +360,16 @@ export interface GeneratedOutline {
   sections: OutlineSection[]
 }
 
+const requireOutline = (text: string, needTitle: boolean) => {
+  const parsed = safeParseAiJson<Partial<GeneratedOutline>>(text)
+  if (
+    (needTitle && !String(parsed.title ?? '').trim()) ||
+    !Array.isArray(parsed.sections) ||
+    !parsed.sections.some((s) => String(s?.heading ?? '').trim())
+  )
+    throw new InvalidAiOutputError()
+}
+
 /**
  * Sinh dàn ý bài giảng từ prompt.
  */
@@ -354,22 +421,12 @@ export const generateOutlineFromPrompt = async (
           }
         }
       },
-      'ai.generateOutline'
+      'ai.generateOutline',
+      undefined,
+      (text) => requireOutline(text, true)
     )
 
     const parsed = safeParseAiJson<GeneratedOutline>(rawText)
-
-    if (
-      !parsed.title ||
-      !Array.isArray(parsed.sections) ||
-      parsed.sections.length === 0
-    ) {
-      logger.error(
-        { err: 'Outline không đúng định dạng' },
-        'ai.generateOutline failed'
-      )
-      throw new AppError('Cấu trúc dàn ý trả về không đúng định dạng', 502)
-    }
 
     return {
       title: parsed.title.trim(),
@@ -436,7 +493,9 @@ export const refineOutlineWithFeedback = async (
           responseMimeType: 'application/json'
         }
       },
-      'ai.refineOutline'
+      'ai.refineOutline',
+      undefined,
+      (text) => requireOutline(text, false)
     )
 
     const parsed = safeParseAiJson<GeneratedOutline>(rawText)
@@ -482,6 +541,30 @@ export interface GeneratedSlideData {
   titleSize?: 'sm' | 'md' | 'lg' | 'xl'
   bulletStyle?: 'disc' | 'decimal' | 'dash' | 'none'
   speakerNotes?: string
+}
+
+/** Lấy mảng slide (có tiêu đề hoặc nội dung) từ các dạng JSON AI hay trả về. */
+const extractGeneratedSlides = (text: string): GeneratedSlideData[] => {
+  const parsed = safeParseAiJson<
+    Record<string, unknown> | GeneratedSlideData[]
+  >(text)
+  const list = Array.isArray(parsed)
+    ? parsed
+    : [
+        parsed.slides,
+        parsed.data,
+        (parsed.presentation as Record<string, unknown> | undefined)?.slides
+      ].find(Array.isArray)
+  return ((list as GeneratedSlideData[] | undefined) ?? []).filter(
+    (s) =>
+      s &&
+      typeof s === 'object' &&
+      Boolean(
+        String(s.title ?? '').trim() ||
+        (Array.isArray(s.contentItems) && s.contentItems.length) ||
+        (Array.isArray(s.bullets) && s.bullets.length)
+      )
+  )
 }
 
 /**
@@ -615,37 +698,15 @@ export const generateSlidesFromOutline = async (
           }
         }
       },
-      'ai.generateSlides'
+      'ai.generateSlides',
+      undefined,
+      (text) => {
+        if (extractGeneratedSlides(text).length === 0)
+          throw new InvalidAiOutputError()
+      }
     )
 
-    const parsed = safeParseAiJson<
-      Record<string, unknown> | GeneratedSlideData[]
-    >(rawText)
-
-    let rawSlides: GeneratedSlideData[] = []
-    if (Array.isArray(parsed)) {
-      rawSlides = parsed
-    } else if (Array.isArray(parsed.slides)) {
-      rawSlides = parsed.slides as GeneratedSlideData[]
-    } else if (Array.isArray(parsed.data)) {
-      rawSlides = parsed.data as GeneratedSlideData[]
-    } else if (
-      Array.isArray((parsed.presentation as Record<string, unknown>)?.slides)
-    ) {
-      rawSlides = (parsed.presentation as Record<string, unknown>)
-        .slides as GeneratedSlideData[]
-    }
-
-    if (rawSlides.length === 0) {
-      logger.error(
-        {
-          err: 'Slides trả về không đúng định dạng',
-          keys: Array.isArray(parsed) ? 'is_array_empty' : Object.keys(parsed)
-        },
-        'ai.generateSlides failed'
-      )
-      throw new AppError('Cấu trúc slide trả về không đúng định dạng', 502)
-    }
+    const rawSlides = extractGeneratedSlides(rawText)
 
     return rawSlides.map((s) => ({
       id: `slide-${crypto.randomUUID()}`,
@@ -681,10 +742,13 @@ export async function editSelectedText(
   signal?: AbortSignal
 ): Promise<AiChatResponse> {
   const instruction = {
-    rewrite: 'Viết lại cho mạch lạc',
+    rewrite:
+      'Diễn đạt lại đoạn văn bằng câu chữ khác (đổi cách dùng từ và cấu trúc câu), giữ nguyên ý, mạch lạc hơn. Không được trả lại nguyên văn',
     shorten: 'Rút gọn cho súc tích',
     expand: 'Mở rộng chi tiết'
   }[action]
+  const original = content.trim()
+  const looksLikeJson = (text: string) => /^[[{]/.test(text)
   try {
     const replacement = (
       await generateTextWithRetry(
@@ -697,10 +761,21 @@ export async function editSelectedText(
             systemInstruction:
               instruction +
               '. Chỉ trả về văn bản thay thế cho đoạn được cung cấp, giữ nguyên ngôn ngữ.',
-            temperature: 0.5
+            temperature: action === 'rewrite' ? 0.9 : 0.5
           }
         },
-        'ai.editSelectedText'
+        'ai.editSelectedText',
+        undefined,
+        (text) => {
+          const result = text.trim()
+          if (!result || (looksLikeJson(result) && !looksLikeJson(original)))
+            throw new InvalidAiOutputError()
+          // Kết quả trùng đầu vào là AI chưa làm gì: thử lại, hết lượt thì báo lỗi, không trừ credit.
+          if (result === original)
+            throw new InvalidAiOutputError(
+              'AI chưa đưa ra cách viết khác, vui lòng thử lại. Yêu cầu này không bị tính credit.'
+            )
+        }
       )
     ).trim()
     return { action: 'UPDATE_CURRENT_SLIDE', replacement, reply: replacement }
@@ -775,6 +850,22 @@ export interface AiChatResponse {
   proposedSlide?: Record<string, unknown>
   proposals?: AiSlideProposal[]
   updatedSummary?: string
+}
+
+/** Phản hồi chat phải có action, và có slide đề xuất hoặc câu trả lời. */
+const requireChatResponse = (text: string) => {
+  const parsed = safeParseAiJson<Record<string, unknown>>(text)
+  const isSlide = (value: unknown) =>
+    Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  const hasProposal =
+    isSlide(parsed?.proposedSlide) ||
+    (Array.isArray(parsed?.proposals) &&
+      parsed.proposals.some((p) => isSlide(p?.proposedSlide)))
+  if (
+    typeof parsed?.action !== 'string' ||
+    !(hasProposal || String(parsed.reply ?? '').trim())
+  )
+    throw new InvalidAiOutputError()
 }
 
 /**
@@ -963,9 +1054,27 @@ export const chatAndProposeSlideEdit = async (
     const requestedHintLabel = isShortHintAddition
       ? extractRequestedHintLabel(normalizedMessage)
       : undefined
+    const isUserAskingBatch =
+      !isExplicitChatOnly &&
+      !isShortHintAddition &&
+      /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các|hàng loạt|toàn bài)\b/i.test(
+        normalizedMessage
+      )
+    const canTargetCurrentSlide =
+      !isExplicitChatOnly && !isShortHintAddition && !isUserAskingBatch
+    const isStyleOnly =
+      canTargetCurrentSlide && isStyleOnlyRequest(normalizedMessage)
+    // "Thêm X vào slide hiện tại" là sửa slide đang mở, không phải tạo slide mới.
+    const isCurrentSlideEdit =
+      canTargetCurrentSlide &&
+      targetsCurrentSlide(
+        normalizedMessage,
+        isStyleOnly || Boolean(context.selectedElement)
+      )
     const isUserAskingToCreate =
       !isExplicitChatOnly &&
       !isShortHintAddition &&
+      !isCurrentSlideEdit &&
       (/\b(thêm|tạo|bổ sung|viết thêm|chèn thêm)\b.*?\b(slide|slides|trang)\b/i.test(
         normalizedMessage
       ) ||
@@ -976,13 +1085,6 @@ export const chatAndProposeSlideEdit = async (
     const isUserAskingToEdit =
       !isExplicitChatOnly &&
       /\b(sửa|chỉnh sửa|điều chỉnh|đổi|thay đổi|cập nhật|rút gọn|viết lại|format|bố cục|layout|đè chữ|tràn chữ|chống đè|đọc lại|xem lại|khắc phục|sắp xếp)\b/i.test(
-        normalizedMessage
-      )
-
-    const isUserAskingBatch =
-      !isExplicitChatOnly &&
-      !isShortHintAddition &&
-      /\b(các slide|nhiều slide|mỗi slide|các khái niệm|mỗi phần|toàn bộ|tất cả|sau các|hàng loạt|toàn bài)\b/i.test(
         normalizedMessage
       )
 
@@ -1162,10 +1264,24 @@ export const chatAndProposeSlideEdit = async (
 
       executionDirectives.push(
         'Người dùng yêu cầu chỉnh sửa slide: Chọn "action": "UPDATE_SLIDE".',
-        `"targetSlideIndex": Vị trí 0-indexed của slide cần chỉnh sửa (người dùng nhắc đích danh: ${slideNumMatch ? `Slide ${slideNumMatch[1]} -> index ${targetIndexHint}` : `Slide hiện tại -> index ${targetIndexHint}`}).`,
-        'Nếu slide bị tràn chữ hoặc đè chữ: Kiểm tra layout của slide đó. Nếu là "metrics-grid" mà có "stat" là câu chữ dài (như "Ứng dụng Rộng rãi"), BẮT BUỘC rút ngắn "stat" thành số liệu ngắn gọn (<= 5 ký tự như "100%", "Top 1", "500+") HOẶC chuyển "layout": "cards", đồng thời rút gọn "description" còn 12-16 từ súc tích.',
-        'Trả về đối tượng proposedSlide hoàn chỉnh với nội dung mới đã khắc phục triệt để lỗi đè chữ.'
+        `"targetSlideIndex": Vị trí 0-indexed của slide cần chỉnh sửa (người dùng nhắc đích danh: ${slideNumMatch ? `Slide ${slideNumMatch[1]} -> index ${targetIndexHint}` : `Slide hiện tại -> index ${targetIndexHint}`}).`
       )
+      if (isCurrentSlideEdit) {
+        executionDirectives.push(
+          `Yêu cầu này áp dụng cho SLIDE ĐANG MỞ: BẮT BUỘC "action": "UPDATE_SLIDE" với "targetSlideIndex": ${context.currentSlideIndex}. TUYỆT ĐỐI KHÔNG tạo slide mới; "thêm" ở đây là thêm nội dung vào chính slide này.`,
+          'Giữ nguyên tiêu đề, bố cục, contentItems, bullets và mọi câu chữ đã có; chỉ bổ sung hoặc sửa đúng phần người dùng yêu cầu.'
+        )
+      } else {
+        executionDirectives.push(
+          'Nếu slide bị tràn chữ hoặc đè chữ: Kiểm tra layout của slide đó. Nếu là "metrics-grid" mà có "stat" là câu chữ dài (như "Ứng dụng Rộng rãi"), BẮT BUỘC rút ngắn "stat" thành số liệu ngắn gọn (<= 5 ký tự như "100%", "Top 1", "500+") HOẶC chuyển "layout": "cards", đồng thời rút gọn "description" còn 12-16 từ súc tích.',
+          'Trả về đối tượng proposedSlide hoàn chỉnh với nội dung mới đã khắc phục triệt để lỗi đè chữ.'
+        )
+      }
+      if (isStyleOnly) {
+        executionDirectives.push(
+          'Đây là yêu cầu CHỈ ĐỔI MÀU: proposedSlide chỉ cần chứa các trường màu được yêu cầu ("backgroundColor", "textColor", "accentColor", mã HEX). Không viết lại nội dung chữ, không đổi layout.'
+        )
+      }
     }
 
     const userPromptContent =
@@ -1202,7 +1318,9 @@ export const chatAndProposeSlideEdit = async (
           responseMimeType: 'application/json'
         }
       },
-      'ai.chatAndProposeSlideEdit'
+      'ai.chatAndProposeSlideEdit',
+      undefined,
+      requireChatResponse
     )
 
     const parsed = safeParseAiJson<{
@@ -1275,6 +1393,21 @@ export const chatAndProposeSlideEdit = async (
       ]
     }
 
+    if (isCurrentSlideEdit && rawProposals.length > 0) {
+      const currentSlideProposal =
+        rawProposals.find(
+          (proposal) => proposal.targetSlideIndex === context.currentSlideIndex
+        ) || rawProposals[0]
+      action = 'UPDATE_SLIDE'
+      rawProposals = [
+        {
+          ...currentSlideProposal,
+          action: 'UPDATE_SLIDE',
+          targetSlideIndex: context.currentSlideIndex
+        }
+      ]
+    }
+
     if (isShortHintAddition && rawProposals.length === 0) {
       action = 'CHAT_ONLY'
     } else if (
@@ -1316,6 +1449,11 @@ export const chatAndProposeSlideEdit = async (
           : catalogSlide
             ? { ...catalogSlide }
             : undefined
+      // Chỉ đổi màu: áp màu lên slide cũ, giữ nguyên đối tượng và câu chữ (NEW-2).
+      const keepsColorsOnly =
+        isStyleOnly &&
+        isCurrentSlideEdit &&
+        Array.isArray(originalSlide?.components)
       const slideData =
         isShortHintAddition && originalSlide
           ? mergeShortHintIntoSlide(
@@ -1323,7 +1461,13 @@ export const chatAndProposeSlideEdit = async (
               p.proposedSlide || {},
               requestedHintLabel
             )
-          : p.proposedSlide || {}
+          : keepsColorsOnly
+            ? applySlideColorPatch(
+                originalSlide!,
+                p.proposedSlide || {},
+                context.theme
+              )
+            : p.proposedSlide || {}
       const slideTitle = String(slideData.title || '').toLowerCase()
       const slideHeader = String(slideData.header || '').toLowerCase()
       const hasCodeSignal =
@@ -1345,7 +1489,8 @@ export const chatAndProposeSlideEdit = async (
       // Luôn luôn tạo lại components bằng buildSlideComponents để Layout Engine tính toán lại tọa độ chính xác,
       // không bao giờ giữ lại tọa độ cũ bị lệch hay đè chữ!
       const slideComps =
-        isShortHintAddition && Array.isArray(normalizedSlide.components)
+        (isShortHintAddition || keepsColorsOnly) &&
+        Array.isArray(normalizedSlide.components)
           ? normalizedSlide.components
           : buildSlideComponents(normalizedSlide, context.theme)
 
@@ -1363,6 +1508,8 @@ export const chatAndProposeSlideEdit = async (
 
     // Sắp xếp proposals theo targetSlideIndex tăng dần để đảm bảo thứ tự chèn slide chuẩn xác
     proposals.sort((a, b) => a.targetSlideIndex - b.targetSlideIndex)
+    // Không có slide đề xuất thì chỉ là câu trả lời, không được tính phí chỉnh sửa.
+    if (proposals.length === 0) action = 'CHAT_ONLY'
 
     const primaryProposal = proposals[0]
     const targetSlideIndex = primaryProposal

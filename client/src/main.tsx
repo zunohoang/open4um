@@ -6,9 +6,12 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { queryClient } from './lib/queryClient'
 import './index.css'
 import { App } from './app/App'
+import { RouteError } from './app/RouteError'
 import { ToastProvider } from '@/components/ui/Toast'
 
-const router = createBrowserRouter([{ path: '*', element: <App /> }])
+const router = createBrowserRouter([
+  { path: '*', element: <App />, errorElement: <RouteError /> }
+])
 
 window.addEventListener('error', (event) => {
   console.error(

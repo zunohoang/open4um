@@ -8,12 +8,27 @@ jest.mock('@google/genai', () => ({
   }))
 }))
 
+const mockClaudeCreate = jest.fn()
+
+jest.mock('@anthropic-ai/sdk', () => {
+  class APIConnectionError extends Error {}
+  const Anthropic = Object.assign(
+    jest.fn().mockImplementation(() => ({
+      messages: { create: (...args: any[]) => mockClaudeCreate(...args) }
+    })),
+    { APIConnectionError }
+  )
+  return { __esModule: true, default: Anthropic }
+})
+
+import Anthropic from '@anthropic-ai/sdk'
 import { GoogleGenAI } from '@google/genai'
 import { env } from '@/config/env'
 import { logger } from '@/lib/logger'
 import {
   AI_ATTEMPTS_PER_MODEL,
   AI_BUSY_MESSAGE,
+  AI_CALL_TIMEOUT_MS,
   generateOutlineFromPrompt,
   generateTextWithRetry
 } from '@/services/ai.service'
@@ -266,5 +281,95 @@ describe('ai.service generateOutlineFromPrompt', () => {
     } finally {
       controller.abort(reason)
     }
+  })
+})
+
+describe('ai.service generateTextWithRetry với Claude', () => {
+  const claudeReply = (text: string, stop_reason = 'end_turn') => ({
+    stop_reason,
+    content: [
+      { type: 'thinking', thinking: '' },
+      { type: 'text', text }
+    ],
+    usage: { input_tokens: 1, output_tokens: 1 }
+  })
+  const claudeParams = { model: 'claude-opus-5-5', contents: 'xin chào' }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockClaudeCreate.mockReset()
+    mockGenerateContent.mockReset()
+    ;(env as any).GEMINI_FALLBACK_MODEL = undefined
+  })
+
+  it('gọi Claude khi model bắt đầu bằng claude-, chỉ lấy khối text', async () => {
+    mockClaudeCreate.mockResolvedValueOnce(claudeReply('{"ok":true}'))
+    const params = {
+      ...claudeParams,
+      config: {
+        systemInstruction: 'Bạn là trợ lý.',
+        temperature: 0.7,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+        responseSchema: { type: 'OBJECT' }
+      }
+    }
+
+    await expect(
+      generateTextWithRetry(ai, params as any, 'test', 0)
+    ).resolves.toBe('{"ok":true}')
+    expect(mockGenerateContent).not.toHaveBeenCalled()
+    const [body, options] = mockClaudeCreate.mock.calls[0]
+    expect(body).toMatchObject({
+      model: 'claude-opus-5-5',
+      max_tokens: 16000,
+      messages: [{ role: 'user', content: 'xin chào' }]
+    })
+    expect(body).not.toHaveProperty('temperature')
+    expect(body.system).toContain('Bạn là trợ lý.')
+    expect(body.system).toContain('JSON hợp lệ')
+    expect(body.system).toContain('"type":"OBJECT"')
+    expect(options).toMatchObject({ timeout: AI_CALL_TIMEOUT_MS })
+  })
+
+  it('model Gemini vẫn gọi Gemini, không gọi Claude', async () => {
+    mockGenerateContent.mockResolvedValueOnce({ text: 'từ Gemini' })
+
+    await expect(generateTextWithRetry(ai, params, 'test', 0)).resolves.toBe(
+      'từ Gemini'
+    )
+    expect(mockClaudeCreate).not.toHaveBeenCalled()
+  })
+
+  it('Claude từ chối thì chuyển sang model dự phòng Gemini', async () => {
+    ;(env as any).GEMINI_FALLBACK_MODEL = 'gemini-fallback'
+    mockClaudeCreate.mockResolvedValue(claudeReply('xin lỗi', 'refusal'))
+    mockGenerateContent.mockResolvedValueOnce({ text: 'từ Gemini' })
+
+    await expect(
+      generateTextWithRetry(ai, claudeParams, 'test', 0)
+    ).resolves.toBe('từ Gemini')
+    expect(mockClaudeCreate).toHaveBeenCalledTimes(AI_ATTEMPTS_PER_MODEL)
+    expect(mockGenerateContent.mock.calls[0][0].model).toBe('gemini-fallback')
+  })
+
+  it('thử lại khi Claude quá tải 529 hoặc mất kết nối', async () => {
+    ;(env as any).GEMINI_FALLBACK_MODEL = 'claude-sonnet-5-5'
+    const { APIConnectionError } = Anthropic as unknown as {
+      APIConnectionError: new (message: string) => Error
+    }
+    mockClaudeCreate
+      .mockRejectedValueOnce(httpError(529))
+      .mockRejectedValueOnce(new APIConnectionError('Connection error.'))
+      .mockResolvedValueOnce(claudeReply('nội dung'))
+
+    await expect(
+      generateTextWithRetry(ai, claudeParams, 'test', 0)
+    ).resolves.toBe('nội dung')
+    expect(mockClaudeCreate.mock.calls.map((c) => c[0].model)).toEqual([
+      'claude-opus-5-5',
+      'claude-opus-5-5',
+      'claude-sonnet-5-5'
+    ])
   })
 })
