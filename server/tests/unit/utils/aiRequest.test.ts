@@ -3,7 +3,12 @@ import type { Request, Response } from 'express'
 import type { GoogleGenAI } from '@google/genai'
 import { env } from '@/config/env'
 import { requestContext } from '@/middlewares/requestContext.middleware'
-import { generateTextWithRetry } from '@/services/ai.service'
+import {
+  AI_BUSY_MESSAGE,
+  QA_INVALID_OUTPUT,
+  generateOutlineFromPrompt,
+  generateTextWithRetry
+} from '@/services/ai.service'
 import { withAiRequest } from '@/utils/aiRequest'
 import { isExplicitChatOnlyRequest } from '@/utils/aiChatContext'
 
@@ -19,7 +24,7 @@ const provider = jest.fn()
 const ai = { models: { generateContent: provider } } as unknown as GoogleGenAI
 const originalTimeout = env.AI_REQUEST_TIMEOUT_MS
 const originalFallback = env.GEMINI_FALLBACK_MODEL
-function call(userId: string) {
+function call(userId: string, extraConfig: Record<string, unknown> = {}) {
   const req = Object.assign(new EventEmitter(), {
     user: { id: userId }
   }) as Request
@@ -35,7 +40,7 @@ function call(userId: string) {
         {
           model: 'primary',
           contents: 'chủ đề',
-          config: { abortSignal: signal }
+          config: { abortSignal: signal, ...extraConfig }
         },
         'test',
         0
@@ -118,6 +123,42 @@ describe('theo dõi yêu cầu AI', () => {
     await expect(call('B').work).resolves.toBe('Kết quả')
     mockRead.mockResolvedValue(null)
     await expect(call('A').work).resolves.toBe('Kết quả')
+  })
+  const invalidOutputFor = (kind?: 'schema' | 'json') =>
+    mockRead.mockImplementation(async (key) =>
+      key === 'qa:fault:invalid_output:A'
+        ? JSON.stringify({
+            fault: 'invalid_output',
+            targetEmail: 'qa@example.com',
+            params: kind ? { kind } : {}
+          })
+        : null
+    )
+  const json = { responseMimeType: 'application/json' }
+  it('invalid_output schema trả JSON sai cấu trúc thay cho AI, chỉ với user A', async () => {
+    invalidOutputFor()
+    await expect(call('A', json).work).resolves.toBe(QA_INVALID_OUTPUT.schema)
+    expect(provider).not.toHaveBeenCalled()
+    await expect(call('B').work).resolves.toBe('Kết quả')
+  })
+  it('invalid_output json đi qua retry như JSON hỏng rồi báo 503', async () => {
+    invalidOutputFor('json')
+    await expect(call('A', json).work).rejects.toMatchObject({
+      statusCode: 503,
+      message: AI_BUSY_MESSAGE
+    })
+    expect(provider).not.toHaveBeenCalled()
+  })
+  it('dàn ý gặp invalid_output báo 502 sai định dạng', async () => {
+    invalidOutputFor('schema')
+    await expect(
+      requestContext.run({ requestId: 'outline-A', userId: 'A' }, () =>
+        generateOutlineFromPrompt('chủ đề')
+      )
+    ).rejects.toMatchObject({
+      statusCode: 502,
+      message: 'Cấu trúc dàn ý trả về không đúng định dạng'
+    })
   })
   it('phân biệt yêu cầu chỉ trả lời và giới hạn phạm vi chỉnh sửa', () => {
     expect(isExplicitChatOnlyRequest('Chỉ trả lời, không sửa slide.')).toBe(

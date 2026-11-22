@@ -43,11 +43,24 @@ export const faultSchema = z.discriminatedUnion('fault', [
     ...common,
     fault: z.literal('storage_down'),
     params: z.object({}).strict().default({})
+  }),
+  z.object({
+    ...common,
+    fault: z.literal('invalid_output'),
+    params: z
+      .object({
+        /** schema: JSON hợp lệ nhưng sai cấu trúc; json: JSON hỏng, không parse được. */
+        kind: z.enum(['schema', 'json']).default('schema')
+      })
+      .strict()
+      .default({})
   })
 ])
 export const faultFilter = z
   .object({
-    fault: z.enum(['ai_delay', 'ai_error', 'storage_down']).optional(),
+    fault: z
+      .enum(['ai_delay', 'ai_error', 'storage_down', 'invalid_output'])
+      .optional(),
     targetEmail: common.targetEmail.optional()
   })
   .strict()

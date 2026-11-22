@@ -75,6 +75,12 @@ const AI_RETRY_DELAY_MS = Math.min(
 export const AI_BUSY_MESSAGE =
   'Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút.'
 
+/** Nội dung giả lập khi bật QA fault invalid_output, thay cho phản hồi của AI. */
+export const QA_INVALID_OUTPUT = {
+  schema: '{"qaInvalidOutput":true}',
+  json: '{"title": "QA invalid_output", "sections": ['
+} as const
+
 class EmptyAiResponseError extends Error {
   constructor() {
     super('Không nhận được nội dung từ AI')
@@ -157,7 +163,18 @@ export const generateTextWithRetry = async (
           throw Object.assign(new Error('Simulated provider error'), {
             status: fault.status
           })
-        const response = await ai.models.generateContent({ ...params, model })
+        const invalid = await getFault('invalid_output', userId)
+        signal?.throwIfAborted()
+        if (invalid)
+          logger.warn(
+            { model, attempt, kind: invalid.kind },
+            `${label}: QA giả lập AI trả output không hợp lệ`
+          )
+        const response = invalid
+          ? ({ text: QA_INVALID_OUTPUT[invalid.kind] } as Awaited<
+              ReturnType<typeof ai.models.generateContent>
+            >)
+          : await ai.models.generateContent({ ...params, model })
         signal?.throwIfAborted()
         const text = response.text
         if (text && text.trim()) {
