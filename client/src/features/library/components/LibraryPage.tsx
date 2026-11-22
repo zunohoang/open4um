@@ -517,7 +517,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
           handleOpen(lecture)
         }
       }}
-      className='group relative flex cursor-pointer flex-col justify-between border border-stone-300 bg-white p-5 transition hover:border-emerald-950 hover:shadow-md'
+      className='group relative flex min-w-0 cursor-pointer flex-col justify-between border border-stone-300 bg-white p-5 transition hover:border-emerald-950 hover:shadow-md'
     >
       {/* Khung thumbnail bài giảng tỷ lệ 16:9 sắc nét */}
       <div className='relative aspect-video w-full overflow-hidden rounded-xs border border-stone-200 bg-stone-100 shadow-2xs'>
@@ -606,7 +606,7 @@ export const LibraryPage = ({ viewMode }: LibraryPageProps) => {
   )
 
   return (
-    <div className='px-6 py-10 sm:px-12'>
+    <div className='px-4 py-10 sm:px-12'>
       {/* Tiêu đề trang phong cách xuất bản cổ điển */}
       <div className='mb-9'>
         <span className='font-sans text-xs font-bold tracking-widest text-orange-700 uppercase'>

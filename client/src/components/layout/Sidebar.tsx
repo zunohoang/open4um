@@ -38,7 +38,7 @@ export const Sidebar = ({
   }
 
   return (
-    <aside className='fixed left-0 top-16 bottom-0 z-20 flex w-60 flex-col justify-between overflow-y-auto border-r border-stone-300 bg-brand-paper p-5 font-sans'>
+    <aside className='max-md:static max-md:mt-16 max-md:w-full max-md:gap-6 max-md:border-r-0 max-md:border-b fixed left-0 top-16 bottom-0 z-20 flex w-60 flex-col justify-between overflow-y-auto border-r border-stone-300 bg-brand-paper p-5 font-sans'>
       <div className='space-y-6'>
         {/* Nút Tạo bài giảng mới phẳng chuẩn phong cách editorial */}
         {!isAdmin && (

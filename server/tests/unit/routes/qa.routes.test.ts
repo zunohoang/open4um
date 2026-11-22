@@ -92,7 +92,8 @@ describe('QA theo tài khoản', () => {
   it.each([
     { fault: 'bad', params: {} },
     { fault: 'ai_delay', params: { delayMs: 999 } },
-    { fault: 'ai_error', params: { status: 401 } }
+    { fault: 'ai_error', params: { status: 401 } },
+    { fault: 'ai_invalid_output', params: { kind: 'garbage' } }
   ])('từ chối fault/params không hợp lệ', async (input) => {
     await request(enabled)
       .put(url)
@@ -103,7 +104,8 @@ describe('QA theo tài khoản', () => {
   it.each([
     ['ai_delay', { delayMs: 1000 }],
     ['ai_error', { status: 503 }],
-    ['storage_down', {}]
+    ['storage_down', {}],
+    ['ai_invalid_output', { kind: 'bad_json' }]
   ] as const)('giới hạn TTL và cô lập %s', async (fault, params) => {
     const created = await request(enabled)
       .put(url)

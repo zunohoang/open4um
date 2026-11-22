@@ -54,7 +54,7 @@ export const EditorHeader = ({
   const toggleAiPanel = useEditorStore((state) => state.toggleAiPanel)
 
   return (
-    <header className='max-sm:[&_[data-account-name]]:hidden relative z-40 grid w-full shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-1 py-1 lg:flex lg:h-14 lg:justify-between border-b border-emerald-900/80 bg-brand-ink px-2 lg:px-4 text-white shadow-xs select-none'>
+    <header className='max-sm:[&_[data-account-name]]:hidden relative z-50 grid w-full shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-1 py-1 lg:flex lg:h-14 lg:justify-between border-b border-emerald-900/80 bg-brand-ink px-2 lg:px-4 text-white shadow-xs select-none'>
       {/* KHU VỰC TRÁI: Logo/Back, Undo/Redo, Autosave Toggle, Save Status */}
       <div className='relative z-10 flex shrink-0 items-center gap-2'>
         <button

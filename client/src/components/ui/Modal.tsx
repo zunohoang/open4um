@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 interface ModalProps {
   open: boolean
@@ -36,7 +37,8 @@ export const Modal = ({
     }
   }, [open, onClose, dismissible])
   if (!open) return null
-  return (
+  // Portal ra body: cha có transform/overflow (vd thanh công cụ ảnh) sẽ ép `fixed` thành dải nhỏ.
+  return createPortal(
     <div
       className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs'
       onClick={() => {
@@ -65,6 +67,7 @@ export const Modal = ({
         )}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

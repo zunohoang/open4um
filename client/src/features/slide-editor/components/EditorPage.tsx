@@ -1407,6 +1407,14 @@ export const EditorPage = ({
         components: getSlideComponents(currentSlide, lecture.theme)
       }
 
+      // Lưu xong autosave đang chờ (vd vừa đính kèm tài liệu) rồi mới gọi AI,
+      // nếu không autosave chạy giữa chừng làm server báo 409 "Bài giảng đã thay đổi".
+      if (countdownTimerRef.current || pendingSavesRef.current > 0) {
+        clearCountdownTimers()
+        await executeSave(lectureRef.current, true)
+        if (controller.signal.aborted) return false
+      }
+
       const response = await editorApi.aiChat(
         lecture._id,
         {
