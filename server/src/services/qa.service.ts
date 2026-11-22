@@ -43,11 +43,20 @@ export const faultSchema = z.discriminatedUnion('fault', [
     ...common,
     fault: z.literal('storage_down'),
     params: z.object({}).strict().default({})
+  }),
+  z.object({
+    ...common,
+    fault: z.literal('ai_invalid_output'),
+    params: z
+      .object({ kind: z.enum(['bad_json', 'missing_fields', 'empty']) })
+      .strict()
   })
 ])
 export const faultFilter = z
   .object({
-    fault: z.enum(['ai_delay', 'ai_error', 'storage_down']).optional(),
+    fault: z
+      .enum(['ai_delay', 'ai_error', 'storage_down', 'ai_invalid_output'])
+      .optional(),
     targetEmail: common.targetEmail.optional()
   })
   .strict()
